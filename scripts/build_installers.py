@@ -88,10 +88,9 @@ def main():
             # Try to download appimagetool
             print("appimagetool not found. Downloading appimagetool...")
             try:
-                import urllib.request
                 url = "https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage"
                 wget_target = os.path.abspath("appimagetool-x86_64.AppImage")
-                urllib.request.urlretrieve(url, wget_target)
+                run_cmd(["curl", "-L", "-o", wget_target, url])
                 os.chmod(wget_target, 0o755)
                 appimagetool_path = wget_target
             except Exception as e:
