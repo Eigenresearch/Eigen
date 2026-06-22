@@ -4,7 +4,7 @@ on:
   push:
     tags:
       - 'v2.2.*'
-      - 'v2.2.0'
+      - 'v2.3.*'
 
 permissions:
   contents: write
@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -50,10 +50,10 @@ jobs:
     needs: test-and-bench
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -62,7 +62,7 @@ jobs:
           python scripts/build_installers.py
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Windows-Installer
           path: dist/Eigen-2.2-Windows-x64.exe
@@ -73,10 +73,10 @@ jobs:
     needs: test-and-bench
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -90,7 +90,7 @@ jobs:
           python scripts/build_installers.py
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: Linux-AppImage
           path: dist/Eigen-2.2-Linux.AppImage
@@ -101,10 +101,10 @@ jobs:
     needs: test-and-bench
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -113,7 +113,7 @@ jobs:
           python scripts/build_installers.py
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macOS-PKG
           path: dist/Eigen-2.2-macOS.pkg
@@ -124,39 +124,39 @@ jobs:
     needs: [build-windows, build-linux, build-macos]
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download Windows Artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: Windows-Installer
           path: dist/
 
       - name: Download Linux Artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: Linux-AppImage
           path: dist/
 
       - name: Download macOS Artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: macOS-PKG
           path: dist/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/Eigen-2.2-Windows-x64.exe
             dist/Eigen-2.2-Linux.AppImage
             dist/Eigen-2.2-macOS.pkg
           body: |
-            # Eigen 2.2 — Lattice Release
+            # Eigen 2.3 — Aurora Release
             
-            Welcome to Eigen 2.2 — Lattice!
+            Welcome to Eigen 2.3 — Aurora!
             
-            This release focuses on execution performance, compile-time caching, exact simulation optimizations, and packaging.
+            This is a stabilized, performance-oriented, runtime-first hybrid classical-quantum programming language platform designed for serious development, research workloads, scalable experimentation, and transparent backend compatibility.
             
             ### Key Features
             - **Fast VM Execution:** Table-driven dispatch and activation frame pooling.
