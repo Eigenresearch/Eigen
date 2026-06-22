@@ -1,0 +1,27 @@
+eigen 1.0
+import quantum.ghz
+
+qubit q0
+qubit q1
+qubit q2
+
+# Create GHZ state |GHZ> = 1/sqrt(2) (|000> + |111>)
+ghz(q0, q1, q2)
+
+trace
+
+cbit c0
+cbit c1
+cbit c2
+
+measure q0 -> c0
+measure q1 -> c1
+measure q2 -> c2
+
+print c0
+print c1
+print c2
+
+# Verify perfect correlation
+assert c0 == c1
+assert c1 == c2

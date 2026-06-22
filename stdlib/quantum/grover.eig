@@ -1,0 +1,16 @@
+eigen 1.0
+module quantum.grover
+
+# Diffuser for 2 qubits
+qfunc diffuse_2(qubit q0, qubit q1) {
+    H q0
+    H q1
+    X q0
+    X q1
+    CZ q0, q1
+    X q0
+    X q1
+    H q0
+    H q1
+    return
+}

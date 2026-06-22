@@ -1,0 +1,8 @@
+eigen 1.0
+
+let half_pi: float = PI / 2
+
+qubit q0
+
+# Single merged rotation
+RX q0, half_pi

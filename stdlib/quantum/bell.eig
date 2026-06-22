@@ -1,0 +1,8 @@
+eigen 1.0
+module quantum.bell
+
+qfunc bell(qubit a, qubit b) {
+    H a
+    CNOT a, b
+    return
+}

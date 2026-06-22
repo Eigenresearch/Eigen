@@ -1,0 +1,24 @@
+eigen 1.0
+import quantum.bell
+
+qubit q0
+qubit q1
+
+# Create Bell state |Phi+> = 1/sqrt(2) (|00> + |11>)
+bell(q0, q1)
+
+# Inspect state before measurement
+trace
+
+cbit c0
+cbit c1
+
+measure q0 -> c0
+measure q1 -> c1
+
+# Print the measurement outcomes
+print c0
+print c1
+
+# Bell state measurements are perfectly correlated: c0 == c1
+assert c0 == c1
