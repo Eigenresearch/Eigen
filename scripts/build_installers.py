@@ -33,7 +33,7 @@ def main():
     # Include stdlib folder as data
     sep = ';' if system == 'windows' else ':'
     pyinstaller_args = [
-        "pyinstaller",
+        sys.executable, "-m", "PyInstaller",
         "--onefile",
         "--name", "eigen",
         f"--add-data=stdlib{sep}stdlib",
