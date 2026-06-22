@@ -100,7 +100,12 @@ def main():
                 
         # Build AppImage
         target_appimage = os.path.join(dist_dir, "Eigen-2.2-Linux.AppImage")
-        run_cmd([appimagetool_path, "--appimage-extract-and-run", app_dir, target_appimage])
+        if appimagetool_path.endswith(".AppImage"):
+            print("Extracting appimagetool to avoid FUSE issues...")
+            run_cmd([appimagetool_path, "--appimage-extract"])
+            appimagetool_path = os.path.abspath("squashfs-root/AppRun")
+            
+        run_cmd([appimagetool_path, app_dir, target_appimage])
         print(f"Linux AppImage successfully created at: {target_appimage}")
 
     elif system == 'darwin':
