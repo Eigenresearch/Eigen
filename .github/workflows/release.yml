@@ -6,6 +6,9 @@ on:
       - 'v2.2.*'
       - 'v2.2.0'
 
+permissions:
+  contents: write
+
 jobs:
   test-and-bench:
     name: Run Tests and Benchmarks
