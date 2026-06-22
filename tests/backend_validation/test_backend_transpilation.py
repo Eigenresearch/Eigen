@@ -107,15 +107,20 @@ class TestBackendTranspilationValidation(unittest.TestCase):
                 return MockJob()
         mock_aer.AerSimulator = MockAerSimulator
         
+        # Create mock numpy module
+        mock_numpy = ModuleType("numpy")
+        
         orig_qiskit = sys.modules.get("qiskit")
         orig_aer = sys.modules.get("qiskit_aer")
+        orig_numpy = sys.modules.get("numpy")
         
         sys.modules["qiskit"] = mock_qiskit
         sys.modules["qiskit_aer"] = mock_aer
+        sys.modules["numpy"] = mock_numpy
         
         try:
             local_vars = {}
-            exec(script, {"__builtins__": __builtins__, "np": __import__("numpy")}, local_vars)
+            exec(script, {"__builtins__": __builtins__, "np": mock_numpy}, local_vars)
             self.assertIn("counts", local_vars)
             self.assertEqual(local_vars["counts"], {"00": 512, "11": 512})
         except Exception as e:
@@ -130,6 +135,11 @@ class TestBackendTranspilationValidation(unittest.TestCase):
                 sys.modules["qiskit_aer"] = orig_aer
             else:
                 del sys.modules["qiskit_aer"]
+                
+            if orig_numpy is not None:
+                sys.modules["numpy"] = orig_numpy
+            else:
+                del sys.modules["numpy"]
 
 if __name__ == "__main__":
     unittest.main()
