@@ -38,8 +38,8 @@ Eigen requires **Python 3.10** or higher. There are no external dependencies, ma
 
 Clone the repository:
 ```bash
-git clone https://github.com/yourusername/eigen.git
-cd eigen
+git clone https://github.com/Eigenresearch/Eigen.git
+cd Eigen
 ```
 
 ### Running Tests
