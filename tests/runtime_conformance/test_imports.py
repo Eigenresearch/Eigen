@@ -11,7 +11,9 @@ class TestImportsConformance(unittest.TestCase):
         qubit q1
         bell(q0, q1)
         """
-        vm = run_eigen_code(source, workspace_root="d:\\Nuras-7")
+        import os
+        workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        vm = run_eigen_code(source, workspace_root=workspace_root)
         self.assertIn("q0", vm.simulator.qubit_map)
         self.assertIn("q1", vm.simulator.qubit_map)
 

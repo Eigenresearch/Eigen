@@ -78,9 +78,9 @@ def main():
         with open(desktop_path, "w") as f:
             f.write("[Desktop Entry]\nType=Application\nName=Eigen\nExec=eigen\nIcon=eigen\nCategories=Development;\n")
             
-        # Create empty icon
-        with open(os.path.join(app_dir, "eigen.png"), "w") as f:
-            pass
+        # Create a valid minimal 1x1 PNG icon to satisfy appimagetool validation
+        with open(os.path.join(app_dir, "eigen.png"), "wb") as f:
+            f.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB')
             
         # Try to use appimagetool to build AppImage
         appimagetool_path = shutil.which("appimagetool")
