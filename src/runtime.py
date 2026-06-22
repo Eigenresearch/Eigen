@@ -34,16 +34,15 @@ class EigenRuntime:
     def execute(self, graph: EQIRGraph):
         nodes = graph.topological_sort()
         
-        self.log_trace("Starting execution of EQIR v1 Graph")
+        self.log_trace("Starting execution of EQIR v1.1 Graph")
         
         for node in nodes:
             # 1. Check classical condition
             if node.condition:
                 cbit_name, op, expected_val = node.condition
-                actual_val = self.classical_store.get(cbit_name, cbit_name) if isinstance(cbit_name, str) else cbit_name
-                resolved_expected = self.classical_store.get(expected_val, expected_val) if isinstance(expected_val, str) else expected_val
+                actual_val = self.classical_store.get(cbit_name, 0)
                 if op == '==':
-                    condition_met = (actual_val == resolved_expected)
+                    condition_met = (actual_val == expected_val)
                 else:
                     condition_met = False
                     
@@ -112,16 +111,15 @@ class EigenRuntime:
                 print(f"[PRINT DIRECTIVE] {val}")
                 
             elif node.type == 'ASSERT':
-                left_ref, op, right_ref = node.assert_cond
-                left_val = self.classical_store.get(left_ref, left_ref) if isinstance(left_ref, str) else left_ref
-                right_val = self.classical_store.get(right_ref, right_ref) if isinstance(right_ref, str) else right_ref
+                left_ref, op, right_val = node.assert_cond
+                left_val = self.classical_store.get(left_ref, 0)
                 if op == '==':
                     assert_ok = (left_val == right_val)
                 else:
                     assert_ok = False
                     
                 if not assert_ok:
-                    raise AssertionError(f"Eigen Assertion Failed: {left_ref} (value: {left_val}) {op} {right_ref} (value: {right_val}) at node {node.id}")
-                self.log_trace(f"Assertion Passed: {left_ref} ({left_val}) {op} {right_ref} ({right_val})")
+                    raise AssertionError(f"Eigen Assertion Failed: {left_ref} (value: {left_val}) {op} {right_val} at node {node.id}")
+                self.log_trace(f"Assertion Passed: {left_ref} ({left_val}) {op} {right_val}")
 
-        self.log_trace("Finished execution of EQIR v1 Graph")
+        self.log_trace("Finished execution of EQIR v1.1 Graph")

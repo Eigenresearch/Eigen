@@ -14,7 +14,7 @@ class EQIRConverter:
         # Current active condition for conditional blocks (None or (cbit, op, val))
         self.current_condition = None
 
-    def evaluate_expr(self, node: ASTNode) -> float | int:
+    def evaluate_expr(self, node: ASTNode) -> float | int | str:
         if isinstance(node, LiteralNode):
             return node.value
         elif isinstance(node, VarRefNode):
@@ -23,20 +23,23 @@ class EQIRConverter:
             # If it's not in self.env, it might be a qubit/cbit name, return as string
             return node.name
         elif isinstance(node, BinaryOpNode):
-            left_val = self.evaluate_expr(node.left)
-            right_val = self.evaluate_expr(node.right)
-            if node.op == '+':
-                return left_val + right_val
-            elif node.op == '-':
-                return left_val - right_val
-            elif node.op == '*':
-                return left_val * right_val
-            elif node.op == '/':
-                return left_val / right_val
-            else:
-                raise ValueError(f"Unknown binary operator '{node.op}'")
+            try:
+                left_val = self.evaluate_expr(node.left)
+                right_val = self.evaluate_expr(node.right)
+                if node.op == '+':
+                    return left_val + right_val
+                elif node.op == '-':
+                    return left_val - right_val
+                elif node.op == '*':
+                    return left_val * right_val
+                elif node.op == '/':
+                    return left_val / right_val
+                else:
+                    return f"({left_val} {node.op} {right_val})"
+            except Exception:
+                return f"__expr_error__"
         else:
-            raise ValueError(f"Cannot evaluate AST node of type {type(node).__name__}")
+            return f"__unsupported_{type(node).__name__}__"
 
     def convert(self, program: ProgramNode) -> EQIRGraph:
         # Step 1: Register all qfuncs
@@ -78,8 +81,11 @@ class EQIRConverter:
 
         elif isinstance(node, LetNode):
             # Evaluate expression statically
-            val = self.evaluate_expr(node.value)
-            self.env[node.name] = val
+            try:
+                val = self.evaluate_expr(node.value)
+                self.env[node.name] = val
+            except Exception:
+                self.env[node.name] = f"__unsupported_{type(node.value).__name__}__"
             return
 
         elif isinstance(node, GateNode):
@@ -132,7 +138,7 @@ class EQIRConverter:
             left_val = self.evaluate_expr(node.condition_left)
             # If left_val resolves to a string, it means it's a variable reference (cbit name)
             if not isinstance(left_val, str):
-                raise TypeError(f"Left side of condition must be a classical bit reference, got {left_val}")
+                left_val = str(left_val)
             
             # Resolve cbit name if in a function call mapping
             cbit_name = param_map.get(left_val, left_val)

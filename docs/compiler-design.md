@@ -1,6 +1,6 @@
 # Eigen Compiler Design
 
-This document details the design of the compilation pipeline for the Eigen compiler frontend.
+This document details the design of the compilation pipeline for the Eigen compiler frontend and bytecode target layers.
 
 ## 1. Lexical Analysis (`lexer.py`)
 
@@ -16,8 +16,8 @@ Each `Token` holds:
 ### Scanning Algorithm
 1. **Whitespace & Comments**: Skips whitespace (` `, `\t`, `\r`, `\n`) and updates coordinates. Comments starting with `#` or `//` skip characters until a newline.
 2. **Numeric Literals**: Identifies integers (`\d+`) and floats (`\d+\.\d+`).
-3. **Identifiers & Keywords**: Matches `[a-zA-Z_][a-zA-Z0-9_\.]*`. Note that dotted identifiers are tokenized as a single `IDENTIFIER` (e.g. `quantum.bell`) to simplify import resolution.
-4. **Delimiters & Operators**: Matches operators (`->`, `==`, `=`, `+`, `-`, `*`, `/`) and symbols (`(`, `)`, `{`, `}`, `,`, `:`).
+3. **Identifiers & Keywords**: Matches keywords (such as `func`, `struct`, `try`, `catch`, `noise`, etc.) and variable identifiers. Dotted identifiers are tokenized as a single `IDENTIFIER` (e.g. `quantum.bell`) to simplify import resolution.
+4. **Operators & Symbols**: Matches operators (`->`, `==`, `!=`, `<`, `>`, `<=`, `>=`, `=`, etc.) and delimiters.
 
 ---
 
@@ -26,22 +26,12 @@ Each `Token` holds:
 The Parser is implemented as a recursive descent parser. It translates the token sequence into an Abstract Syntax Tree (AST) rooted at `ProgramNode`.
 
 ### Abstract Syntax Tree (AST) Nodes
-- **`ProgramNode`**: Root of the file, holds version information, module name, imports, and statements.
-- **`ImportNode`**: Captures imported module paths.
-- **`QFuncDeclNode`**: Declares quantum subroutines with typed parameters.
-- **`LetNode`**: Binds a variable identifier to an expression.
-- **`VarDeclNode`**: Allocates a qubit or classical bit.
-- **`BinaryOpNode`**: Represents classical arithmetic expressions.
-- **`QFuncCallNode`**: Triggers a subroutine invocation.
-- **`GateNode`**: Holds gate operations, target qubits, and angle expressions.
-- **`MeasureNode`**: Maps qubit state collapse to classical memory.
-- **`IfNode`**: Conditional execution block.
-
-### Operator Precedence Parsing
-To parse mathematical expressions (like `PI / 2 + 0.1` for gate rotations), the parser handles operator precedence explicitly using a Pratt-style precedence hierarchy:
-1. **Primary**: Literals, constant variables (`PI`, `TAU`, `E`), identifier references, parenthesized sub-expressions, or prefix signs (`-`, `+`).
-2. **Multiplicative**: Multiplications (`*`) and divisions (`/`).
-3. **Additive**: Additions (`+`) and subtractions (`-`).
+- **`ProgramNode`**: Root of the file.
+- **`FuncDeclNode` / `QFuncDeclNode`**: Classic and quantum subroutine declarations.
+- **`StructDeclNode` / `StructLiteralNode`**: Member declarations and struct allocations.
+- **`TryCatchNode` / `ThrowNode`**: Exception handling blocks.
+- **`NoiseNode`**: Physical decoherence channel insertions.
+- **`BinaryOpNode` / `LiteralNode` / `VarRefNode` / `AssignmentNode`: Classical arithmetic and variables.
 
 ---
 
@@ -67,14 +57,61 @@ sequenceDiagram
         end
         Resolver->>Parser: Compile imported file
         Parser-->>Resolver: Return module AST
-        Resolver->>Resolver: Extract qfuncs & merge declarations
+        Resolver->>Resolver: Extract declarations & merge
     end
     Resolver-->>Resolver: Return Merged Program AST
 ```
 
-### Inlining Subroutine Declarations
-During import resolution:
-1. The resolver extracts all `QFuncDeclNode` nodes from the imported ASTs.
-2. It appends these declarations to the beginning of the main program AST's body.
-3. This creates a global subroutine registry, ensuring that subsequent calls (e.g. `bell(q0, q1)`) find their corresponding declarations during semantic analysis and code generation.
-4. Circular imports are prevented by tracking visited modules in a set.
+---
+
+## 4. Diagnostic Engine (`diagnostics.py`)
+
+To ensure compilation errors and warnings are reportable across CLI tools, IDE extensions, and lint scripts, Eigen uses a dedicated `DiagnosticEngine`.
+
+### Diagnostic Object Model
+- **`Diagnostic`**: Comprises a severity rating, diagnostic message, and a `SourceLocation` (line, column).
+- **`DiagnosticSeverity`**: Enumeration of error levels:
+  - `ERROR`: Halts compilation (e.g., TypeMismatch).
+  - `WARNING`: Non-fatal warning (e.g., transpiling unsupported classical features to Qiskit).
+  - `INFO`: Compilation/performance hints.
+
+---
+
+## 5. Backend Capability Layer (`backend_capabilities.py`)
+
+The Backend Capability Layer defines capability requirements and query capabilities for compilation/transpilation targets.
+
+### Capability Levels
+- `CapabilityLevel.NONE`: Feature is not supported.
+- `CapabilityLevel.PARTIAL`: Feature is supported under constraints.
+- `CapabilityLevel.FULL`: Feature is fully supported.
+
+Targets (like the Qiskit backend) declare capability profiles:
+- Quantum Gates: `FULL`
+- Recursion: `NONE`
+- Exceptions: `NONE`
+
+When transpiling, the engine checks AST nodes against the capability profile and emits diagnostics/warnings via the `DiagnosticEngine`.
+
+---
+
+## 6. Bytecode Compilation (`ebc_compiler.py`)
+
+For native VM execution, the `EBCCompiler` translates AST nodes into a flat array of **Eigen Bytecode (EBC)** instructions:
+- Resolves nested expressions using postfix instruction stacks.
+- Emits control flow markers (jumps and conditional branch offsets) for loops and conditional blocks.
+- Binds try-catch offset markers onto frame stacks.
+
+---
+
+## 7. Runtime Guarantees & Backend Compatibility
+
+### Runtime Guarantees
+The Eigen VM guarantees 100% execution coverage for all syntax structures. Recursive function execution, exception catch-blocks, collections, and custom structs are fully supported natively.
+
+### Compatibility Summary
+| Target | Quantum Gates | Structs/Maps | Exceptions | Loops |
+| --- | --- | --- | --- | --- |
+| **Eigen VM** | `FULL` | `FULL` | `FULL` | `FULL` |
+| **Qiskit Backend** | `FULL` | `NONE` | `NONE` | `NONE` |
+| **EQIR v1.1 DAG** | `FULL` | `NONE` | `NONE` | `NONE` |

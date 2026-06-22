@@ -1,6 +1,6 @@
 # Eigen Optimizer Specification
 
-This document mathematically describes the optimization passes performed by the Eigen compiler on the EQIR v1 DAG.
+This document mathematically describes the optimization passes performed by the Eigen compiler on the EQIR v1.1 DAG.
 
 ## 1. Redundancy Elimination (Self-Inverse Gates)
 
@@ -27,7 +27,7 @@ If two identical self-inverse gates \(U\) are applied consecutively on the same 
 
 ---
 
-## 2. Rotation Merging
+## 2. Rotation Merging (Gate Fusion)
 
 Rotation gates represent continuous rotations in the Bloch sphere about a specific axis. Consecutive rotations about the same axis are additive.
 
@@ -54,3 +54,19 @@ Multiplying two such matrices yields:
      \[\theta_{\text{merged}} = (\theta_1 + \theta_2) \pmod{2\pi}\]
    - It updates the angle parameter of node \(A\) to \(\theta_{\text{merged}}\).
    - It bypasses node \(B\) by connecting \(A\) directly to the child nodes of \(B\), and deletes \(B\) from the graph.
+
+---
+
+## 3. Scope Limits and Runtime Guarantees
+
+### Runtime Guarantees
+Optimization passes are guaranteed to preserve physical and state-vector equivalence up to a global phase (\(U_1 = e^{i\theta} U_2\)) for any input circuit.
+
+### Backend Compatibility
+The optimizer runs exclusively on the **EQIR v1.1 DAG** representation. It does not optimize classical VM instructions or dynamic control paths (like recursive loops or try-catch blocks) that operate outside the static quantum circuit graph.
+
+| Phase / Feature | Optimizer Support | Eigen VM Executable | Qiskit Exportable |
+| --- | --- | --- | --- |
+| Gate Cancellation | `FULL` | `FULL` | `FULL` |
+| Rotation Merging | `FULL` | `FULL` | `FULL` |
+| Classical Code Optimization | `NONE` | `NONE` | `NONE` |

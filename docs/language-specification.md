@@ -1,10 +1,10 @@
-# Eigen Language Specification
+# Eigen 2.1 Language Specification
 
-This document provides the formal language specification for Eigen version 1.0.
+This document provides the formal language specification for Eigen version 2.1.
 
 ## 1. Syntax Grammar (EBNF)
 
-Below is the formal Extended Backus-Naur Form (EBNF) grammar specification for Eigen:
+Below is the formal Extended Backus-Naur Form (EBNF) grammar specification for Eigen 2.1:
 
 ```ebnf
 Program             = "eigen" Version [ ModuleDecl ] { ImportDecl } { Statement } EOF ;
@@ -13,26 +13,42 @@ ModuleDecl          = "module" Identifier ;
 ImportDecl          = "import" Identifier ;
 
 Statement           = QFuncDecl 
+                    | FuncDecl 
+                    | StructDecl 
+                    | EnumDecl 
                     | VarDecl 
                     | LetStmt 
+                    | AssignmentStmt 
                     | GateStmt 
                     | QFuncCall 
+                    | CallNode 
                     | MeasureStmt 
                     | IfStmt 
-                    | "return" 
-                    | "trace" 
-                    | "print" Expression 
+                    | ForStmt 
+                    | WhileStmt 
+                    | BreakStmt 
+                    | ContinueStmt 
+                    | TryCatchStmt 
+                    | ThrowStmt 
+                    | NoiseStmt 
+                    | ReturnStmt 
+                    | TraceStmt 
+                    | PrintStmt 
                     | AssertStmt ;
 
 QFuncDecl           = "qfunc" Identifier "(" [ ParamList ] ")" "{" { Statement } "}" ;
-ParamList           = Param { "," Param } ;
-Param               = Type Identifier ;
+FuncDecl            = "func" Identifier "(" [ ParamList ] ")" "->" Type "{" { Statement } "}" ;
+StructDecl          = "struct" Identifier "{" FieldList "}" ;
+FieldList           = Identifier ":" Type { "," Identifier ":" Type } ;
+EnumDecl            = "enum" Identifier "{" Identifier { "," Identifier } "}" ;
 
 VarDecl             = Type Identifier ;
-Type                = "qubit" | "cbit" | "int" | "float" ;
-
-LetStmt             = "let" Identifier ":" BasicType "=" Expression ;
-BasicType           = "int" | "float" | "cbit" ;
+LetStmt             = "let" Identifier ":" Type "=" Expression ;
+AssignmentStmt      = AccessExpr "=" Expression
+                    | AccessExpr "+=" Expression
+                    | AccessExpr "-=" Expression
+                    | AccessExpr "*=" Expression
+                    | AccessExpr "/=" Expression ;
 
 GateStmt            = SingleQubitGate Identifier
                     | TwoQubitGate Identifier "," Identifier
@@ -43,26 +59,61 @@ TwoQubitGate        = "CNOT" | "CZ" | "SWAP" ;
 RotationGate        = "RX" | "RY" | "RZ" ;
 
 QFuncCall           = Identifier "(" [ ArgList ] ")" ;
+CallNode            = Identifier "(" [ ExprList ] ")" ;
 ArgList             = Identifier { "," Identifier } ;
+ExprList            = Expression { "," Expression } ;
 
 MeasureStmt         = "measure" Identifier "->" Identifier ;
+IfStmt              = "if" Expression "{" { Statement } "}" [ "else" "{" { Statement } "}" ] ;
+ForStmt             = "for" Identifier "in" Expression "{" { Statement } "}" ;
+WhileStmt           = "while" Expression "{" { Statement } "}" ;
+BreakStmt           = "break" ;
+ContinueStmt        = "continue" ;
 
-IfStmt              = "if" Expression "==" Expression "{" { Statement } "}" ;
+TryCatchStmt        = "try" "{" { Statement } "}" "catch" Identifier "{" { Statement } "}" ;
+ThrowStmt           = "throw" Expression ;
+NoiseStmt           = "noise" ( "depolarizing" | "bitflip" ) "(" Expression ")" Identifier { "," Identifier } ;
 
-AssertStmt          = "assert" Expression "==" Expression ;
+ReturnStmt          = "return" [ Expression ] ;
+TraceStmt           = "trace" ;
+PrintStmt           = "print" Expression ;
+AssertStmt          = "assert" Expression ;
 
-Expression          = AdditiveExpr ;
+Type                = ( "int" | "float" | "string" | "bool" | "qubit" | "cbit" | "array" | "map" | Identifier ) [ "<" Type { "," Type } ">" ] ;
+
+Expression          = LogicalOrExpr ;
+LogicalOrExpr       = LogicalAndExpr { "or" LogicalAndExpr } ;
+LogicalAndExpr      = EqualityExpr { "and" EqualityExpr } ;
+EqualityExpr        = RelationalExpr { ( "==" | "!=" ) RelationalExpr } ;
+RelationalExpr      = AdditiveExpr { ( "<" | ">" | "<=" | ">=" ) AdditiveExpr } ;
 AdditiveExpr        = MultiplicativeExpr { ( "+" | "-" ) MultiplicativeExpr } ;
-MultiplicativeExpr  = PrimaryExpr { ( "*" | "/" ) PrimaryExpr } ;
+MultiplicativeExpr  = UnaryExpr { ( "*" | "/" ) UnaryExpr } ;
+UnaryExpr           = [ "-" | "+" | "not" ] AccessExpr ;
+AccessExpr          = PrimaryExpr { "." Identifier | "[" Expression "]" | "(" [ ExprList ] ")" } ;
+
 PrimaryExpr         = IntLiteral
                     | FloatLiteral
+                    | StringLiteral
+                    | BooleanLiteral
+                    | "null"
                     | Identifier
                     | Constant
-                    | "(" Expression ")"
-                    | "-" PrimaryExpr
-                    | "+" PrimaryExpr ;
+                    | ArrayLiteral
+                    | MapLiteral
+                    | TupleLiteral
+                    | StructLiteral
+                    | "(" Expression ")" ;
+
+ArrayLiteral        = "[" [ ExprList ] "]" ;
+MapLiteral          = "{" [ KeyValuePair { "," KeyValuePair } ] "}" ;
+KeyValuePair        = Expression ":" Expression ;
+TupleLiteral        = "(" Expression "," Expression { "," Expression } ")" ;
+StructLiteral       = Identifier "{" FieldBindingList "}" ;
+FieldBindingList    = Identifier ":" Expression { "," Identifier ":" Expression } ;
 
 Constant            = "PI" | "TAU" | "E" ;
+BooleanLiteral      = "true" | "false" ;
+StringLiteral       = '"' { AnyCharacter } '"' ;
 Identifier          = ( Letter | "_" ) { Letter | Digit | "_" | "." } ;
 Digit               = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
 Letter              = "a" | ... | "z" | "A" | ... | "Z" ;
@@ -70,48 +121,63 @@ IntLiteral          = Digit { Digit } ;
 FloatLiteral        = Digit { Digit } "." Digit { Digit } ;
 ```
 
+---
+
 ## 2. Type System
 
-Eigen implements a static type system with four primitive types:
-- **`qubit`**: Represents a quantum bit state. Qubits are hardware-level resources that cannot be copied or reassigned. They can only be declared and manipulated using unitary operations (gates) or collapsed via measurement.
-- **`cbit`**: Represents a classical bit (storing values `0` or `1`). Used primarily for storing measurement outcomes and classical conditional branching.
-- **`int`**: Represents standard integer variables used in classical arithmetic expressions.
-- **`float`**: Represents standard double-precision floating-point numbers. Used primarily for specifying rotation gate angles.
+Eigen implements a static type system comprising primitive, quantum, hybrid, and composite structures.
 
-### Type Compatibility and Coercion
-- Implicit type coercion is restricted. Only `int` values can be implicitly promoted to `float` in numeric expressions (e.g., `let theta: float = PI / 2` promotes `2` to `2.0`).
-- Any attempt to apply a quantum gate to a non-`qubit` variable triggers a compilation-time type error.
-- Any attempt to store a measurement outcome in a non-`cbit` variable triggers a compilation-time type error.
+### 2.1 Primitive and Collection Types
+- **`qubit`**: A non-copiable quantum bit reference.
+- **`cbit`**: A classical bit (storing `0` or `1`), compatible with `int` for assignments and comparisons.
+- **`int`**: 64-bit signed integer.
+- **`float`**: Double-precision floating-point number.
+- **`string`**: Character strings (immutable).
+- **`bool`**: Boolean value (`true` or `false`).
+- **`array<T>`**: Dynamically allocated list of elements of type `T`.
+- **`map<K, V>`**: Key-value store mapping keys of type `K` to values of type `V`.
+- **`struct`**: User-defined structured collection of named, typed fields.
+- **`enum`**: User-defined finite set of named constants.
 
-## 3. Scope and Modularity
+### 2.2 Compatibility and Coercion
+- **Cbit & Int Compatibility**: Comparators (`==`, `!=`) and assignments permit comparing `cbit` directly with `int` literals.
+- **Implicit Promotion**: Only `int` promotes to `float` where expected (e.g. gate rotation angles).
+- **Generics**: Fully checked at compile-time to guarantee collection homogeneity.
 
-### Files and Versioning
-Every valid Eigen file must start with the `eigen 1.0` header directive, identifying the version of the compiler requested.
+---
 
-### Module System
-- A file can optionally declare its namespace via `module <module_path>`.
-- Other files can import this module using `import <module_path>`. Dotted paths correspond directly to directory structures (e.g., `import quantum.bell` maps to `quantum/bell.eig`).
-- Importing compiles the target module and merges its `qfunc` declarations into the current file's global compiler namespace, making subroutines available for invocation.
+## 3. Runtime Guarantees
 
-## 4. Operational Semantics
+Eigen Runtime and VM provide full execution guarantees. Every language construct—including recursive functions, loops, structures, arrays, maps, and exception catch blocks—is executed natively by the Eigen VM. Classical execution is considered the source of truth, whereas backend exporters (like the Qiskit backend) are optional compatibility targets.
 
-### Variable Binding (`let`)
-Variables of type `int`, `float`, and `cbit` are declared and initialized using `let name: type = expression`. Bindings are evaluated statically during AST-to-EQIR compilation if they represent constants, or tracked dynamically if they represent runtime states (e.g., classical bits).
+---
 
-### Quantum Functions (`qfunc`)
-`qfunc` declarations define parameterized, reusable quantum subroutines. They cannot allocate qubits internally. Instead, they accept qubits as arguments and manipulate them. During compilation, all `qfunc` invocations are inlined into a flat execution graph (EQIR v1), resolving parameter names to argument names.
+## 4. Backend Compatibility Matrix
 
-### Built-in Quantum Gates
-Unitary transformations alter the quantum state vector according to:
-- **Hadamard (`H`)**: Creates equal superposition states:
-  \[H = \frac{1}{\sqrt{2}} \begin{pmatrix} 1 & 1 \\ 1 & -1 \end{pmatrix}\]
-- **Pauli-X (`X`)**: Quantum NOT gate:
-  \[X = \begin{pmatrix} 0 & 1 \\ 1 & 0 \end{pmatrix}\]
-- **Rotation-X (`RX`)**: Rotation around the X-axis:
-  \[RX(\theta) = \begin{pmatrix} \cos(\theta/2) & -i\sin(\theta/2) \\ -i\sin(\theta/2) & \cos(\theta/2) \end{pmatrix}\]
+The table below specifies the level of support (`FULL`, `PARTIAL`, or `NONE`) for language features across execution targets:
 
-### Measurement (`measure`)
-Measurement collapses the quantum state of a targeted qubit:
-- Extracts a classical bit outcome with probability \(P(b) = |\langle b | \psi \rangle|^2\).
-- Erases entanglement of the measured qubit and updates the classical store.
-- Wavefunction collapse is simulated probabilistically using a pseudo-random number generator.
+| Feature / Capability | Eigen Runtime / VM | Qiskit Transpiler | EQIR v1.1 DAG |
+| -------------------- | ------------------ | ----------------- | ----------- |
+| Quantum Gates        | `FULL`             | `FULL`            | `FULL`      |
+| Measurements         | `FULL`             | `FULL`            | `FULL`      |
+| Noise Channels       | `FULL`             | `NONE`            | `NONE`      |
+| Recursive Functions  | `FULL`             | `NONE`            | `NONE`      |
+| Loops                | `FULL`             | `NONE`            | `NONE`      |
+| Structs              | `FULL`             | `NONE`            | `NONE`      |
+| Maps                 | `FULL`             | `NONE`            | `NONE`      |
+| Arrays (Dynamic)     | `FULL`             | `NONE`            | `NONE`      |
+| Try-Catch Exceptions | `FULL`             | `NONE`            | `NONE`      |
+| Debug Directives     | `FULL`             | `PARTIAL` (Comm)  | `FULL`      |
+
+---
+
+## 5. Operational Semantics
+
+### 5.1 Exception Handling (`try`-`catch`-`throw`)
+Exceptions are dynamically thrown using `throw expression`. The VM call stack is unwound step-by-step until the closest matching catch handler is resolved. Uncaught exceptions cause VM termination with trace outputs.
+
+### 5.2 Noise Modeling
+The simulator supports applying decoherence noise directly on qubits.
+- `noise depolarizing(p) q0`: Applies a depolarizing channel with error probability `p`.
+- `noise bitflip(p) q0`: Applies a bit-flip channel (probabilistic X gate) with probability `p`.
+These operations are executed natively by the VM simulator.

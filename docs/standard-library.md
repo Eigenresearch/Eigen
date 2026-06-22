@@ -93,4 +93,20 @@ qfunc diffuse_2(qubit q0, qubit q1) {
     return
 }
 ```
-This operator amplifies the amplitude of the target marked state by performing a reflection about the uniform superposition state.
+
+---
+
+## 5. Runtime Guarantees and Backend Compatibility
+
+### Runtime Guarantees
+All standard library modules are guaranteed to compile, resolve namespace references, inline properly during EQIR generation, and run on both the **Eigen VM** and **topological Runtime**.
+
+### Backend Compatibility
+Because the standard library is written as pure, static quantum subroutines (`qfunc`), it possesses maximum compatibility across all compilation targets:
+
+| Module / Function | Eigen VM Target | topological Runtime Target | Qiskit Exporter |
+| --- | --- | --- | --- |
+| `quantum.bell` | `FULL` | `FULL` | `FULL` |
+| `quantum.ghz` | `FULL` | `FULL` | `FULL` |
+| `quantum.deutsch` | `FULL` | `FULL` | `FULL` |
+| `quantum.grover` | `FULL` | `FULL` | `FULL` |

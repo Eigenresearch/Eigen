@@ -1,57 +1,63 @@
 # Eigen Project Audit
 
-This document presents a technical audit of the Eigen v1.0 MVP language, compiler frontend, DAG-based intermediate representation, and state-vector simulator.
+This document presents a technical audit of the Eigen 2.1 language, compiler frontend, VM execution engine, DAG-based intermediate representation, and state-vector simulator.
 
 ---
 
 ## 1. Architectural Strengths
 
-1. **Topological Decoupling via DAG**: Modeling quantum operations in **EQIR v1** as a Directed Acyclic Graph (DAG) decoupled execution from linear notation constraints. This allows for straightforward dependency analysis (calculating circuit depth) and facilitates parallel scheduler mappings.
-2. **Modular Compiler Front-End**: The recursive descent parser combined with modular namespace imports (`module`, `import`) allows developers to write scaleable quantum code. The import resolver handles path mappings cleanly, resolving standard libraries and local files recursively.
-3. **Strict static type checking**: The `TypeChecker` checks type constraints before running simulations, catching errors such as applying quantum gates to classical bits, which is a common failure mode in Qiskit (which lacks compilation type-safety).
-4. **Exact Equivalence Checking**: The exact unitary matrix comparison checker is mathematically robust and phase-invariant (\(U_1 = e^{i\theta} U_2\)), providing a reliable correctness validator for compiler optimization passes.
+1. **Dual-Execution Engines**: 
+   Eigen 2.1 decouples quantum circuit optimization from complex classical control flows by offering:
+   - **Eigen VM**: A stack-based execution environment running **Eigen Bytecode (EBC)**. This natively supports recursion, try-catch exceptions, dynamic heap allocations (structs, arrays, maps), and noise channels.
+   - **topological Runtime**: A Directed Acyclic Graph (**EQIR v1.1**) scheduler optimized for pure quantum gate sequences and circuit equivalence checking.
+2. **Dedicated Diagnostic Engine**:
+   Rather than emitting untyped Python warnings, compilation/transpilation issues are collected via a structured `DiagnosticEngine`. This makes error and warning reports easily integrated into CLI, LSP servers, and IDE tools.
+3. **Backend Capability Safeguards**:
+   The `BackendCapabilities` layer blocks invalid code emission during transpilation. Features unsupported by target backends (like Qiskit) are commented out safely in the transpiler output with warnings emitted, preventing syntax errors in output scripts.
+4. **Cbit & Int Type Coercion**:
+   Type compatibility rules have been relaxed to allow comparisons and assignments between `cbit` and `int` values, simplifying hybrid classical-quantum control logic.
 
 ---
 
-## 2. Architectural Weaknesses and Limitations
+## 2. Technical Audit and Scope Boundaries
 
-1. **State-Vector Simulation Complexity**:
-   The quantum state-vector simulator stores and processes the full amplitude state space.
-   - **Time Complexity**: Applying a 1-qubit gate on a system of \(N\) qubits requires traversing \(2^N\) states, executing \(2^{N-1}\) complex coordinate transforms. The time complexity per gate is \(O(2^N)\).
-   - **Memory Complexity**: The state vector size is \(2^N\) complex numbers.
-     - At 20 qubits: \(2^{20} = 1,048,576\) complex values (\(\approx 16\) MB of RAM).
-     - At 30 qubits: \(2^{30} \approx 1.07 \times 10^9\) complex values (\(\approx 16\) GB of RAM).
-     - At 40 qubits: \(2^{40} \approx 1.1 \times 10^{12}\) complex values (\(\approx 16\) TB of RAM).
-     This forms a hard limit for classical simulation.
-2. **Equivalence Checking Memory Blowup**:
-   Unitary matrix comparisons are restricted to \(N \le 8\) qubits.
-   - The matrix size scales as \(2^N \times 2^N = 2^{2N}\).
-   - Comparing 10-qubit circuits requires comparing matrices of size \(1024 \times 1024\) (\(2^{20} \approx 10^6\) entries).
-   - Comparing 20-qubit circuits requires \(2^{40} \approx 10^{12}\) entries (16 TB of RAM), which is impossible for classical machines.
-   - Therefore, the current equivalence checker does not scale to large systems.
-3. **No Noise / Decoherence Modeling**:
-   The simulator performs ideal, coherent unitary calculations. Real NISQ quantum devices suffer from state decay (relaxation time \(T_1\)), phase dephasing (\(T_2\)), and thermal noise. The lack of open system density matrix simulation limits Eigen's usefulness for simulating realistic hardware.
-4. **Dynamic branching execution issues**:
-   In our DAG model, conditional branches (`if cbit == 1`) are handled by placing classical conditions directly onto gate nodes. If a block is conditionally skipped at runtime, the execution engine skips the corresponding nodes. While simple, this does not support dynamic nested loop structures or complex runtime branching natively in the DAG graph.
+1. **State-Vector Simulation Boundaries**:
+   The wavefunction simulator represents state amplitudes explicitly as a \(2^N\) complex vector.
+   - Per-gate execution time: \(O(2^N)\).
+   - Memory usage: Scales as \(2^N\) floats. This restricts classical simulation to roughly \(N \le 25\) qubits on standard workstations.
+2. **Equivalence Checking Matrix Blowup**:
+   Equivalence is checked by generating complete unitary matrices column-by-column.
+   - Matrix size: \(2^{2N}\) complex numbers.
+   - Maximum qubit size limit is strictly capped at **8 qubits** to prevent memory exhausts.
+3. **Target Exporter Limitations**:
+   While the **Eigen VM** supports 100% of language constructs, external backends (like Qiskit) can only represent a subset. Structs, maps, recursion, and try-catch exceptions cannot be represented in Qiskit Aer circuits. The compiler handles this subset difference gracefully via capability profiles.
 
 ---
 
-## 3. Simulator Bottlenecks
+## 3. Runtime Guarantees
 
-- **Pure Python loops**: Applying single-qubit gates requires running a `for` loop in Python over \(2^N\) items. Because Python is an interpreted language, these loops suffer from high CPU overhead compared to compiled C++/Rust array slicing or GPU-accelerated tensor contractions.
-- **Copying array matrices**: Copying the state vector to columns during unitary matrix construction requires repeatedly re-allocating memory, leading to garbage collection overhead.
+Every language construct—recursive functions, loops, structures, arrays, maps, and exception catch blocks—is executed natively by the Eigen VM. Classical execution is considered the source of truth, whereas backend exporters (like the Qiskit backend) are optional compatibility targets.
 
 ---
 
-## 4. Security Considerations
+## 4. Backend Compatibility Matrix
 
-- **Import path traversal**: The `ImportResolver` maps dotted module names to paths (e.g. `import quantum.bell` maps to `quantum/bell.eig`). Because it joins paths, an attacker could attempt path traversal attacks using dot-dot structures (e.g. `import ..dangerous.exploit`).
-- **Input code injection**: There is no sandboxing. If future versions add system commands or file writing directives, the compiler front-end must check path permissions to prevent remote code execution.
+| Feature / Subsystem | Eigen VM Target | topological Runtime | Qiskit Backend |
+| --- | --- | --- | --- |
+| Quantum Gates & Measures | `FULL` | `FULL` | `FULL` |
+| Noise Channels | `FULL` | `NONE` | `NONE` |
+| Structs / Maps Allocation | `FULL` | `NONE` | `NONE` (Transpiler Warning) |
+| Recursion (Call Stack) | `FULL` | `NONE` | `NONE` (Transpiler Warning) |
+| Exceptions (Try-Catch) | `FULL` | `NONE` | `NONE` (Transpiler Warning) |
+| Dynamic Loops | `FULL` | `NONE` | `NONE` (Transpiler Warning) |
 
 ---
 
 ## 5. Future Architectural Improvements
 
-1. **Compile Simulator to C/C++ or Rust**: Porting the simulator matrix transformations to a compiled C/C++ library (e.g. via PyO3 for Rust or C-types) would speed up execution times by \(100\times\) and allow leveraging multi-core parallel processing (OpenMP) or GPU scaling (CUDA).
-2. **Algebraic Decision Diagrams**: Transition the equivalence checker from raw matrix comparisons to Quantum Decision Diagrams (QDDs). QDDs compress regular gate structures into compact graph topologies, enabling the comparison of circuits with up to 50+ qubits in milliseconds.
-3. **Transpiler backends**: Implement exporters to target OpenQASM 2.0/3.0. This allows Eigen to compile down to standard formats that can be executed directly on real quantum hardware (IBM Q, Rigetti, etc.).
+1. **Compile Simulator Core to Rust/C++**:
+   Porting state vector operations to Rust or C++ would bypass Python loop overhead and enable multi-threading.
+2. **Algebraic Decision Diagrams**:
+   Replacing full-unitary matrix comparison in the Equivalence Checker with Quantum Decision Diagrams (QDDs) to scale equivalence checks to 50+ qubits.
+3. **OpenQASM Target Backend**:
+   Developing an exporter targeting OpenQASM 2.0/3.0 to run compiled gates directly on physical quantum hardware.

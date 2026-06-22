@@ -4,80 +4,80 @@ This document describes the compilation, optimization, and execution pipeline of
 
 ## 1. System Pipeline Overview
 
-Eigen translates high-level quantum source code into an optimized Intermediate Representation, which is subsequently simulated and profiled on classical hardware.
+Eigen translates high-level quantum and classical source code into either an optimized Intermediate Representation (EQIR v1.1) or stack-based bytecode (EBC), supporting both fast simulation and cross-platform transpilation.
 
 ```mermaid
 graph TD
-    subgraph Frontend [Compiler Frontend]
-        Src[Source Code .eig] --> Lex[Lexer]
-        Lex -->|Token Stream| Par[Parser]
-        Par -->|Abstract Syntax Tree| Imp[Import Resolver]
-        Imp -->|Merged AST| Typ[Type Checker]
-    end
+    Source[Eigen Source .eig] --> Lexer[Lexer]
+    Lexer -->|Tokens| Parser[Parser]
+    Parser -->|AST| ImportResolver[Import Resolver]
+    ImportResolver -->|Merged AST| TypeChecker[Type Checker]
+    TypeChecker -->|Typed AST| PipelineBranch{Execution Target}
     
-    subgraph Middleend [Intermediate Representation]
-        Typ -->|Validated AST| IRGen[EQIR v1 Converter]
-        IRGen -->|Raw EQIR Graph| Opt[Optimizer]
-    end
+    PipelineBranch -->|VM Execution| EBCCompiler[EBC Compiler]
+    EBCCompiler -->|Bytecode EBC| VM[Eigen VM]
+    VM <--> Simulator[Quantum Simulator]
     
-    subgraph Backend [Execution Engine]
-        Opt -->|Optimized EQIR Graph| Run[Eigen Runtime]
-        Run <--> Sim[State-Vector Simulator]
-        Run -->|Execution Trace| Trc[Trace Report]
-        Run -->|Runtime Profile| Prof[Profiler]
-        
-        Opt -->|Unitary Comparison N <= 8| Equiv[Equivalence Checker]
-    end
+    PipelineBranch -->|Transpilation| QiskitBackend[Qiskit Transpiler]
+    QiskitBackend -->|Python Aer Script| Qiskit[Qiskit / AerSimulator]
+    
+    PipelineBranch -->|Quantum DAG IR| EQIRGen[EQIR v1.1 Converter]
+    EQIRGen -->|Raw DAG IR| Optimizer[DAG Optimizer]
+    Optimizer -->|Optimized DAG IR| Runtime[Eigen Runtime]
+    Runtime <--> Simulator
+    
+    SubGraphEquiv[Equivalence Checker] <.-> Optimizer
 ```
+
+---
 
 ## 2. Component Layout & Responsibilities
 
 ### 2.1 Lexer (`lexer.py`)
-- **Input**: Plain-text source code string.
-- **Output**: Stream of typed `Token` objects.
-- **Responsibility**: Performs lexical scanning, strips comments (both `#` and `//`), identifies numeric literals, built-in gates, keywords, and preserves line and column markers for error reporting.
+Performs lexical scanning, stripping comments, identifying numeric literals, operators, symbols, keywords, and preserving line and column markers.
 
 ### 2.2 Parser (`parser.py`)
-- **Input**: Token stream from the Lexer.
-- **Output**: Abstract Syntax Tree (AST) rooted at a `ProgramNode`.
-- **Responsibility**: Implements recursive descent parsing, handles operator precedence for arithmetic expressions (using Pratt parsing concepts), and builds typed AST nodes representing the syntax grammar.
+Implements recursive descent parsing, handles operator precedence, and builds typed AST nodes representing the syntax grammar.
 
 ### 2.3 Import Resolver (`import_resolver.py`)
-- **Input**: AST containing `ImportNode` references.
-- **Output**: Merged AST containing all function declarations from imported modules.
-- **Responsibility**: Resolves module namespaces to absolute file system locations, checking both local workspace paths and the standard library (`stdlib/`). Recursively parses modules to handle dependencies, preventing cyclic imports.
+Resolves module namespaces to absolute file system locations, checking both local workspace paths and standard library modules (`stdlib/`).
 
 ### 2.4 Type Checker (`type_checker.py`)
-- **Input**: Merged AST from the Import Resolver.
-- **Output**: Validated AST (or raises `TypeErrorException`).
-- **Responsibility**: Inspects variable bindings and declarations. Enforces strict resource usage (e.g. quantum gates can only be applied to qubits, measurements must map from qubits to classical bits, and function call argument signatures must match parameters).
+Inspects variable bindings and declarations. Enforces static type boundaries and checks variable compatibility (e.g., `cbit` and `int`).
 
-### 2.5 EQIR v1 Converter (`ir_converter.py`)
-- **Input**: Validated AST.
-- **Output**: **EQIR v1** Graph (Directed Acyclic Graph).
-- **Responsibility**: Inlines all quantum subroutine (`qfunc`) calls by recursively generating nodes with mapped parameter names. Statically evaluates arithmetic constants (like `PI / 2`) and builds dataflow dependency edges.
+### 2.5 Diagnostic Engine (`diagnostics.py`)
+Collects errors, warnings, and informational diagnostics, providing line/column locations for CLI outputs and IDE integrations.
 
-### 2.6 Optimizer (`optimizer.py`)
-- **Input**: Raw EQIR Graph.
-- **Output**: Optimized EQIR Graph.
-- **Responsibility**: Traverses the DAG to perform local circuit rewrites. Cancels consecutive self-inverse gates (like \(H \cdot H = I\)) and merges consecutive rotations about the same axis.
+### 2.6 Backend Capability Layer (`backend_capabilities.py`)
+Defines targets' capability profiles and validates compatibility of AST nodes with target backends.
 
-### 2.7 State-Vector Simulator (`simulator.py`)
-- **Input**: Gate operations from the Runtime.
-- **Output**: Complex amplitudes state vector updates.
-- **Responsibility**: Allocates complex vector coordinates, applies \(2 \times 2\) and \(4 \times 4\) unitary matrices to represent gates, calculates measurement outcome probabilities, and simulates wavefunction collapse.
+### 2.7 EBC Compiler & VM (`ebc_compiler.py`, `vm.py`)
+Compiles AST nodes into Eigen Bytecode (EBC) and executes them step-by-step using a stack-based call frame, heap manager, and simulator connection.
 
-### 2.8 Eigen Runtime (`runtime.py`)
-- **Input**: Optimized EQIR Graph.
-- **Output**: Final execution log.
-- **Responsibility**: Sorts the EQIR graph topologically to compute execution schedules. Executes statements sequentially, resolves dynamic branches (`if`), runs assertions, and formats detailed trace files.
+### 2.8 EQIR v1.1 Converter & Optimizer (`ir_converter.py`, `optimizer.py`)
+Converts AST to a Directed Acyclic Graph (DAG) representing wire dataflow, and optimizes the DAG by canceling self-inverse gates and merging rotation angles.
 
 ### 2.9 Equivalence Checker (`equivalence.py`)
-- **Input**: Two distinct EQIR Graphs.
-- **Output**: Boolean equivalence state.
-- **Responsibility**: Extracts active qubits, checks size constraints (\(N \le 8\)), constructs full unitary matrices for both graphs by running basis inputs, and checks if they are equivalent up to global phase.
+Mathematically checks whether two EQIR circuits are equivalent up to a global phase (\(U_1 = e^{i\theta} U_2\)) using exact unitary matrix comparison.
 
-### 2.10 Profiler (`profiler.py`)
-- **Input**: EQIR Graph and execution timing data.
-- **Output**: Profile statistics.
-- **Responsibility**: Computes critical path lengths (circuit depth), gate counts, entangling gate counts, and tracks execution duration.
+### 2.10 State-Vector Simulator (`simulator.py`)
+Executes quantum state manipulations, updates amplitude coordinates, collapses state spaces upon measurement, and applies noise channels.
+
+---
+
+## 3. Runtime Guarantees
+
+The Eigen VM execution engine guarantees complete coverage of the language's capabilities. Features such as recursive function calling, heap collections, struct allocation, exception try-catch logic, and physical noise channels are guaranteed to execute natively on the state-vector simulator.
+
+---
+
+## 4. Backend Compatibility Matrix
+
+| System Component | Eigen VM Target | topological Runtime | Qiskit Backend |
+| --- | --- | --- | --- |
+| Quantum Gates | `FULL` | `FULL` | `FULL` |
+| Measurements | `FULL` | `FULL` | `FULL` |
+| Noise Channels | `FULL` | `NONE` | `NONE` |
+| Classical Structs | `FULL` | `NONE` | `NONE` |
+| Recursion (Stack) | `FULL` | `NONE` | `NONE` |
+| Exceptions (Catch) | `FULL` | `NONE` | `NONE` |

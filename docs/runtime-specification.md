@@ -1,54 +1,72 @@
-# Eigen Runtime Specification
+# Eigen 2.1 Runtime & VM Specification
 
-This document details the architecture and operational mechanics of the **Eigen Runtime** execution engine.
+This document details the architecture and operational mechanics of the **Eigen Runtime** and the **Eigen VM** execution engines.
 
 ## 1. Execution Engine Architecture
 
-The Eigen Runtime is responsible for executing the compiled and optimized EQIR v1 DAG. 
+Eigen supports two distinct execution paths: the **EQIR v1.1 topological runtime** (for optimized quantum circuits) and the **Eigen VM** (for classical-quantum hybrid applications).
 
 ```mermaid
-graph LR
-    DAG[EQIR v1 DAG] --> TopSort[Topological Scheduler]
-    TopSort -->|Scheduled Nodes| ExecutionLoop[Execution Loop]
-    ExecutionLoop <--> Simulator[Quantum Simulator]
-    ExecutionLoop <--> Store[Classical Store]
-    ExecutionLoop -->|Output| Trace[Trace / Report Log]
+graph TD
+    AST[Typed AST] --> Branch{Execution Mode}
+    
+    Branch -->|--vm| EBCCompiler[EBC Compiler]
+    EBCCompiler -->|Bytecode| VM[Eigen VM]
+    VM <--> Simulator[Quantum Simulator]
+    
+    Branch -->|Default Runtime| EQIRGen[EQIR v1.1 Converter]
+    EQIRGen -->|DAG Graph| Optimizer[DAG Optimizer]
+    Optimizer -->|Optimized DAG| Runtime[Eigen Runtime]
+    Runtime <--> Simulator
 ```
 
-### Topological Scheduling
-Since the EQIR graph is a Directed Acyclic Graph, the execution order is determined by a topological sort. Nodes are executed such that for any edge \(U \to V\), operation \(U\) is executed before operation \(V\). If multiple execution orders are valid, the runtime uses a deterministic tie-breaker based on node IDs.
+### 1.1 Eigen VM (EBC Execution)
+The Eigen VM is a stack-based virtual machine designed to execute **Eigen Bytecode (EBC)**. It consists of:
+- **Call Stack**: A stack of activation frames. Each frame holds local variables, parameter scopes, and the instruction pointer (`ip`).
+- **Heap**: Stores dynamically allocated objects like structs, maps, arrays, and string literals.
+- **Exception Stack**: Tracks try-catch handler offsets. When an exception is thrown, the VM unwinds activation frames until it finds the closest catch offset or aborts execution with a stack trace.
+
+### 1.2 EQIR v1.1 Runtime
+The topological runtime executes static, inlined quantum DAGs:
+- **Topological Scheduling**: Sorts the EQIR v1.1 graph to run independent gates in parallel or deterministic sequential order.
+- **Classical Store**: Stores state vectors and measurement outcomes for basic conditional branches (`if cbit == 1`).
 
 ---
 
-## 2. Classical Variable Store
+## 2. Quantum Simulator Integration
 
-The runtime maintains a classical memory space (`classical_store`) that stores:
-- Classic variables declared via `let` (resolved statically during compilation if constant, or updated dynamically).
-- Classical bits (`cbit`) allocated in the source file.
-- Dynamic measurement results.
-
-### Conditional Branch Evaluation
-For conditional nodes (`if c0 == 1`), the runtime evaluates the condition dynamically:
-1. It reads the current value of the condition variable (e.g. `c0`) from the classical store.
-2. It compares it against the target value.
-3. If the condition is met, the node executes. Otherwise, the runtime skips the node and all of its dependent conditional nodes.
+Both the VM and the Runtime integrate with the `simulator.py` core to execute quantum gates:
+- **State Vector Representation**: Manages the system wavefunction as a 1D array of \(2^N\) complex amplitudes.
+- **Unitary Gate Application**: Computes Kronecker products of gates and multiplies them against the state vector.
+- **Measurement and Wavefunction Collapse**: Collapses the wavefunction probabilistically and returns classical bit outcomes.
+- **Decoherence Noise**: Integrates depolarizing and bitflip noise channels directly into the state-vector transformations.
 
 ---
 
-## 3. Execution Tracing and Visualization
+## 3. Tracing and Debugging
 
-When launched with the `--trace` flag, the runtime outputs step-by-step state information for each executed node.
-
-### 3.1 Trace Log Format
-- **Allocations**: Logs new qubit declarations (e.g. `[TRACE] Allocated qubit: 'q0'`).
-- **Gate Applications**: Logs gate operations and lists the non-zero amplitudes of the state vector:
+When launched with the `--trace` flag, both engines output detailed step-by-step state information:
+- **Allocations**: `[TRACE] Allocated qubit: 'q0'`
+- **Gate Applications**: Logs the updated non-zero amplitudes of the state vector:
   `[TRACE] Applied gate: H on q0`
   `[TRACE]   Current Quantum State: 0.70711 * |00> (prob=50.0%) + 0.70711 * |10> (prob=50.0%)`
-- **Measurements**: Logs collapsed outcomes:
-  `[TRACE] Measured qubit 'q0' -> stored in cbit 'c0' (value: 0)`
-  `[TRACE]   Current Quantum State: 1.00000 * |00> (prob=100.0%)`
+- **Measurements**: Logs collapsed outcomes and probabilities.
+- **Noise Channels**: Logs noise application:
+  `[TRACE] Applied bitflip noise (X) on 'q0'`
 
-### 3.2 State Formatting Rules
-- Amplitudes are formatted as complex numbers. Purely real values omit the imaginary part, and purely imaginary values omit the real part.
-- Probabilities are displayed as percentages: \(P(i) = |\alpha_i|^2 \times 100\%\).
-- Amplitudes with magnitudes below \(10^{-12}\) are omitted from the trace report to ensure clean visualizations.
+---
+
+## 4. Runtime Guarantees and Backend Compatibility Matrix
+
+### Runtime Guarantees
+The Eigen VM guarantees complete runtime execution of all classical-quantum hybrid operations. Recursion, dynamic heap allocations, structural access, and try-catch scoping are fully executable.
+
+### Target Support Matrix
+| Feature / Subsystem | Eigen VM | topological Runtime | Qiskit Exporter |
+| --- | --- | --- | --- |
+| Quantum Gate Simulation | `FULL` | `FULL` | `FULL` |
+| Noise Channels | `FULL` | `NONE` | `NONE` |
+| Subroutine Inlining | `NONE` (Dynamic call stack) | `FULL` (Static inline) | `FULL` (Inline fallback) |
+| Structs / Maps Heap | `FULL` | `NONE` | `NONE` |
+| Recursion (Stack) | `FULL` | `NONE` | `NONE` |
+| Try-Catch Unwinding | `FULL` | `NONE` | `NONE` |

@@ -10,13 +10,31 @@ class TokenType(enum.Enum):
     CBIT = "cbit"
     INT = "int"
     FLOAT = "float"
+    STRING = "string"
+    BOOL = "bool"
+    ARRAY = "array"
+    MAP = "map"
     
     # Keywords
     MODULE = "module"
     IMPORT = "import"
     QFUNC = "qfunc"
+    FUNC = "func"
+    STRUCT = "struct"
+    ENUM = "enum"
+    TRY = "try"
+    CATCH = "catch"
+    THROW = "throw"
+    NOISE = "noise"
+    DEPOLARIZING = "depolarizing"
+    BITFLIP = "bitflip"
     LET = "let"
     IF = "if"
+    FOR = "for"
+    IN = "in"
+    WHILE = "while"
+    BREAK = "break"
+    CONTINUE = "continue"
     MEASURE = "measure"
     RETURN = "return"
     
@@ -44,6 +62,12 @@ class TokenType(enum.Enum):
     GATE_RY = "RY"
     GATE_RZ = "RZ"
     
+    # Literals
+    STRING_LIT = "STRING_LIT"
+    TRUE = "true"
+    FALSE = "false"
+    NULL = "null"
+    
     # General
     IDENTIFIER = "IDENTIFIER"
     INT_LIT = "INT_LIT"
@@ -54,15 +78,33 @@ class TokenType(enum.Enum):
     RPAREN = ")"
     LBRACE = "{"
     RBRACE = "}"
+    LBRACK = "["
+    RBRACK = "]"
     COMMA = ","
     COLON = ":"
+    DOT = "."
     ARROW = "->"
     EQUALS = "="
     EQ = "=="
+    NE = "!="
+    LT = "<"
+    GT = ">"
+    LE = "<="
+    GE = ">="
+    
     PLUS = "+"
     MINUS = "-"
     MUL = "*"
     DIV = "/"
+    
+    ADD_ASSIGN = "+="
+    SUB_ASSIGN = "-="
+    MUL_ASSIGN = "*="
+    DIV_ASSIGN = "/="
+    
+    AND = "and"
+    OR = "or"
+    NOT = "not"
     
     EOF = "EOF"
 
@@ -113,11 +155,29 @@ class Lexer:
             "cbit": TokenType.CBIT,
             "int": TokenType.INT,
             "float": TokenType.FLOAT,
+            "string": TokenType.STRING,
+            "bool": TokenType.BOOL,
+            "array": TokenType.ARRAY,
+            "map": TokenType.MAP,
             "module": TokenType.MODULE,
             "import": TokenType.IMPORT,
             "qfunc": TokenType.QFUNC,
+            "func": TokenType.FUNC,
+            "struct": TokenType.STRUCT,
+            "enum": TokenType.ENUM,
+            "try": TokenType.TRY,
+            "catch": TokenType.CATCH,
+            "throw": TokenType.THROW,
+            "noise": TokenType.NOISE,
+            "depolarizing": TokenType.DEPOLARIZING,
+            "bitflip": TokenType.BITFLIP,
             "let": TokenType.LET,
             "if": TokenType.IF,
+            "for": TokenType.FOR,
+            "in": TokenType.IN,
+            "while": TokenType.WHILE,
+            "break": TokenType.BREAK,
+            "continue": TokenType.CONTINUE,
             "measure": TokenType.MEASURE,
             "return": TokenType.RETURN,
             "trace": TokenType.TRACE,
@@ -138,6 +198,12 @@ class Lexer:
             "RX": TokenType.GATE_RX,
             "RY": TokenType.GATE_RY,
             "RZ": TokenType.GATE_RZ,
+            "true": TokenType.TRUE,
+            "false": TokenType.FALSE,
+            "null": TokenType.NULL,
+            "and": TokenType.AND,
+            "or": TokenType.OR,
+            "not": TokenType.NOT,
         }
 
         while self.pos < self.length:
@@ -152,6 +218,29 @@ class Lexer:
             if char == '#' or (char == '/' and self.peek(1) == '/'):
                 while self.pos < self.length and self.peek() != '\n':
                     self.advance()
+                continue
+
+            # Double-quoted string literals
+            if char == '"':
+                start_col = self.column
+                self.advance()  # consume open quote
+                string_val = ""
+                while self.pos < self.length and self.peek() != '"':
+                    if self.peek() == '\n':
+                        self.error("Unterminated string literal")
+                    # Handle escape sequences
+                    if self.peek() == '\\':
+                        self.advance()
+                        if self.pos < self.length:
+                            string_val += self.peek()
+                            self.advance()
+                    else:
+                        string_val += self.peek()
+                        self.advance()
+                if self.peek() != '"':
+                    self.error("Unterminated string literal")
+                self.advance()  # consume close quote
+                tokens.append(Token(TokenType.STRING_LIT, string_val, self.line, start_col))
                 continue
 
             # Multi-character operators and symbols
@@ -169,19 +258,73 @@ class Lexer:
                 tokens.append(Token(TokenType.EQ, "==", self.line, start_col))
                 continue
 
+            if char == '!' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.NE, "!=", self.line, start_col))
+                continue
+
+            if char == '<' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.LE, "<=", self.line, start_col))
+                continue
+
+            if char == '>' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.GE, ">=", self.line, start_col))
+                continue
+
+            if char == '+' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.ADD_ASSIGN, "+=", self.line, start_col))
+                continue
+
+            if char == '-' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.SUB_ASSIGN, "-=", self.line, start_col))
+                continue
+
+            if char == '*' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.MUL_ASSIGN, "*=", self.line, start_col))
+                continue
+
+            if char == '/' and self.peek(1) == '=':
+                start_col = self.column
+                self.advance()
+                self.advance()
+                tokens.append(Token(TokenType.DIV_ASSIGN, "/=", self.line, start_col))
+                continue
+
             # Single character operators & delimiters
             char_tokens = {
                 '(': TokenType.LPAREN,
                 ')': TokenType.RPAREN,
                 '{': TokenType.LBRACE,
                 '}': TokenType.RBRACE,
+                '[': TokenType.LBRACK,
+                ']': TokenType.RBRACK,
                 ',': TokenType.COMMA,
                 ':': TokenType.COLON,
+                '.': TokenType.DOT,
                 '=': TokenType.EQUALS,
                 '+': TokenType.PLUS,
                 '-': TokenType.MINUS,
                 '*': TokenType.MUL,
                 '/': TokenType.DIV,
+                '<': TokenType.LT,
+                '>': TokenType.GT,
             }
             if char in char_tokens:
                 tokens.append(Token(char_tokens[char], char, self.line, self.column))
@@ -208,18 +351,13 @@ class Lexer:
                     tokens.append(Token(TokenType.INT_LIT, num_str, self.line, start_col))
                 continue
 
-            # Identifiers and keywords (can contain dots for module paths in import)
+            # Identifiers and keywords (no dots allowed anymore, dots are separate tokens)
             if char.isalpha() or char == '_':
                 start_col = self.column
                 ident_str = ""
-                # Allow letters, digits, underscores, and dots (dots are for dotted module names in import/module statements)
-                while self.pos < self.length and (self.peek().isalnum() or self.peek() == '_' or self.peek() == '.'):
+                while self.pos < self.length and (self.peek().isalnum() or self.peek() == '_'):
                     ident_str += self.peek()
                     self.advance()
-
-                # Clean up trailing dot if any, though syntactically invalid
-                if ident_str.endswith('.'):
-                    self.error("Identifier cannot end with a dot")
 
                 if ident_str in KEYWORDS_MAP:
                     tokens.append(Token(KEYWORDS_MAP[ident_str], ident_str, self.line, start_col))

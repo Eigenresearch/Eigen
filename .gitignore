@@ -1,0 +1,7 @@
+# Ignore research paper as requested
+papers/eigen-research-paper.md
+
+# Ignore caches
+__pycache__/
+*.pyc
+.pytest_cache/
