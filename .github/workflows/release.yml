@@ -59,7 +59,7 @@ jobs:
 
       - name: Build Windows Installer
         run: |
-          python scripts/build_installers.py
+          python scripts/build_installers.py > win_build.log 2>&1 || (type win_build.log && exit 1)
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -87,7 +87,7 @@ jobs:
 
       - name: Build Linux AppImage
         run: |
-          python scripts/build_installers.py
+          python scripts/build_installers.py > linux_build.log 2>&1 || (cat linux_build.log && exit 1)
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -110,7 +110,7 @@ jobs:
 
       - name: Build macOS PKG
         run: |
-          python scripts/build_installers.py
+          python scripts/build_installers.py > mac_build.log 2>&1 || (cat mac_build.log && exit 1)
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
