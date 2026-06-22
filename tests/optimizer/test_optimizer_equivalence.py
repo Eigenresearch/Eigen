@@ -23,9 +23,9 @@ class TestOptimizerEquivalence(unittest.TestCase):
         c_opt = optimizer.optimize(c)
         
         # Original: H, H, CNOT, RY, RY
-        # Optimized: CNOT and RY(0.0)
+        # Optimized: CNOT (RY(0.0) is eliminated by dead gate pass)
         gates = [n for n in c_opt.nodes.values() if n.type == 'GATE']
-        self.assertEqual(len(gates), 2)
+        self.assertEqual(len(gates), 1)
         self.assertEqual(gates[0].gate_name, "CNOT")
         
         # Verify equivalence

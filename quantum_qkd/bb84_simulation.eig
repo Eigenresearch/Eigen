@@ -1,0 +1,272 @@
+eigen 1.0
+
+# Struct to store QKD execution statistics
+struct QkdResult {
+    total_rounds: int,
+    sifted_length: int,
+    detected_errors: int,
+    first_error_index: int,
+    secure: bool
+}
+
+# Integer division helper (as floating point division yields float)
+func int_div(val: int, div: int) -> int {
+    let count: int = 0
+    let temp: int = val
+    while temp >= div {
+        temp = temp - div
+        count = count + 1
+    }
+    return count
+}
+
+# Modulo 2 helper
+func mod2(val: int) -> int {
+    let half: int = int_div(val, 2)
+    return val - half * 2
+}
+
+# Recursive classical function to find the first mismatched bit index between Alice and Bob
+func find_mismatch(alice_key: array<int>, bob_key: array<int>, start: int, end: int) -> int {
+    if start == end {
+        let av: int = alice_key[start]
+        let bv: int = bob_key[start]
+        if av != bv {
+            return start
+        }
+        return -1
+    }
+    
+    # Calculate parity of the block
+    let alice_parity: int = 0
+    let bob_parity: int = 0
+    let idx: int = start
+    while idx <= end {
+        alice_parity = alice_parity + alice_key[idx]
+        bob_parity = bob_parity + bob_key[idx]
+        idx = idx + 1
+    }
+    
+    let a_mod: int = mod2(alice_parity)
+    let b_mod: int = mod2(bob_parity)
+    
+    if a_mod == b_mod {
+        # Parity matches, no mismatch in this block (or even number of mismatches)
+        return -1
+    }
+    
+    # Parity mismatch! Search recursively in half blocks
+    let diff: int = end - start
+    let half_diff: int = int_div(diff, 2)
+    let mid: int = start + half_diff
+    
+    let left_res: int = find_mismatch(alice_key, bob_key, start, mid)
+    if left_res != -1 {
+        return left_res
+    }
+    
+    return find_mismatch(alice_key, bob_key, mid + 1, end)
+}
+
+# Helper function to print an array of bits
+func print_key(arr: array<int>, length: int) -> int {
+    let idx: int = 0
+    while idx < length {
+        let val: int = arr[idx]
+        print val
+        idx = idx + 1
+    }
+    return 0
+}
+
+# Global qubits and cbits for transmission and QRNG
+qubit q_channel
+qubit q_rand
+cbit c_rand
+
+# Main logic execution
+func run_simulation(eavesdropper: int) -> QkdResult {
+    let alice_bits: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+    let alice_bases: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+    let bob_bits: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+    let bob_bases: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+
+    let i: int = 0
+    while i < 8 {
+        # --- ALICE: Generate random bit via QRNG ---
+        H q_rand
+        measure q_rand -> c_rand
+        let a_bit: int = 0
+        if c_rand == 1 {
+            a_bit = 1
+            X q_rand # reset to |0>
+        }
+        alice_bits[i] = a_bit
+
+        # --- ALICE: Generate random basis via QRNG (0=Z, 1=X) ---
+        H q_rand
+        measure q_rand -> c_rand
+        let a_basis: int = 0
+        if c_rand == 1 {
+            a_basis = 1
+            X q_rand # reset to |0>
+        }
+        alice_bases[i] = a_basis
+
+        # --- ALICE: Prepare and Encode Qubit ---
+        if a_bit == 1 {
+            X q_channel
+        }
+        if a_basis == 1 {
+            H q_channel
+        }
+
+        # --- EVE (Eavesdropper) Simulation ---
+        if eavesdropper == 1 {
+            # Eve measures in random basis
+            H q_rand
+            measure q_rand -> c_rand
+            let e_basis: int = 0
+            if c_rand == 1 {
+                e_basis = 1
+                X q_rand # reset to |0>
+            }
+
+            if e_basis == 1 {
+                H q_channel
+            }
+            cbit c_eve
+            measure q_channel -> c_eve
+            # Reset/re-prepare qubit according to Eve's measurement
+            if c_eve == 1 {
+                X q_channel
+            }
+            if e_basis == 1 {
+                H q_channel
+            }
+        }
+
+        # --- BOB: Generate random basis via QRNG ---
+        H q_rand
+        measure q_rand -> c_rand
+        let b_basis: int = 0
+        if c_rand == 1 {
+            b_basis = 1
+            X q_rand # reset to |0>
+        }
+        bob_bases[i] = b_basis
+
+        # --- BOB: Measure Qubit ---
+        if b_basis == 1 {
+            H q_channel
+        }
+        cbit b_bit
+        measure q_channel -> b_bit
+        bob_bits[i] = b_bit
+
+        # --- Reset channel qubit for next round ---
+        if b_bit == 1 {
+            X q_channel
+        }
+
+        i = i + 1
+    }
+
+    # --- SIFTING PHASE ---
+    let sifted_alice: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+    let sifted_bob: array<int> = [0, 0, 0, 0, 0, 0, 0, 0]
+    let sifted_count: int = 0
+
+    let k: int = 0
+    while k < 8 {
+        let ab: int = alice_bases[k]
+        let bb: int = bob_bases[k]
+        if ab == bb {
+            sifted_alice[sifted_count] = alice_bits[k]
+            sifted_bob[sifted_count] = bob_bits[k]
+            sifted_count = sifted_count + 1
+        }
+        k = k + 1
+    }
+
+    # Print sifted keys
+    print "Alice sifted key bits:"
+    let p1: int = print_key(sifted_alice, sifted_count)
+    print "Bob sifted key bits:"
+    let p2: int = print_key(sifted_bob, sifted_count)
+
+    # --- ERROR CHECKING ---
+    let errors: int = 0
+    let m: int = 0
+    while m < sifted_count {
+        let av: int = sifted_alice[m]
+        let bv: int = sifted_bob[m]
+        if av != bv {
+            errors = errors + 1
+        }
+        m = m + 1
+    }
+
+    # Find the index of the first mismatch using classical recursive parity bisection
+    let first_err: int = -1
+    if errors > 0 {
+        if sifted_count > 0 {
+            let end_idx: int = sifted_count - 1
+            first_err = find_mismatch(sifted_alice, sifted_bob, 0, end_idx)
+            print "Eavesdropping detected! First mismatch located at index:"
+            print first_err
+            print "Alice bit:"
+            let a_val: int = sifted_alice[first_err]
+            print a_val
+            print "Bob bit:"
+            let b_val: int = sifted_bob[first_err]
+            print b_val
+        }
+    }
+
+    let is_secure: bool = true
+    if errors > 0 {
+        is_secure = false
+        throw "SecurityBreach: Eavesdropping detected or key compromised!"
+    }
+
+    return QkdResult {
+        total_rounds: 8,
+        sifted_length: sifted_count,
+        detected_errors: errors,
+        first_error_index: first_err,
+        secure: is_secure
+    }
+}
+
+# Run execution simulation
+print "--- Starting Secure QKD BB84 Simulation ---"
+
+# 1. Run without eavesdropper
+try {
+    print "Running scenario 1: Alice and Bob communicate directly (No Eavesdropper)"
+    let res1: QkdResult = run_simulation(0)
+    print "Scenario 1 Complete."
+    print "Sifted Key Length:"
+    print res1.sifted_length
+    print "Errors detected:"
+    print res1.detected_errors
+    print "Is secure:"
+    print res1.secure
+    assert res1.detected_errors == 0
+    assert res1.secure == true
+} catch (err) {
+    print "Scenario 1 Unexpected Error:"
+    print err
+}
+
+# 2. Run with eavesdropper
+try {
+    print "Running scenario 2: Alice and Bob communicate under Eve's Eavesdropping"
+    let res2: QkdResult = run_simulation(1)
+    print "Scenario 2 Complete (unexpectedly succeeded without error)."
+} catch (err) {
+    print "Scenario 2 Caught Security Alert:"
+    print err
+    print "Security protocol successfully aborted communication."
+}

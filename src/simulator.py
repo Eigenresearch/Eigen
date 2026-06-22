@@ -30,63 +30,83 @@ class QuantumSimulator:
         k = self.get_qubit_index(name)
         n = len(self.state_vector)
         
-        # Apply gate_matrix (2x2) to qubit k
         u00, u01 = gate_matrix[0][0], gate_matrix[0][1]
         u10, u11 = gate_matrix[1][0], gate_matrix[1][1]
         
-        for i in range(n):
-            if ((i >> k) & 1) == 0:
-                i0 = i
-                i1 = i | (1 << k)
-                
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i0 = j
+                i1 = j + step
                 a0 = self.state_vector[i0]
                 a1 = self.state_vector[i1]
-                
                 self.state_vector[i0] = u00 * a0 + u01 * a1
                 self.state_vector[i1] = u10 * a0 + u11 * a1
 
     def H(self, q: str):
-        inv_sqrt2 = 1.0 / math.sqrt(2)
-        matrix = [
-            [inv_sqrt2, inv_sqrt2],
-            [inv_sqrt2, -inv_sqrt2]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        inv_sqrt2 = 0.7071067811865475
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i0 = j
+                i1 = j + step
+                a0 = self.state_vector[i0]
+                a1 = self.state_vector[i1]
+                self.state_vector[i0] = inv_sqrt2 * (a0 + a1)
+                self.state_vector[i1] = inv_sqrt2 * (a0 - a1)
 
     def X(self, q: str):
-        matrix = [
-            [0.0j, 1.0 + 0.0j],
-            [1.0 + 0.0j, 0.0j]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i0 = j
+                i1 = j + step
+                self.state_vector[i0], self.state_vector[i1] = self.state_vector[i1], self.state_vector[i0]
 
     def Y(self, q: str):
-        matrix = [
-            [0.0j, -1j],
-            [1j, 0.0j]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i0 = j
+                i1 = j + step
+                a0 = self.state_vector[i0]
+                a1 = self.state_vector[i1]
+                self.state_vector[i0] = -1j * a1
+                self.state_vector[i1] = 1j * a0
 
     def Z(self, q: str):
-        matrix = [
-            [1.0 + 0.0j, 0.0j],
-            [0.0j, -1.0 + 0.0j]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i1 = j + step
+                self.state_vector[i1] = -self.state_vector[i1]
 
     def S(self, q: str):
-        matrix = [
-            [1.0 + 0.0j, 0.0j],
-            [0.0j, 1j]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i1 = j + step
+                self.state_vector[i1] *= 1j
 
     def T(self, q: str):
-        matrix = [
-            [1.0 + 0.0j, 0.0j],
-            [0.0j, cmath.exp(1j * math.pi / 4)]
-        ]
-        self.apply_1qubit_gate(q, matrix)
+        k = self.get_qubit_index(q)
+        n = len(self.state_vector)
+        step = 1 << k
+        val = 0.7071067811865475 + 0.7071067811865475j
+        for i in range(0, n, step * 2):
+            for j in range(i, i + step):
+                i1 = j + step
+                self.state_vector[i1] *= val
 
     def RX(self, q: str, theta: float):
         cos_val = math.cos(theta / 2)
@@ -117,11 +137,12 @@ class QuantumSimulator:
         c = self.get_qubit_index(control)
         t = self.get_qubit_index(target)
         n = len(self.state_vector)
+        c_mask = 1 << c
+        t_mask = 1 << t
         
         for i in range(n):
-            # If control bit is 1 and target bit is 0, swap amplitude with state where target bit is 1
-            if ((i >> c) & 1) == 1 and ((i >> t) & 1) == 0:
-                i_target_1 = i | (1 << t)
+            if (i & c_mask) and not (i & t_mask):
+                i_target_1 = i | t_mask
                 self.state_vector[i], self.state_vector[i_target_1] = (
                     self.state_vector[i_target_1],
                     self.state_vector[i]
@@ -131,22 +152,23 @@ class QuantumSimulator:
         c = self.get_qubit_index(control)
         t = self.get_qubit_index(target)
         n = len(self.state_vector)
+        c_mask = 1 << c
+        t_mask = 1 << t
         
         for i in range(n):
-            # If control is 1 and target is 1, multiply amplitude by -1
-            if ((i >> c) & 1) == 1 and ((i >> t) & 1) == 1:
+            if (i & c_mask) and (i & t_mask):
                 self.state_vector[i] = -self.state_vector[i]
 
     def SWAP(self, q1: str, q2: str):
         idx1 = self.get_qubit_index(q1)
         idx2 = self.get_qubit_index(q2)
         n = len(self.state_vector)
+        idx1_mask = 1 << idx1
+        idx2_mask = 1 << idx2
         
         for i in range(n):
-            # Swap if qubit1 is 1 and qubit2 is 0
-            if ((i >> idx1) & 1) == 1 and ((i >> idx2) & 1) == 0:
-                # Find index where qubit1 is 0 and qubit2 is 1
-                j = (i & ~(1 << idx1)) | (1 << idx2)
+            if (i & idx1_mask) and not (i & idx2_mask):
+                j = (i & ~idx1_mask) | idx2_mask
                 self.state_vector[i], self.state_vector[j] = (
                     self.state_vector[j],
                     self.state_vector[i]
@@ -155,28 +177,24 @@ class QuantumSimulator:
     def measure(self, q: str) -> int:
         k = self.get_qubit_index(q)
         n = len(self.state_vector)
+        k_mask = 1 << k
         
-        # Calculate probability of measuring 0
-        p0 = sum(abs(amp)**2 for i, amp in enumerate(self.state_vector) if ((i >> k) & 1) == 0)
-        
-        # Roll random float in [0.0, 1.0)
+        p0 = sum(abs(amp)**2 for i, amp in enumerate(self.state_vector) if not (i & k_mask))
         r = random.random()
         
         if r < p0:
-            # Measure 0: collapse state vector to only states where qubit k is 0
             norm = math.sqrt(p0)
             for i in range(n):
-                if ((i >> k) & 1) == 1:
+                if i & k_mask:
                     self.state_vector[i] = 0.0j
                 else:
                     self.state_vector[i] /= norm
             return 0
         else:
-            # Measure 1: collapse state vector to only states where qubit k is 1
             p1 = 1.0 - p0
             norm = math.sqrt(p1) if p1 > 1e-15 else 1.0
             for i in range(n):
-                if ((i >> k) & 1) == 0:
+                if not (i & k_mask):
                     self.state_vector[i] = 0.0j
                 else:
                     self.state_vector[i] /= norm
@@ -190,13 +208,11 @@ class QuantumSimulator:
         if self.num_qubits == 0:
             return {"": 1.0 + 0.0j}
             
-        # Get sorted list of qubit names to construct consistent bitstrings
         sorted_qubits = sorted(self.qubit_map.keys(), key=lambda name: self.qubit_map[name])
         
         amplitudes = {}
         for i, amp in enumerate(self.state_vector):
             if abs(amp) > 1e-12:
-                # Construct bitstring representation
                 bitstring = ""
                 for q in reversed(sorted_qubits):
                     idx = self.qubit_map[q]

@@ -1,0 +1,35 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+# State to teleport: |1>
+X q0
+
+# Create EPR pair
+H q1
+CNOT q1, q2
+
+# Alice Bell measurement
+CNOT q0, q1
+H q0
+
+cbit c0
+cbit c1
+measure q0 -> c0
+measure q1 -> c1
+
+# Conditional corrections
+if c1 == 1 {
+    X q2
+}
+if c0 == 1 {
+    Z q2
+}
+
+cbit c2
+measure q2 -> c2
+
+print c2
+assert c2 == 1

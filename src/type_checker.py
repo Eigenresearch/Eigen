@@ -21,6 +21,7 @@ class TypeChecker:
         self.scopes = [{}]
         self.current_function = None
         self.loop_depth = 0
+        self._type_cache = {}
 
     def error(self, msg: str, node: ASTNode = None):
         if node:
@@ -88,6 +89,7 @@ class TypeChecker:
         self.scopes = [{}]
         self.current_function = None
         self.loop_depth = 0
+        self._type_cache = {}
 
         # Register all global declarations first (qfuncs, funcs, structs, enums)
         for node in program.body:
@@ -113,6 +115,17 @@ class TypeChecker:
             self.check_node(node)
 
     def check_node(self, node: ASTNode) -> str | None:
+        if node is None:
+            return None
+        node_id = id(node)
+        if node_id in self._type_cache:
+            return self._type_cache[node_id]
+        res = self._check_node_uncached(node)
+        if res is not None:
+            self._type_cache[node_id] = res
+        return res
+
+    def _check_node_uncached(self, node: ASTNode) -> str | None:
         if isinstance(node, QFuncDeclNode):
             self.enter_scope()
             for p_name, p_type in node.params:

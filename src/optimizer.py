@@ -10,16 +10,42 @@ class EQIROptimizer:
         """
         while True:
             improved = False
-            # Run self-inverse cancellation pass
+            # 1. Dead gate elimination
+            if self._pass_dead_gate_elimination(graph):
+                improved = True
+                continue
+            # 2. Self-inverse cancellation
             if self._pass_cancel_self_inverse(graph):
                 improved = True
-            # Run rotation merging pass
+                continue
+            # 3. Rotation merging
             if self._pass_merge_rotations(graph):
                 improved = True
+                continue
+            # 4. Peephole optimization
+            if self._pass_peephole(graph):
+                improved = True
+                continue
+            # 5. Commutation cancellation
+            if self._pass_commutation_cancellation(graph):
+                improved = True
+                continue
             
             if not improved:
                 break
         return graph
+
+    def _pass_dead_gate_elimination(self, graph: EQIRGraph) -> bool:
+        nodes = list(graph.nodes.values())
+        for node in nodes:
+            if node.id not in graph.nodes:
+                continue
+            if node.type == 'GATE' and node.gate_name in {"RX", "RY", "RZ"}:
+                if len(node.args) > 0 and abs(node.args[0]) < 1e-9:
+                    self._bypass_node(graph, node)
+                    self.optimizations_count += 1
+                    return True
+        return False
 
     def _pass_cancel_self_inverse(self, graph: EQIRGraph) -> bool:
         nodes = graph.topological_sort()
@@ -90,6 +116,97 @@ class EQIROptimizer:
                         
                         # Bypass and remove next_node
                         self._bypass_node(graph, next_node)
+                        self.optimizations_count += 1
+                        return True
+        return False
+
+    def _pass_peephole(self, graph: EQIRGraph) -> bool:
+        nodes = graph.topological_sort()
+        for n1 in nodes:
+            if n1.id not in graph.nodes:
+                continue
+            
+            # H -> X -> H  and  H -> Z -> H
+            if n1.type == 'GATE' and n1.gate_name == 'H':
+                q = n1.targets[0]
+                n2 = None
+                for child in n1.children:
+                    if child.targets and child.targets[0] == q:
+                        n2 = child
+                        break
+                if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name in ('X', 'Z'):
+                    n3 = None
+                    for child in n2.children:
+                        if child.targets and child.targets[0] == q:
+                            n3 = child
+                            break
+                    if n3 and n3.id in graph.nodes and n3.type == 'GATE' and n3.gate_name == 'H':
+                        target_gate = 'Z' if n2.gate_name == 'X' else 'X'
+                        n2.gate_name = target_gate
+                        self._bypass_node(graph, n1)
+                        self._bypass_node(graph, n3)
+                        self.optimizations_count += 1
+                        return True
+            
+            # S -> S -> Z  and  T -> T -> S
+            if n1.type == 'GATE' and n1.gate_name in ('S', 'T'):
+                q = n1.targets[0]
+                n2 = None
+                for child in n1.children:
+                    if child.targets and child.targets[0] == q:
+                        n2 = child
+                        break
+                if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name == n1.gate_name:
+                    target_gate = 'Z' if n1.gate_name == 'S' else 'S'
+                    n2.gate_name = target_gate
+                    self._bypass_node(graph, n1)
+                    self.optimizations_count += 1
+                    return True
+        return False
+
+    def _pass_commutation_cancellation(self, graph: EQIRGraph) -> bool:
+        nodes = graph.topological_sort()
+        for n1 in nodes:
+            if n1.id not in graph.nodes:
+                continue
+            
+            # Case 1: Z q0 -> CNOT q0, q1 -> Z q0
+            if n1.type == 'GATE' and n1.gate_name == 'Z':
+                q0 = n1.targets[0]
+                n2 = None
+                for child in n1.children:
+                    if child.targets and child.targets[0] == q0:
+                        n2 = child
+                        break
+                if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name == 'CNOT' and n2.targets[0] == q0:
+                    n3 = None
+                    for child in n2.children:
+                        if child.targets and child.targets[0] == q0:
+                            n3 = child
+                            break
+                    if n3 and n3.id in graph.nodes and n3.type == 'GATE' and n3.gate_name == 'Z' and n3.targets[0] == q0:
+                        self._bypass_node(graph, n1)
+                        self._bypass_node(graph, n3)
+                        self.optimizations_count += 1
+                        return True
+            
+            # Case 2: X q1 -> CNOT q0, q1 -> X q1
+            if n1.type == 'GATE' and n1.gate_name == 'X':
+                q1 = n1.targets[0]
+                n2 = None
+                for child in n1.children:
+                    if child.targets and len(child.targets) > 1 and child.targets[1] == q1:
+                        n2 = child
+                        break
+                if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name == 'CNOT' and n2.targets[1] == q1:
+                    n3 = None
+                    for child in n2.children:
+                        if child.targets and child.targets[0] == q1:
+                            n3 = child
+                            break
+                    if n3 and n3.id in graph.nodes and n3.type == 'GATE' and n3.gate_name == 'X' and n3.targets[0] == q1:
+                        self._bypass_node(graph, n1)
+                        self._bypass_node(graph, n3)
                         self.optimizations_count += 1
                         return True
         return False

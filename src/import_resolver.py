@@ -3,6 +3,9 @@ from src.lexer import Lexer
 from src.parser import Parser
 from src.ast import ProgramNode, QFuncDeclNode, ImportNode
 
+# Cache mapping file_path -> (mtime, ProgramNode)
+_PARSED_AST_CACHE = {}
+
 class ImportResolver:
     def __init__(self, workspace_root: str, stdlib_root: str | None = None):
         self.workspace_root = os.path.abspath(workspace_root)
@@ -53,13 +56,23 @@ class ImportResolver:
             visited.add(module_path)
 
             file_path = self.resolve_module_file(module_path)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            try:
+                mtime = os.path.getmtime(file_path)
+            except Exception:
+                mtime = 0.0
 
-            lexer = Lexer(content)
-            tokens = lexer.tokenize()
-            parser = Parser(tokens)
-            module_ast = parser.parse()
+            cached = _PARSED_AST_CACHE.get(file_path)
+            if cached and cached[0] == mtime:
+                module_ast = cached[1]
+            else:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                lexer = Lexer(content)
+                tokens = lexer.tokenize()
+                parser = Parser(tokens)
+                module_ast = parser.parse()
+                _PARSED_AST_CACHE[file_path] = (mtime, module_ast)
 
             # Add imports of this module to pending
             for sub_imp in module_ast.imports:

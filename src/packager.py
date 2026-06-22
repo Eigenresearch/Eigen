@@ -73,6 +73,27 @@ class EigenPackager:
             f.write(write_toml(default_data))
             
         print(f"Initialized new Eigen package '{name}' at {self.toml_path}")
+
+        # Create standard workspace src/main.eig
+        src_dir = os.path.join(self.workspace_root, "src")
+        os.makedirs(src_dir, exist_ok=True)
+        main_eig_path = os.path.join(src_dir, "main.eig")
+        if not os.path.exists(main_eig_path):
+            template_code = """eigen 1.0
+
+# Template main entrypoint for Eigen package
+func main() -> int {
+    print "Hello from Eigen!"
+    return 0
+}
+
+let result: int = main()
+assert result == 0
+"""
+            with open(main_eig_path, 'w', encoding='utf-8') as f:
+                f.write(template_code)
+            print(f"Created template entrypoint at {main_eig_path}")
+            
         return True
 
     def add_dependency(self, dep_name: str, version: str = "0.1.0"):

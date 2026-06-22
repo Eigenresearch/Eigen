@@ -206,158 +206,171 @@ class Lexer:
             "not": TokenType.NOT,
         }
 
+        char_tokens = {
+            '(': TokenType.LPAREN,
+            ')': TokenType.RPAREN,
+            '{': TokenType.LBRACE,
+            '}': TokenType.RBRACE,
+            '[': TokenType.LBRACK,
+            ']': TokenType.RBRACK,
+            ',': TokenType.COMMA,
+            ':': TokenType.COLON,
+            '.': TokenType.DOT,
+            '=': TokenType.EQUALS,
+            '+': TokenType.PLUS,
+            '-': TokenType.MINUS,
+            '*': TokenType.MUL,
+            '/': TokenType.DIV,
+            '<': TokenType.LT,
+            '>': TokenType.GT,
+        }
+
         while self.pos < self.length:
-            char = self.peek()
+            char = self.source[self.pos]
 
             # Skip whitespace
             if char.isspace():
-                self.advance()
+                if char == '\n':
+                    self.line += 1
+                    self.column = 1
+                    self.pos += 1
+                else:
+                    start_pos = self.pos
+                    while self.pos < self.length and self.source[self.pos].isspace() and self.source[self.pos] != '\n':
+                        self.pos += 1
+                    self.column += (self.pos - start_pos)
                 continue
 
             # Skip comments (both # and //)
-            if char == '#' or (char == '/' and self.peek(1) == '/'):
-                while self.pos < self.length and self.peek() != '\n':
-                    self.advance()
+            if char == '#' or (char == '/' and self.pos + 1 < self.length and self.source[self.pos + 1] == '/'):
+                while self.pos < self.length and self.source[self.pos] != '\n':
+                    self.pos += 1
                 continue
 
             # Double-quoted string literals
             if char == '"':
                 start_col = self.column
-                self.advance()  # consume open quote
-                string_val = ""
-                while self.pos < self.length and self.peek() != '"':
-                    if self.peek() == '\n':
+                self.pos += 1  # consume open quote
+                start_pos = self.pos
+                string_val = []
+                while self.pos < self.length and self.source[self.pos] != '"':
+                    if self.source[self.pos] == '\n':
                         self.error("Unterminated string literal")
-                    # Handle escape sequences
-                    if self.peek() == '\\':
-                        self.advance()
+                    if self.source[self.pos] == '\\':
+                        self.pos += 1
                         if self.pos < self.length:
-                            string_val += self.peek()
-                            self.advance()
+                            string_val.append(self.source[self.pos])
+                            self.pos += 1
                     else:
-                        string_val += self.peek()
-                        self.advance()
-                if self.peek() != '"':
+                        string_val.append(self.source[self.pos])
+                        self.pos += 1
+                if self.pos >= self.length or self.source[self.pos] != '"':
                     self.error("Unterminated string literal")
-                self.advance()  # consume close quote
-                tokens.append(Token(TokenType.STRING_LIT, string_val, self.line, start_col))
+                self.pos += 1  # consume close quote
+                self.column += (self.pos - start_pos + 1)
+                tokens.append(Token(TokenType.STRING_LIT, "".join(string_val), self.line, start_col))
                 continue
 
             # Multi-character operators and symbols
-            if char == '-' and self.peek(1) == '>':
+            if char == '-' and self.pos + 1 < self.length and self.source[self.pos + 1] == '>':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.ARROW, "->", self.line, start_col))
                 continue
 
-            if char == '=' and self.peek(1) == '=':
+            if char == '=' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.EQ, "==", self.line, start_col))
                 continue
 
-            if char == '!' and self.peek(1) == '=':
+            if char == '!' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.NE, "!=", self.line, start_col))
                 continue
 
-            if char == '<' and self.peek(1) == '=':
+            if char == '<' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.LE, "<=", self.line, start_col))
                 continue
 
-            if char == '>' and self.peek(1) == '=':
+            if char == '>' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.GE, ">=", self.line, start_col))
                 continue
 
-            if char == '+' and self.peek(1) == '=':
+            if char == '+' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.ADD_ASSIGN, "+=", self.line, start_col))
                 continue
 
-            if char == '-' and self.peek(1) == '=':
+            if char == '-' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.SUB_ASSIGN, "-=", self.line, start_col))
                 continue
 
-            if char == '*' and self.peek(1) == '=':
+            if char == '*' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.MUL_ASSIGN, "*=", self.line, start_col))
                 continue
 
-            if char == '/' and self.peek(1) == '=':
+            if char == '/' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
-                self.advance()
-                self.advance()
+                self.pos += 2
+                self.column += 2
                 tokens.append(Token(TokenType.DIV_ASSIGN, "/=", self.line, start_col))
                 continue
 
             # Single character operators & delimiters
-            char_tokens = {
-                '(': TokenType.LPAREN,
-                ')': TokenType.RPAREN,
-                '{': TokenType.LBRACE,
-                '}': TokenType.RBRACE,
-                '[': TokenType.LBRACK,
-                ']': TokenType.RBRACK,
-                ',': TokenType.COMMA,
-                ':': TokenType.COLON,
-                '.': TokenType.DOT,
-                '=': TokenType.EQUALS,
-                '+': TokenType.PLUS,
-                '-': TokenType.MINUS,
-                '*': TokenType.MUL,
-                '/': TokenType.DIV,
-                '<': TokenType.LT,
-                '>': TokenType.GT,
-            }
             if char in char_tokens:
                 tokens.append(Token(char_tokens[char], char, self.line, self.column))
-                self.advance()
+                self.pos += 1
+                self.column += 1
                 continue
 
             # Numbers (integers or floats)
             if char.isdigit():
+                start_pos = self.pos
                 start_col = self.column
-                num_str = ""
-                while self.pos < self.length and self.peek().isdigit():
-                    num_str += self.peek()
-                    self.advance()
+                while self.pos < self.length and self.source[self.pos].isdigit():
+                    self.pos += 1
                 
                 # Check for decimal point
-                if self.peek() == '.' and self.peek(1).isdigit():
-                    num_str += '.'
-                    self.advance()
-                    while self.pos < self.length and self.peek().isdigit():
-                        num_str += self.peek()
-                        self.advance()
+                if self.pos < self.length and self.source[self.pos] == '.' and (self.pos + 1 < self.length and self.source[self.pos + 1].isdigit()):
+                    self.pos += 2
+                    while self.pos < self.length and self.source[self.pos].isdigit():
+                        self.pos += 1
+                    num_str = self.source[start_pos:self.pos]
+                    self.column += (self.pos - start_pos)
                     tokens.append(Token(TokenType.FLOAT_LIT, num_str, self.line, start_col))
                 else:
+                    num_str = self.source[start_pos:self.pos]
+                    self.column += (self.pos - start_pos)
                     tokens.append(Token(TokenType.INT_LIT, num_str, self.line, start_col))
                 continue
 
-            # Identifiers and keywords (no dots allowed anymore, dots are separate tokens)
+            # Identifiers and keywords
             if char.isalpha() or char == '_':
+                start_pos = self.pos
                 start_col = self.column
-                ident_str = ""
-                while self.pos < self.length and (self.peek().isalnum() or self.peek() == '_'):
-                    ident_str += self.peek()
-                    self.advance()
+                while self.pos < self.length and (self.source[self.pos].isalnum() or self.source[self.pos] == '_'):
+                    self.pos += 1
+                ident_str = self.source[start_pos:self.pos]
+                self.column += (self.pos - start_pos)
 
                 if ident_str in KEYWORDS_MAP:
                     tokens.append(Token(KEYWORDS_MAP[ident_str], ident_str, self.line, start_col))

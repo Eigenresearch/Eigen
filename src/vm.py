@@ -29,9 +29,14 @@ class HeapObject:
 
 class ActivationFrame:
     def __init__(self, return_address: int | None, func_name: str = "main"):
-        self.locals = {}           # var_name -> value
+        self.locals = {}
+        self.try_stack = []
+        self.reset(return_address, func_name)
+
+    def reset(self, return_address: int | None, func_name: str = "main"):
+        self.locals.clear()
         self.return_address = return_address
-        self.try_stack = []        # list of (handler_ip, saved_stack_depth)
+        self.try_stack.clear()
         self.current_line = None
         self.func_name = func_name
 
@@ -48,10 +53,51 @@ class EigenVM:
         self.operand_stack = []
         self.call_stack = []
         self.globals = {}
+        self.frame_pool = []
         
         # Heap
         self.heap = {}
         self.next_ref_id = 1
+
+        # Dispatch table for bytecode instructions
+        self.dispatch_table = {
+            Opcode.HALT: self.op_halt,
+            Opcode.MUL: self.op_mul,
+            Opcode.DIV: self.op_div,
+            Opcode.EQ: self.op_eq,
+            Opcode.NEQ: self.op_neq,
+            Opcode.LT: self.op_lt,
+            Opcode.GT: self.op_gt,
+            Opcode.LTE: self.op_lte,
+            Opcode.GTE: self.op_gte,
+            Opcode.AND: self.op_and,
+            Opcode.OR: self.op_or,
+            Opcode.NOT: self.op_not,
+            Opcode.JMP: self.op_jmp,
+            Opcode.JMP_IF_FALSE: self.op_jmp_if_false,
+            Opcode.JMP_IF_TRUE: self.op_jmp_if_true,
+            Opcode.CALL: self.op_call,
+            Opcode.RET: self.op_ret,
+            Opcode.ENTER_FRAME: self.op_enter_frame,
+            Opcode.EXIT_FRAME: self.op_exit_frame,
+            Opcode.ALLOC_STRUCT: self.op_alloc_struct,
+            Opcode.GET_FIELD: self.op_get_field,
+            Opcode.SET_FIELD: self.op_set_field,
+            Opcode.ALLOC_MAP: self.op_alloc_map,
+            Opcode.ALLOC_ARRAY: self.op_alloc_array,
+            Opcode.LEN: self.op_len,
+            Opcode.GET_INDEX: self.op_get_index,
+            Opcode.SET_INDEX: self.op_set_index,
+            Opcode.THROW: self.op_throw,
+            Opcode.PUSH_TRY: self.op_push_try,
+            Opcode.POP_TRY: self.op_pop_try,
+            Opcode.Q_ALLOC: self.op_q_alloc,
+            Opcode.Q_GATE: self.op_q_gate,
+            Opcode.Q_MEASURE: self.op_q_measure,
+            Opcode.Q_NOISE: self.op_q_noise,
+            Opcode.Q_TRACE: self.op_q_trace,
+            Opcode.PRINT: self.op_print,
+        }
 
     def log_trace(self, msg: str):
         self.trace_log.append(msg)
@@ -119,16 +165,344 @@ class EigenVM:
         self.heap[ref_id] = HeapObject(obj_type, data)
         return VMRef(ref_id)
 
+    def get_frame(self, return_address, func_name):
+        if self.frame_pool:
+            frame = self.frame_pool.pop()
+            frame.reset(return_address, func_name)
+            return frame
+        return ActivationFrame(return_address, func_name)
+
+    def recycle_frame(self, frame):
+        self.frame_pool.append(frame)
+
+    # Opcode handlers for dispatch
+    def op_halt(self, arg):
+        return True
+
+    def op_mul(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a * b)
+
+    def op_div(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a / b)
+
+    def op_eq(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a == b)
+
+    def op_neq(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a != b)
+
+    def op_lt(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a < b)
+
+    def op_gt(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a > b)
+
+    def op_lte(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a <= b)
+
+    def op_gte(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(a >= b)
+
+    def op_and(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(bool(a) and bool(b))
+
+    def op_or(self, arg):
+        b = self.operand_stack.pop()
+        a = self.operand_stack.pop()
+        self.operand_stack.append(bool(a) or bool(b))
+
+    def op_not(self, arg):
+        a = self.operand_stack.pop()
+        self.operand_stack.append(not a)
+
+    def op_jmp(self, arg):
+        self.ip = arg
+
+    def op_jmp_if_false(self, arg):
+        cond = self.operand_stack.pop()
+        if not cond:
+            self.ip = arg
+
+    def op_jmp_if_true(self, arg):
+        cond = self.operand_stack.pop()
+        if cond:
+            self.ip = arg
+
+    def op_call(self, arg):
+        func_target, func_name, num_args = arg
+        args = []
+        pop = self.operand_stack.pop
+        for _ in range(num_args):
+            args.append(pop())
+        args.reverse()
+
+        new_frame = self.get_frame(self.ip, func_name)
+        self.call_stack.append(new_frame)
+
+        append = self.operand_stack.append
+        for a in args:
+            append(a)
+
+        self.ip = func_target
+
+    def op_ret(self, arg):
+        val = self.operand_stack.pop()
+        old_frame = self.call_stack.pop()
+        self.ip = old_frame.return_address
+        self.operand_stack.append(val)
+        self.recycle_frame(old_frame)
+
+    def op_enter_frame(self, arg):
+        pass
+
+    def op_exit_frame(self, arg):
+        pass
+
+    def op_alloc_struct(self, arg):
+        field_names = arg
+        field_vals = []
+        pop = self.operand_stack.pop
+        for _ in range(len(field_names)):
+            field_vals.append(pop())
+        field_vals.reverse()
+
+        data = {name: val for name, val in zip(field_names, field_vals)}
+        ref = self.allocate_heap("struct", data)
+        self.operand_stack.append(ref)
+
+    def op_get_field(self, arg):
+        field_name = arg
+        ref = self.operand_stack.pop()
+        if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
+            self.throw_exception(f"NullPointerReference: Cannot access field '{field_name}' on non-struct {ref}")
+            return
+        obj = self.heap[ref.ref_id]
+        if obj.obj_type != "struct":
+            self.throw_exception(f"TypeError: Attempted field access on non-struct heap object of type {obj.obj_type}")
+            return
+        if field_name not in obj.data:
+            self.throw_exception(f"AttributeError: Struct has no field '{field_name}'")
+            return
+        self.operand_stack.append(obj.data[field_name])
+
+    def op_set_field(self, arg):
+        field_name = arg
+        val = self.operand_stack.pop()
+        ref = self.operand_stack.pop()
+        if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
+            self.throw_exception(f"NullPointerReference: Cannot set field '{field_name}' on non-struct {ref}")
+            return
+        obj = self.heap[ref.ref_id]
+        if obj.obj_type != "struct":
+            self.throw_exception(f"TypeError: Attempted field set on non-struct heap object of type {obj.obj_type}")
+            return
+        obj.data[field_name] = val
+
+    def op_alloc_map(self, arg):
+        num_pairs = arg
+        pairs = []
+        pop = self.operand_stack.pop
+        for _ in range(num_pairs):
+            val = pop()
+            key = pop()
+            pairs.append((key, val))
+        
+        data = {}
+        for key, val in reversed(pairs):
+            data[key] = val
+        ref = self.allocate_heap("map", data)
+        self.operand_stack.append(ref)
+
+    def op_alloc_array(self, arg):
+        num_elems = arg
+        elems = []
+        pop = self.operand_stack.pop
+        for _ in range(num_elems):
+            elems.append(pop())
+        elems.reverse()
+        ref = self.allocate_heap("array", elems)
+        self.operand_stack.append(ref)
+
+    def op_len(self, arg):
+        ref = self.operand_stack.pop()
+        if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
+            self.throw_exception(f"NullPointerReference: Cannot perform LEN on {ref}")
+            return
+        obj = self.heap[ref.ref_id]
+        self.operand_stack.append(len(obj.data))
+
+    def op_get_index(self, arg):
+        idx = self.operand_stack.pop()
+        ref = self.operand_stack.pop()
+        if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
+            self.throw_exception(f"NullPointerReference: Cannot perform GET_INDEX on {ref}")
+            return
+        obj = self.heap[ref.ref_id]
+        if obj.obj_type == "array":
+            if not isinstance(idx, int) or idx < 0 or idx >= len(obj.data):
+                self.throw_exception(f"IndexError: Array index {idx} out of range (length {len(obj.data)})")
+                return
+            self.operand_stack.append(obj.data[idx])
+        elif obj.obj_type == "map":
+            if idx not in obj.data:
+                self.throw_exception(f"KeyError: Map does not contain key {idx}")
+                return
+            self.operand_stack.append(obj.data[idx])
+        else:
+            self.throw_exception(f"TypeError: Index access not supported on type {obj.obj_type}")
+
+    def op_set_index(self, arg):
+        val = self.operand_stack.pop()
+        idx = self.operand_stack.pop()
+        ref = self.operand_stack.pop()
+        if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
+            self.throw_exception(f"NullPointerReference: Cannot perform SET_INDEX on {ref}")
+            return
+        obj = self.heap[ref.ref_id]
+        if obj.obj_type == "array":
+            if not isinstance(idx, int) or idx < 0 or idx >= len(obj.data):
+                self.throw_exception(f"IndexError: Array index {idx} out of range (length {len(obj.data)})")
+                return
+            obj.data[idx] = val
+        elif obj.obj_type == "map":
+            obj.data[idx] = val
+        else:
+            self.throw_exception(f"TypeError: Index set not supported on type {obj.obj_type}")
+
+    def op_throw(self, arg):
+        val = self.operand_stack.pop()
+        self.throw_exception(val)
+
+    def op_push_try(self, arg):
+        if self.call_stack:
+            self.call_stack[-1].try_stack.append((arg, len(self.operand_stack)))
+
+    def op_pop_try(self, arg):
+        if self.call_stack and self.call_stack[-1].try_stack:
+            self.call_stack[-1].try_stack.pop()
+
+    def op_q_alloc(self, arg):
+        qname = self.lookup_var(arg)
+        self.simulator.allocate_qubit(qname)
+        self.log_trace(f"Allocated qubit: '{qname}'")
+
+    def op_q_gate(self, arg):
+        gate_name, targets = arg
+        angles = []
+        if gate_name in ("RX", "RY", "RZ"):
+            angles.append(self.operand_stack.pop())
+        
+        resolved_targets = [self.lookup_var(t) for t in targets]
+
+        if gate_name == 'H':
+            self.simulator.H(resolved_targets[0])
+        elif gate_name == 'X':
+            self.simulator.X(resolved_targets[0])
+        elif gate_name == 'Y':
+            self.simulator.Y(resolved_targets[0])
+        elif gate_name == 'Z':
+            self.simulator.Z(resolved_targets[0])
+        elif gate_name == 'S':
+            self.simulator.S(resolved_targets[0])
+        elif gate_name == 'T':
+            self.simulator.T(resolved_targets[0])
+        elif gate_name == 'RX':
+            self.simulator.RX(resolved_targets[0], angles[0])
+        elif gate_name == 'RY':
+            self.simulator.RY(resolved_targets[0], angles[0])
+        elif gate_name == 'RZ':
+            self.simulator.RZ(resolved_targets[0], angles[0])
+        elif gate_name == 'CNOT':
+            self.simulator.CNOT(resolved_targets[0], resolved_targets[1])
+        elif gate_name == 'CZ':
+            self.simulator.CZ(resolved_targets[0], resolved_targets[1])
+        elif gate_name == 'SWAP':
+            self.simulator.SWAP(resolved_targets[0], resolved_targets[1])
+        else:
+            self.throw_exception(f"UnknownGateException: {gate_name}")
+            return
+
+        args_str = f"({', '.join(map(str, angles))})" if angles else ""
+        self.log_trace(f"Applied gate: {gate_name}{args_str} on {', '.join(resolved_targets)}")
+        self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
+
+    def op_q_measure(self, arg):
+        qubit_name, cbit_name = arg
+        resolved_q = self.lookup_var(qubit_name)
+        outcome = self.simulator.measure(resolved_q)
+        
+        if self.call_stack:
+            self.call_stack[-1].locals[cbit_name] = outcome
+        else:
+            self.globals[cbit_name] = outcome
+            
+        self.log_trace(f"Measured qubit '{resolved_q}' -> stored in cbit '{cbit_name}' (value: {outcome})")
+        self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
+
+    def op_q_noise(self, arg):
+        noise_type, targets = arg
+        p = self.operand_stack.pop()
+        resolved_targets = [self.lookup_var(t) for t in targets]
+        
+        for target in resolved_targets:
+            r = random.random()
+            if noise_type == "bitflip":
+                if r < p:
+                    self.simulator.X(target)
+                    self.log_trace(f"Applied bitflip noise (X) on '{target}'")
+            elif noise_type == "depolarizing":
+                if r < p:
+                    r_dep = random.random()
+                    if r_dep < 1/3:
+                        self.simulator.X(target)
+                        self.log_trace(f"Applied depolarizing noise (X) on '{target}'")
+                    elif r_dep < 2/3:
+                        self.simulator.Y(target)
+                        self.log_trace(f"Applied depolarizing noise (Y) on '{target}'")
+                    else:
+                        self.simulator.Z(target)
+                        self.log_trace(f"Applied depolarizing noise (Z) on '{target}'")
+
+    def op_q_trace(self, arg):
+        print(f"[TRACE DIRECTIVE] Quantum State: {self.format_amplitudes()}")
+
+    def op_print(self, arg):
+        val = self.operand_stack.pop()
+        print(f"[PRINT DIRECTIVE] {val}")
+
     def execute(self, instructions: list[Instruction]):
         self.instructions = instructions
         self.ip = 0
         self.operand_stack = []
-        self.call_stack = [ActivationFrame(return_address=None, func_name="main")]
+        self.call_stack = [self.get_frame(None, "main")]
         self.globals = {}
         self.heap = {}
         self.next_ref_id = 1
 
         self.log_trace("Starting execution of Eigen VM bytecode")
+
+        # Localize hot properties and stack operations
+        dispatch = self.dispatch_table
+        pop = self.operand_stack.pop
+        append = self.operand_stack.append
 
         while self.ip < len(self.instructions):
             instr = self.instructions[self.ip]
@@ -140,333 +514,28 @@ class EigenVM:
             opcode = instr.opcode
             arg = instr.arg
 
-            if opcode == Opcode.HALT:
-                break
-
-            elif opcode == Opcode.LOAD_CONST:
-                self.operand_stack.append(arg)
-
+            # Fast-path for extremely common operations
+            if opcode == Opcode.LOAD_CONST:
+                append(arg)
             elif opcode == Opcode.LOAD_VAR:
-                self.operand_stack.append(self.lookup_var(arg))
-
+                append(self.lookup_var(arg))
             elif opcode == Opcode.STORE_VAR:
-                val = self.operand_stack.pop()
+                val = pop()
                 if self.call_stack:
                     self.call_stack[-1].locals[arg] = val
                 else:
                     self.globals[arg] = val
-
             elif opcode == Opcode.ADD:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a + b)
-
+                b = pop()
+                a = pop()
+                append(a + b)
             elif opcode == Opcode.SUB:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a - b)
-
-            elif opcode == Opcode.MUL:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a * b)
-
-            elif opcode == Opcode.DIV:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a / b)
-
-            elif opcode == Opcode.EQ:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a == b)
-
-            elif opcode == Opcode.NEQ:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a != b)
-
-            elif opcode == Opcode.LT:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a < b)
-
-            elif opcode == Opcode.GT:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a > b)
-
-            elif opcode == Opcode.LTE:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a <= b)
-
-            elif opcode == Opcode.GTE:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(a >= b)
-
-            elif opcode == Opcode.AND:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(bool(a) and bool(b))
-
-            elif opcode == Opcode.OR:
-                b = self.operand_stack.pop()
-                a = self.operand_stack.pop()
-                self.operand_stack.append(bool(a) or bool(b))
-
-            elif opcode == Opcode.NOT:
-                a = self.operand_stack.pop()
-                self.operand_stack.append(not a)
-
-            elif opcode == Opcode.JMP:
-                self.ip = arg
-
-            elif opcode == Opcode.JMP_IF_FALSE:
-                cond = self.operand_stack.pop()
-                if not cond:
-                    self.ip = arg
-
-            elif opcode == Opcode.JMP_IF_TRUE:
-                cond = self.operand_stack.pop()
-                if cond:
-                    self.ip = arg
-
-            elif opcode == Opcode.CALL:
-                func_target, func_name, num_args = arg
-                args = []
-                for _ in range(num_args):
-                    args.append(self.operand_stack.pop())
-                args.reverse()
-
-                new_frame = ActivationFrame(return_address=self.ip, func_name=func_name)
-                self.call_stack.append(new_frame)
-
-                for a in args:
-                    self.operand_stack.append(a)
-
-                self.ip = func_target
-
-            elif opcode == Opcode.RET:
-                val = self.operand_stack.pop()
-                old_frame = self.call_stack.pop()
-                self.ip = old_frame.return_address
-                self.operand_stack.append(val)
-
-            elif opcode == Opcode.ENTER_FRAME:
-                pass
-
-            elif opcode == Opcode.EXIT_FRAME:
-                pass
-
-            elif opcode == Opcode.ALLOC_STRUCT:
-                field_names = arg
-                field_vals = []
-                for _ in range(len(field_names)):
-                    field_vals.append(self.operand_stack.pop())
-                field_vals.reverse()
-
-                data = {name: val for name, val in zip(field_names, field_vals)}
-                ref = self.allocate_heap("struct", data)
-                self.operand_stack.append(ref)
-
-            elif opcode == Opcode.GET_FIELD:
-                field_name = arg
-                ref = self.operand_stack.pop()
-                if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
-                    self.throw_exception(f"NullPointerReference: Cannot access field '{field_name}' on non-struct {ref}")
-                    continue
-                obj = self.heap[ref.ref_id]
-                if obj.obj_type != "struct":
-                    self.throw_exception(f"TypeError: Attempted field access on non-struct heap object of type {obj.obj_type}")
-                    continue
-                if field_name not in obj.data:
-                    self.throw_exception(f"AttributeError: Struct has no field '{field_name}'")
-                    continue
-                self.operand_stack.append(obj.data[field_name])
-
-            elif opcode == Opcode.SET_FIELD:
-                field_name = arg
-                val = self.operand_stack.pop()
-                ref = self.operand_stack.pop()
-                if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
-                    self.throw_exception(f"NullPointerReference: Cannot set field '{field_name}' on non-struct {ref}")
-                    continue
-                obj = self.heap[ref.ref_id]
-                if obj.obj_type != "struct":
-                    self.throw_exception(f"TypeError: Attempted field set on non-struct heap object of type {obj.obj_type}")
-                    continue
-                obj.data[field_name] = val
-
-            elif opcode == Opcode.ALLOC_MAP:
-                num_pairs = arg
-                pairs = []
-                for _ in range(num_pairs):
-                    val = self.operand_stack.pop()
-                    key = self.operand_stack.pop()
-                    pairs.append((key, val))
-                
-                data = {}
-                for key, val in reversed(pairs):
-                    data[key] = val
-                ref = self.allocate_heap("map", data)
-                self.operand_stack.append(ref)
-
-            elif opcode == Opcode.ALLOC_ARRAY:
-                num_elems = arg
-                elems = []
-                for _ in range(num_elems):
-                    elems.append(self.operand_stack.pop())
-                elems.reverse()
-                ref = self.allocate_heap("array", elems)
-                self.operand_stack.append(ref)
-
-            elif opcode == Opcode.LEN:
-                ref = self.operand_stack.pop()
-                if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
-                    self.throw_exception(f"NullPointerReference: Cannot perform LEN on {ref}")
-                    continue
-                obj = self.heap[ref.ref_id]
-                self.operand_stack.append(len(obj.data))
-
-            elif opcode == Opcode.GET_INDEX:
-                idx = self.operand_stack.pop()
-                ref = self.operand_stack.pop()
-                if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
-                    self.throw_exception(f"NullPointerReference: Cannot perform GET_INDEX on {ref}")
-                    continue
-                obj = self.heap[ref.ref_id]
-                if obj.obj_type == "array":
-                    if not isinstance(idx, int) or idx < 0 or idx >= len(obj.data):
-                        self.throw_exception(f"IndexError: Array index {idx} out of range (length {len(obj.data)})")
-                        continue
-                    self.operand_stack.append(obj.data[idx])
-                elif obj.obj_type == "map":
-                    if idx not in obj.data:
-                        self.throw_exception(f"KeyError: Map does not contain key {idx}")
-                        continue
-                    self.operand_stack.append(obj.data[idx])
-                else:
-                    self.throw_exception(f"TypeError: Index access not supported on type {obj.obj_type}")
-
-            elif opcode == Opcode.SET_INDEX:
-                val = self.operand_stack.pop()
-                idx = self.operand_stack.pop()
-                ref = self.operand_stack.pop()
-                if not isinstance(ref, VMRef) or ref.ref_id not in self.heap:
-                    self.throw_exception(f"NullPointerReference: Cannot perform SET_INDEX on {ref}")
-                    continue
-                obj = self.heap[ref.ref_id]
-                if obj.obj_type == "array":
-                    if not isinstance(idx, int) or idx < 0 or idx >= len(obj.data):
-                        self.throw_exception(f"IndexError: Array index {idx} out of range (length {len(obj.data)})")
-                        continue
-                    obj.data[idx] = val
-                elif obj.obj_type == "map":
-                    obj.data[idx] = val
-                else:
-                    self.throw_exception(f"TypeError: Index set not supported on type {obj.obj_type}")
-
-            elif opcode == Opcode.THROW:
-                val = self.operand_stack.pop()
-                self.throw_exception(val)
-
-            elif opcode == Opcode.PUSH_TRY:
-                if self.call_stack:
-                    self.call_stack[-1].try_stack.append((arg, len(self.operand_stack)))
-
-            elif opcode == Opcode.POP_TRY:
-                if self.call_stack and self.call_stack[-1].try_stack:
-                    self.call_stack[-1].try_stack.pop()
-
-            elif opcode == Opcode.Q_ALLOC:
-                qname = self.lookup_var(arg)
-                self.simulator.allocate_qubit(qname)
-                self.log_trace(f"Allocated qubit: '{qname}'")
-
-            elif opcode == Opcode.Q_GATE:
-                gate_name, targets = arg
-                angles = []
-                if gate_name in ("RX", "RY", "RZ"):
-                    angles.append(self.operand_stack.pop())
-                
-                resolved_targets = [self.lookup_var(t) for t in targets]
-
-                if gate_name == 'H':
-                    self.simulator.H(resolved_targets[0])
-                elif gate_name == 'X':
-                    self.simulator.X(resolved_targets[0])
-                elif gate_name == 'Y':
-                    self.simulator.Y(resolved_targets[0])
-                elif gate_name == 'Z':
-                    self.simulator.Z(resolved_targets[0])
-                elif gate_name == 'S':
-                    self.simulator.S(resolved_targets[0])
-                elif gate_name == 'T':
-                    self.simulator.T(resolved_targets[0])
-                elif gate_name == 'RX':
-                    self.simulator.RX(resolved_targets[0], angles[0])
-                elif gate_name == 'RY':
-                    self.simulator.RY(resolved_targets[0], angles[0])
-                elif gate_name == 'RZ':
-                    self.simulator.RZ(resolved_targets[0], angles[0])
-                elif gate_name == 'CNOT':
-                    self.simulator.CNOT(resolved_targets[0], resolved_targets[1])
-                elif gate_name == 'CZ':
-                    self.simulator.CZ(resolved_targets[0], resolved_targets[1])
-                elif gate_name == 'SWAP':
-                    self.simulator.SWAP(resolved_targets[0], resolved_targets[1])
-                else:
-                    self.throw_exception(f"UnknownGateException: {gate_name}")
-                    continue
-
-                args_str = f"({', '.join(map(str, angles))})" if angles else ""
-                self.log_trace(f"Applied gate: {gate_name}{args_str} on {', '.join(resolved_targets)}")
-                self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
-
-            elif opcode == Opcode.Q_MEASURE:
-                qubit_name, cbit_name = arg
-                resolved_q = self.lookup_var(qubit_name)
-                outcome = self.simulator.measure(resolved_q)
-                
-                if self.call_stack:
-                    self.call_stack[-1].locals[cbit_name] = outcome
-                else:
-                    self.globals[cbit_name] = outcome
-                    
-                self.log_trace(f"Measured qubit '{resolved_q}' -> stored in cbit '{cbit_name}' (value: {outcome})")
-                self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
-
-            elif opcode == Opcode.Q_NOISE:
-                noise_type, targets = arg
-                p = self.operand_stack.pop()
-                resolved_targets = [self.lookup_var(t) for t in targets]
-                
-                for target in resolved_targets:
-                    r = random.random()
-                    if noise_type == "bitflip":
-                        if r < p:
-                            self.simulator.X(target)
-                            self.log_trace(f"Applied bitflip noise (X) on '{target}'")
-                    elif noise_type == "depolarizing":
-                        if r < p:
-                            r_dep = random.random()
-                            if r_dep < 1/3:
-                                self.simulator.X(target)
-                                self.log_trace(f"Applied depolarizing noise (X) on '{target}'")
-                            elif r_dep < 2/3:
-                                self.simulator.Y(target)
-                                self.log_trace(f"Applied depolarizing noise (Y) on '{target}'")
-                            else:
-                                self.simulator.Z(target)
-                                self.log_trace(f"Applied depolarizing noise (Z) on '{target}'")
-
-            elif opcode == Opcode.Q_TRACE:
-                print(f"[TRACE DIRECTIVE] Quantum State: {self.format_amplitudes()}")
-
-            elif opcode == Opcode.PRINT:
-                val = self.operand_stack.pop()
-                print(f"[PRINT DIRECTIVE] {val}")
+                b = pop()
+                a = pop()
+                append(a - b)
+            else:
+                # Table dispatch
+                if dispatch[opcode](arg):
+                    break
 
         self.log_trace("Finished execution of Eigen VM bytecode")

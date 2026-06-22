@@ -1,0 +1,11 @@
+eigen 1.0
+
+let m: map<string, int> = {"a": 10, "b": 20, "c": 30}
+let val: int = m["b"]
+m["a"] = 100
+let val2: int = m["a"]
+
+print val
+print val2
+assert val == 20
+assert val2 == 100

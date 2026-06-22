@@ -1,0 +1,159 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v2.2.*'
+      - 'v2.2.0'
+
+jobs:
+  test-and-bench:
+    name: Run Tests and Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+      - name: Run Test Suite
+        run: |
+          python -m unittest discover -s tests
+
+      - name: Run Benchmark Suite
+        run: |
+          python src/main.py bench
+
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    needs: test-and-bench
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Build Windows Installer
+        run: |
+          python scripts/build_installers.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Windows-Installer
+          path: dist/Eigen-2.2-Windows-x64.exe
+
+  build-linux:
+    name: Build Linux AppImage
+    runs-on: ubuntu-latest
+    needs: test-and-bench
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install appimagetool dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fuse libfuse2 wget
+
+      - name: Build Linux AppImage
+        run: |
+          python scripts/build_installers.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: Linux-AppImage
+          path: dist/Eigen-2.2-Linux.AppImage
+
+  build-macos:
+    name: Build macOS PKG
+    runs-on: macos-latest
+    needs: test-and-bench
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Build macOS PKG
+        run: |
+          python scripts/build_installers.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: macOS-PKG
+          path: dist/Eigen-2.2-macOS.pkg
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-windows, build-linux, build-macos]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: Windows-Installer
+          path: dist/
+
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: Linux-AppImage
+          path: dist/
+
+      - name: Download macOS Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: macOS-PKG
+          path: dist/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/Eigen-2.2-Windows-x64.exe
+            dist/Eigen-2.2-Linux.AppImage
+            dist/Eigen-2.2-macOS.pkg
+          body: |
+            # Eigen 2.2 — Lattice Release
+            
+            Welcome to Eigen 2.2 — Lattice!
+            
+            This release focuses on execution performance, compile-time caching, exact simulation optimizations, and packaging.
+            
+            ### Key Features
+            - **Fast VM Execution:** Table-driven dispatch and activation frame pooling.
+            - **Incremental Compiler Caching:** Fast caching of compile targets inside `.eigen_cache/`.
+            - **Optimized Simulator:** In-place exact simulation updates for 9-20 qubits without state corruption.
+            - **Benchmark Suite:** Included CLI command `eigen bench`.
+            
+            ### Installers
+            - **Windows:** `Eigen-2.2-Windows-x64.exe`
+            - **Linux:** `Eigen-2.2-Linux.AppImage`
+            - **macOS:** `Eigen-2.2-macOS.pkg`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,12 @@
+eigen 1.0
+
+func factorial(n: int) -> int {
+    if n == 0 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+let result: int = factorial(30)
+print result
+assert result == 265252859812191058636308480000000

@@ -8,12 +8,14 @@ Designed to move beyond superficial quantum syntax, Eigen provides a complete co
 
 ## Why Eigen?
 
-Eigen is a hybrid classical-quantum programming language. It combines:
-- **Classical programming**: Recursive functions, structures, arrays, maps, and try-catch exceptions.
-- **Quantum programming**: Qubit allocation, built-in gates, rotation gates, and measurements.
-- **Formal circuit verification**: Mathematically checks whether two circuits are equivalent up to a global phase (\(U_1 = e^{i\theta} U_2\)) using exact unitary matrix comparison.
-- **Graph-based optimization**: Redundant gate cancellation and rotation merging on Directed Acyclic Graph (DAG) representations.
-- **Exact equivalence checking**: Graph-level equivalence verification inside a single, unified language.
+Eigen is not a quantum SDK.
+
+Eigen is a runtime-first hybrid classical-quantum programming language.
+
+* **Unlike OpenQASM 3**, Eigen provides a complete classical runtime (supporting recursion, structures, arrays, maps, and exception handling).
+* **Unlike Qiskit**, Eigen is a standalone language rather than a Python framework, enabling unified syntax checking, optimizations, and compilation to target bytecode.
+* **Unlike Silq**, Eigen emphasizes graph-based IR optimization (EQIR), runtime portability, and backend capability transparency.
+* **Unlike Q#**, Eigen focuses on a lightweight, dependencies-free virtual machine execution target (EBC) with built-in exact circuit equivalence checking.
 
 ---
 

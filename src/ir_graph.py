@@ -158,3 +158,52 @@ class EQIRGraph:
             parent_ids = [p.id for p in sorted(node.parents, key=lambda n: n.id)]
             child_ids = [c.id for c in sorted(node.children, key=lambda n: n.id)]
             print(f"Node {node} | Parents: {parent_ids} | Children: {child_ids}")
+
+    def to_dict(self) -> dict:
+        nodes_data = []
+        for n in self.nodes.values():
+            nodes_data.append({
+                "id": n.id,
+                "type": n.type,
+                "gate_name": n.gate_name,
+                "targets": n.targets,
+                "args": n.args,
+                "cbit_name": n.cbit_name,
+                "condition": n.condition,
+                "print_expr": n.print_expr,
+                "assert_cond": n.assert_cond,
+                "children_ids": [c.id for c in n.children]
+            })
+        return {
+            "next_node_id": self.next_node_id,
+            "nodes": nodes_data
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "EQIRGraph":
+        graph = cls()
+        graph.next_node_id = data["next_node_id"]
+        
+        # Create all nodes
+        nodes_map = {}
+        for nd in data["nodes"]:
+            node = EQIRNode(
+                nd["id"], nd["type"],
+                gate_name=nd["gate_name"],
+                targets=nd["targets"],
+                args=nd["args"],
+                cbit_name=nd["cbit_name"],
+                condition=nd["condition"],
+                print_expr=nd["print_expr"],
+                assert_cond=nd["assert_cond"]
+            )
+            graph.nodes[nd["id"]] = node
+            nodes_map[nd["id"]] = (node, nd["children_ids"])
+            
+        # Re-establish parent-child links
+        for nid, (node, children_ids) in nodes_map.items():
+            for cid in children_ids:
+                if cid in graph.nodes:
+                    node.add_child(graph.nodes[cid])
+                    
+        return graph

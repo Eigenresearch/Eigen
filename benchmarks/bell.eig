@@ -1,0 +1,16 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+cbit c0
+cbit c1
+
+H q0
+CNOT q0, q1
+
+measure q0 -> c0
+measure q1 -> c1
+
+print c0
+print c1
+assert c0 == c1

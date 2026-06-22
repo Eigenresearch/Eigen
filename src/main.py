@@ -24,8 +24,87 @@ from src.ebc_compiler import EBCCompiler
 from src.vm import EigenVM
 from src.bytecode import Instruction
 
+import hashlib
+from src.ir_graph import EQIRGraph
+
 def get_workspace_root() -> str:
     return os.getcwd()
+
+def get_project_hash(filepath: str, workspace_root: str) -> str:
+    visited_files = set()
+    files_to_process = [os.path.abspath(filepath)]
+    stdlib_root = os.path.join(workspace_root, "stdlib")
+    hasher = hashlib.sha256()
+    processed_contents = []
+    
+    while files_to_process:
+        current_path = files_to_process.pop(0)
+        if current_path in visited_files:
+            continue
+        visited_files.add(current_path)
+        
+        if not os.path.isfile(current_path):
+            continue
+            
+        with open(current_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        processed_contents.append((current_path, content))
+        
+        for line in content.splitlines():
+            line = line.strip()
+            if line.startswith("import "):
+                parts = line.split()
+                if len(parts) >= 2:
+                    module_name = parts[1]
+                    relative_path = module_name.replace('.', '/') + ".eig"
+                    local_path = os.path.join(workspace_root, relative_path)
+                    if os.path.isfile(local_path):
+                        files_to_process.append(os.path.abspath(local_path))
+                    else:
+                        stdlib_path = os.path.join(stdlib_root, relative_path)
+                        if os.path.isfile(stdlib_path):
+                            files_to_process.append(os.path.abspath(stdlib_path))
+                            
+    processed_contents.sort(key=lambda x: x[0])
+    for path, content in processed_contents:
+        hasher.update(path.encode('utf-8'))
+        hasher.update(content.encode('utf-8'))
+        
+    return hasher.hexdigest()
+
+def load_from_cache(filepath: str, workspace_root: str, cache_type: str):
+    try:
+        proj_hash = get_project_hash(filepath, workspace_root)
+        cache_dir = os.path.join(workspace_root, ".eigen_cache")
+        cache_path = os.path.join(cache_dir, f"{proj_hash}.{cache_type}")
+        if os.path.isfile(cache_path):
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if cache_type == "ebc":
+                return [Instruction.from_dict(d) for d in data]
+            elif cache_type == "eqir":
+                return EQIRGraph.from_dict(data)
+    except Exception:
+        pass
+    return None
+
+def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
+    try:
+        proj_hash = get_project_hash(filepath, workspace_root)
+        cache_dir = os.path.join(workspace_root, ".eigen_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, f"{proj_hash}.{cache_type}")
+        if cache_type == "ebc":
+            data = [inst.to_dict() for inst in obj]
+        elif cache_type == "eqir":
+            data = obj.to_dict()
+        else:
+            return
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 def compile_to_eqir(filepath: str, workspace_root: str) -> tuple:
     if not os.path.isfile(filepath):
@@ -102,11 +181,98 @@ def main():
     # Testing command
     subparsers.add_parser("test", help="Run the Eigen unit test suite")
 
+    # Exec command
+    exec_parser = subparsers.add_parser("exec", help="Execute compiled EBC bytecode (.ebc) directly on VM")
+    exec_parser.add_argument("file", help="Path to compiled EBC file")
+    exec_parser.add_argument("--trace", action="store_true", help="Enable VM trace mode")
+
+    # Bench command
+    subparsers.add_parser("bench", help="Run the benchmark suite and report performance results")
+
     args = parser.parse_args()
     workspace_root = get_workspace_root()
 
+    # Handle Exec command
+    if args.command == "exec":
+        if not args.file.endswith('.ebc'):
+            print("Error: 'eigen exec' expects a compiled EBC (.ebc) file.", file=sys.stderr)
+            sys.exit(1)
+        if not os.path.isfile(args.file):
+            print(f"Error: File '{args.file}' not found.", file=sys.stderr)
+            sys.exit(1)
+        with open(args.file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        instructions = [Instruction.from_dict(d) for d in data]
+        vm = EigenVM(trace_mode=args.trace)
+        try:
+            vm.execute(instructions)
+        except AssertionError as ae:
+            print(f"Assertion Error: {ae}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"VM Execution Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Handle Bench command
+    elif args.command == "bench":
+        import time
+        bench_dir = os.path.join(workspace_root, "benchmarks")
+        if not os.path.isdir(bench_dir):
+            print(f"Error: Benchmarks directory '{bench_dir}' not found.", file=sys.stderr)
+            sys.exit(1)
+            
+        files = [f for f in os.listdir(bench_dir) if f.endswith('.eig')]
+        if not files:
+            print("No .eig benchmark files found in benchmarks/ directory.")
+            return
+            
+        print("=" * 65)
+        print("                 EIGEN BENCHMARK SUITE                 ")
+        print("=" * 65)
+        print(f"{'Benchmark Name':<20} | {'Compile (ms)':<12} | {'Exec (ms)':<12} | {'Total (ms)':<12}")
+        print("-" * 65)
+        
+        for f_name in sorted(files):
+            f_path = os.path.join(bench_dir, f_name)
+            
+            t_comp_start = time.perf_counter()
+            try:
+                with open(f_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                lexer = Lexer(content)
+                parser = Parser(lexer.tokenize())
+                ast = parser.parse()
+                resolver = ImportResolver(workspace_root)
+                ast = resolver.resolve(ast)
+                type_checker = TypeChecker()
+                type_checker.check(ast)
+                compiler = EBCCompiler()
+                instrs = compiler.compile_ast(ast)
+                compile_time_ms = (time.perf_counter() - t_comp_start) * 1000.0
+            except Exception as e:
+                print(f"{f_name:<20} | {'ERROR':<12} | {'-':<12} | {'-':<12} ({e})")
+                continue
+                
+            vm = EigenVM(trace_mode=False)
+            t_exec_start = time.perf_counter()
+            try:
+                import io
+                import contextlib
+                f_null = io.StringIO()
+                with contextlib.redirect_stdout(f_null):
+                    vm.execute(instrs)
+                exec_time_ms = (time.perf_counter() - t_exec_start) * 1000.0
+                total_time_ms = compile_time_ms + exec_time_ms
+                print(f"{f_name:<20} | {compile_time_ms:<12.3f} | {exec_time_ms:<12.3f} | {total_time_ms:<12.3f}")
+            except Exception as e:
+                print(f"{f_name:<20} | {compile_time_ms:<12.3f} | {'EXEC ERROR':<12} | {'-':<12} ({e})")
+                
+        print("=" * 65)
+        return
+
     # 1. Handle Packaging init
-    if args.command == "init":
+    elif args.command == "init":
         from src.packager import EigenPackager
         packager = EigenPackager(workspace_root)
         packager.init_package(args.name)
@@ -218,6 +384,7 @@ def main():
         return
 
     # 9. Handle Run command (.eig or .ebc)
+    # 9. Handle Run command (.eig or .ebc)
     elif args.command == "run":
         if args.file.endswith('.ebc'):
             print(f"Executing EBC bytecode file '{args.file}' on VM...")
@@ -227,6 +394,47 @@ def main():
             vm = EigenVM(trace_mode=args.trace)
             vm.execute(instructions)
             return
+
+        # Try loading from cache
+        if args.vm:
+            cached_instructions = load_from_cache(args.file, workspace_root, "ebc")
+            if cached_instructions is not None:
+                profiler = EQIRProfiler()
+                profiler.start()
+                vm = EigenVM(trace_mode=args.trace)
+                try:
+                    vm.execute(cached_instructions)
+                except AssertionError as ae:
+                    print(f"Assertion Error: {ae}", file=sys.stderr)
+                    sys.exit(1)
+                except Exception as e:
+                    print(f"VM Execution Error: {e}", file=sys.stderr)
+                    sys.exit(1)
+                profiler.stop()
+                print("=" * 40)
+                print("          EIGEN RUNTIME PROFILE (CACHED)          ")
+                print("=" * 40)
+                print(f"Execution Time:      {profiler.execution_time_ms:.3f} ms")
+                print("=" * 40)
+                return
+        else:
+            cached_graph = load_from_cache(args.file, workspace_root, "eqir")
+            if cached_graph is not None:
+                profiler = EQIRProfiler()
+                profiler.start()
+                runtime = EigenRuntime(trace_mode=args.trace)
+                try:
+                    runtime.execute(cached_graph)
+                except AssertionError as ae:
+                    print(f"Assertion Error: {ae}", file=sys.stderr)
+                    sys.exit(1)
+                except Exception as e:
+                    print(f"Runtime Error: {e}", file=sys.stderr)
+                    sys.exit(1)
+                profiler.stop()
+                stats = profiler.profile(cached_graph)
+                profiler.print_profile_report(stats)
+                return
 
         # Compile to EQIR v1.1
         graph, ast = compile_to_eqir(args.file, workspace_root)
@@ -263,6 +471,8 @@ def main():
         if args.vm:
             compiler = EBCCompiler()
             instructions = compiler.compile_eqir(graph)
+            # Save to cache
+            save_to_cache(args.file, workspace_root, "ebc", instructions)
             vm = EigenVM(trace_mode=args.trace)
             try:
                 vm.execute(instructions)
@@ -273,6 +483,8 @@ def main():
                 print(f"VM Execution Error: {e}", file=sys.stderr)
                 sys.exit(1)
         else:
+            # Save to cache
+            save_to_cache(args.file, workspace_root, "eqir", graph)
             runtime = EigenRuntime(trace_mode=args.trace)
             try:
                 runtime.execute(graph)

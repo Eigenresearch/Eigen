@@ -5,3 +5,10 @@ papers/eigen-research-paper.md
 __pycache__/
 *.pyc
 .pytest_cache/
+.eigen_cache/
+
+# PyInstaller / Build outputs
+build/
+dist/
+*.spec
+*.ebc
