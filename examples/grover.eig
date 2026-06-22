@@ -1,0 +1,30 @@
+eigen 1.0
+import quantum.grover
+
+qubit q0
+qubit q1
+
+# Create uniform superposition
+H q0
+H q1
+
+# Oracle: mark the state |11> using Controlled-Z
+CZ q0, q1
+
+# Apply Grover Diffusion Operator for 2 qubits
+diffuse_2(q0, q1)
+
+trace
+
+cbit c0
+cbit c1
+
+measure q0 -> c0
+measure q1 -> c1
+
+print c0
+print c1
+
+# We expect state |11> with 100% probability, so c0 and c1 must be 1
+assert c0 == 1
+assert c1 == 1
