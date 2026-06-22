@@ -1,0 +1,23 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+# Apply Hadamard to all qubits to put them in uniform superposition
+H q0
+H q1
+H q2
+
+cbit b0
+cbit b1
+cbit b2
+
+measure q0 -> b0
+measure q1 -> b1
+measure q2 -> b2
+
+# Print bits. Together they represent a random number from 0 to 7.
+print b0
+print b1
+print b2

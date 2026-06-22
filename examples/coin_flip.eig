@@ -1,0 +1,15 @@
+eigen 1.0
+
+qubit q0
+
+# Put the qubit into equal superposition (50% chance of |0>, 50% chance of |1>)
+H q0
+
+# Trace to inspect the superposition state
+trace
+
+cbit result
+measure q0 -> result
+
+# Print the classical coin flip outcome (0 = Heads, 1 = Tails)
+print result

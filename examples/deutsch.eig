@@ -1,0 +1,26 @@
+eigen 1.0
+import quantum.deutsch
+
+qubit q0
+qubit q1
+
+# Setup ancillary qubit q1 to state |1>
+X q1
+
+# Create superposition
+H q0
+H q1
+
+# Apply a balanced oracle f(x) = x
+oracle_balanced_x(q0, q1)
+
+# Apply Hadamard back to q0 to interfere
+H q0
+
+cbit result
+measure q0 -> result
+
+print result
+
+# For a balanced oracle, the result of Deutsch algorithm must be 1
+assert result == 1

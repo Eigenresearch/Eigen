@@ -1,0 +1,42 @@
+eigen 1.0
+
+# Qubits: 
+# q0 - state to teleport (prepared as |1>)
+# q1 - Alice's EPR qubit
+# q2 - Bob's EPR qubit
+qubit q0
+qubit q1
+qubit q2
+
+# 1. Prepare Alice's qubit q0 in state |1>
+X q0
+
+# 2. Entangle q1 and q2 to create Bell pair (Alice & Bob share EPR pair)
+H q1
+CNOT q1, q2
+
+# 3. Alice performs Bell measurement on q0 and q1
+CNOT q0, q1
+H q0
+
+cbit c0
+cbit c1
+measure q0 -> c0
+measure q1 -> c1
+
+# 4. Alice sends c0 and c1 to Bob. Bob applies conditional corrections.
+if c1 == 1 {
+    X q2
+}
+if c0 == 1 {
+    Z q2
+}
+
+# 5. Measure Bob's qubit q2 to verify teleported state
+cbit c2
+measure q2 -> c2
+
+print c2
+
+# Since q0 was prepared in state |1>, q2 must collapse to |1> after teleportation
+assert c2 == 1

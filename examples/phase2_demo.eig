@@ -1,0 +1,44 @@
+eigen 1.0
+
+# API Reference Demonstration: Person struct
+struct Person {
+    age: int,
+    score: float
+}
+
+# Classical recursive factorial function
+func factorial(n: int) -> int {
+    if n == 0 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+# 1. Execute classical recursion
+let fact5: int = factorial(5)
+print fact5
+assert fact5 == 120
+
+# 2. Instantiate and mutate structure
+let p: Person = Person {age: 30, score: 95.5 }
+p.age = 31
+let page: int = p.age
+print page
+assert page == 31
+
+# 3. Create entangled quantum Bell state
+qubit q0
+qubit q1
+cbit c0
+cbit c1
+
+H q0
+CNOT q0, q1
+
+# 4. Measure qubits and verify entanglement
+measure q0 -> c0
+measure q1 -> c1
+
+print c0
+print c1
+assert c0 == c1

@@ -1,0 +1,7 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+
+# Reversed CNOT: control is q1, target is q0
+CNOT q1, q0

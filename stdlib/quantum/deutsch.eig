@@ -1,0 +1,27 @@
+eigen 1.0
+module quantum.deutsch
+
+# Constant oracle: f(x) = 0 (does nothing)
+qfunc oracle_constant_0(qubit x, qubit y) {
+    return
+}
+
+# Constant oracle: f(x) = 1 (X y)
+qfunc oracle_constant_1(qubit x, qubit y) {
+    X y
+    return
+}
+
+# Balanced oracle: f(x) = x (CNOT x, y)
+qfunc oracle_balanced_x(qubit x, qubit y) {
+    CNOT x, y
+    return
+}
+
+# Balanced oracle: f(x) = not x
+qfunc oracle_balanced_not_x(qubit x, qubit y) {
+    X x
+    CNOT x, y
+    X x
+    return
+}

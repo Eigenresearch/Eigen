@@ -1,0 +1,11 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+
+# CNOT direction reversal: H gates before and after CNOT
+H q0
+H q1
+CNOT q0, q1
+H q0
+H q1

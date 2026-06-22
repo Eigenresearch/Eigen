@@ -1,0 +1,9 @@
+eigen 1.0
+module quantum.ghz
+
+qfunc ghz(qubit a, qubit b, qubit c) {
+    H a
+    CNOT a, b
+    CNOT b, c
+    return
+}
