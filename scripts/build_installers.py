@@ -107,14 +107,18 @@ def main():
             try:
                 url = "https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage"
                 wget_target = os.path.abspath("appimagetool-x86_64.AppImage")
-                run_cmd(["curl", "-L", "-f", "-o", wget_target, url])
-                file_size = os.path.getsize(wget_target)
-                if file_size < 1000:
-                    print(f"appimagetool download seems too small ({file_size} bytes), likely failed")
+                result = subprocess.run(["curl", "-L", "-f", "-o", wget_target, url])
+                if result.returncode != 0:
+                    print(f"curl download failed with code {result.returncode}")
                     appimagetool_path = None
                 else:
-                    os.chmod(wget_target, 0o755)
-                    appimagetool_path = wget_target
+                    file_size = os.path.getsize(wget_target)
+                    if file_size < 1000:
+                        print(f"appimagetool download seems too small ({file_size} bytes), likely failed")
+                        appimagetool_path = None
+                    else:
+                        os.chmod(wget_target, 0o755)
+                        appimagetool_path = wget_target
             except Exception as e:
                 print(f"Could not download appimagetool: {e}")
                 appimagetool_path = None
