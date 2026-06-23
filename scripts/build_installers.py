@@ -117,13 +117,21 @@ def main():
         appimage_ok = False
         if appimagetool_path:
             try:
-                # Run appimagetool directly — APPIMAGE_EXTRACT_AND_RUN handles FUSE
-                print(f"Building AppImage with: {appimagetool_path}")
-                run_cmd([appimagetool_path, app_dir, target_appimage])
+                # Extract appimagetool to avoid FUSE dependency on CI
+                extract_dir = os.path.abspath("appimagetool-extracted")
+                if os.path.exists(extract_dir):
+                    shutil.rmtree(extract_dir)
+                os.makedirs(extract_dir, exist_ok=True)
+                print(f"Extracting appimagetool...")
+                subprocess.run([appimagetool_path, "--appimage-extract"],
+                               cwd=extract_dir, check=True)
+                extracted_apprun = os.path.join(extract_dir, "squashfs-root", "AppRun")
+                print(f"Building AppImage with: {extracted_apprun}")
+                run_cmd([extracted_apprun, app_dir, target_appimage])
                 appimage_ok = True
                 print(f"Linux AppImage successfully created at: {target_appimage}")
-            except SystemExit:
-                print("appimagetool failed. Falling back to tar.gz packaging...")
+            except (SystemExit, subprocess.CalledProcessError) as e:
+                print(f"appimagetool failed: {e}. Falling back to tar.gz packaging...")
         
         if not appimage_ok:
             # Fallback: create a tar.gz with the standalone binary
