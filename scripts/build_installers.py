@@ -107,9 +107,14 @@ def main():
             try:
                 url = "https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage"
                 wget_target = os.path.abspath("appimagetool-x86_64.AppImage")
-                run_cmd(["curl", "-L", "-o", wget_target, url])
-                os.chmod(wget_target, 0o755)
-                appimagetool_path = wget_target
+                run_cmd(["curl", "-L", "-f", "-o", wget_target, url])
+                file_size = os.path.getsize(wget_target)
+                if file_size < 1000:
+                    print(f"appimagetool download seems too small ({file_size} bytes), likely failed")
+                    appimagetool_path = None
+                else:
+                    os.chmod(wget_target, 0o755)
+                    appimagetool_path = wget_target
             except Exception as e:
                 print(f"Could not download appimagetool: {e}")
                 appimagetool_path = None
@@ -130,7 +135,7 @@ def main():
                 run_cmd([extracted_apprun, app_dir, target_appimage])
                 appimage_ok = True
                 print(f"Linux AppImage successfully created at: {target_appimage}")
-            except (SystemExit, subprocess.CalledProcessError) as e:
+            except (SystemExit, subprocess.CalledProcessError, OSError, Exception) as e:
                 print(f"appimagetool failed: {e}. Falling back to tar.gz packaging...")
         
         if not appimage_ok:
