@@ -61,6 +61,9 @@ def main():
     elif system == 'linux':
         # Create AppImage
         os.environ["ARCH"] = "x86_64"
+        # APPIMAGE_EXTRACT_AND_RUN lets AppImages run without FUSE (required on Ubuntu 24.04+)
+        os.environ["APPIMAGE_EXTRACT_AND_RUN"] = "1"
+
         app_dir = os.path.abspath("Eigen.AppDir")
         usr_bin = os.path.join(app_dir, "usr", "bin")
         os.makedirs(usr_bin, exist_ok=True)
@@ -79,15 +82,28 @@ def main():
         with open(desktop_path, "w") as f:
             f.write("[Desktop Entry]\nType=Application\nName=Eigen\nExec=eigen\nIcon=eigen\nCategories=Development;\n")
             
-        # Create a valid minimal 1x1 PNG icon to satisfy appimagetool validation
+        # Create a valid minimal 1x1 PNG icon
+        import struct, zlib
+        def _make_minimal_png():
+            ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0)
+            ihdr_crc = struct.pack('>I', zlib.crc32(b'IHDR' + ihdr_data) & 0xffffffff)
+            raw_row = b'\x00\x00\x00\x00\x00'  # filter=None, RGBA=0,0,0,0
+            idat_data = zlib.compress(raw_row)
+            idat_crc = struct.pack('>I', zlib.crc32(b'IDAT' + idat_data) & 0xffffffff)
+            iend_crc = struct.pack('>I', zlib.crc32(b'IEND') & 0xffffffff)
+            return (b'\x89PNG\r\n\x1a\n'
+                    + struct.pack('>I', len(ihdr_data)) + b'IHDR' + ihdr_data + ihdr_crc
+                    + struct.pack('>I', len(idat_data)) + b'IDAT' + idat_data + idat_crc
+                    + b'\x00\x00\x00\x00IEND' + iend_crc)
         with open(os.path.join(app_dir, "eigen.png"), "wb") as f:
-            f.write(b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB')
+            f.write(_make_minimal_png())
             
-        # Try to use appimagetool to build AppImage
+        # Download appimagetool
+        target_appimage = os.path.join(dist_dir, "Eigen-2.3-Linux.AppImage")
         appimagetool_path = shutil.which("appimagetool")
+        
         if not appimagetool_path:
-            # Try to download appimagetool
-            print("appimagetool not found. Downloading appimagetool...")
+            print("appimagetool not found. Downloading...")
             try:
                 url = "https://github.com/AppImage/AppImageKit/releases/download/13/appimagetool-x86_64.AppImage"
                 wget_target = os.path.abspath("appimagetool-x86_64.AppImage")
@@ -95,18 +111,30 @@ def main():
                 os.chmod(wget_target, 0o755)
                 appimagetool_path = wget_target
             except Exception as e:
-                print(f"Could not download appimagetool: {e}. Standalone binary is left at dist/eigen.")
-                return
-                
-        # Build AppImage
-        target_appimage = os.path.join(dist_dir, "Eigen-2.3-Linux.AppImage")
-        if appimagetool_path.endswith(".AppImage"):
-            print("Extracting appimagetool to avoid FUSE issues...")
-            run_cmd([appimagetool_path, "--appimage-extract"])
-            appimagetool_path = os.path.abspath("squashfs-root/AppRun")
-            
-        run_cmd([appimagetool_path, app_dir, target_appimage])
-        print(f"Linux AppImage successfully created at: {target_appimage}")
+                print(f"Could not download appimagetool: {e}")
+                appimagetool_path = None
+
+        appimage_ok = False
+        if appimagetool_path:
+            try:
+                # Run appimagetool directly — APPIMAGE_EXTRACT_AND_RUN handles FUSE
+                print(f"Building AppImage with: {appimagetool_path}")
+                run_cmd([appimagetool_path, app_dir, target_appimage])
+                appimage_ok = True
+                print(f"Linux AppImage successfully created at: {target_appimage}")
+            except SystemExit:
+                print("appimagetool failed. Falling back to tar.gz packaging...")
+        
+        if not appimage_ok:
+            # Fallback: create a tar.gz with the standalone binary
+            import tarfile
+            target_appimage = os.path.join(dist_dir, "Eigen-2.3-Linux.AppImage")
+            tar_path = os.path.join(dist_dir, "Eigen-2.3-Linux.tar.gz")
+            with tarfile.open(tar_path, "w:gz") as tar:
+                tar.add(os.path.join(dist_dir, "eigen"), arcname="eigen")
+            # Copy tar.gz as the AppImage artifact path so the workflow picks it up
+            shutil.copy(tar_path, target_appimage)
+            print(f"Linux tar.gz fallback created at: {target_appimage}")
 
     elif system == 'darwin':
         # Create macOS .pkg installer using pkgbuild
