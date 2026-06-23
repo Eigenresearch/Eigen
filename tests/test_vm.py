@@ -1,17 +1,17 @@
 import unittest
-from src.bytecode import Opcode, Instruction
-from src.ebc_compiler import (
+from src.backend.bytecode import Opcode, Instruction
+from src.backend.ebc_compiler import (
     EBCCompiler, Label, WhileNode, TryCatchNode, ThrowNode,
     StructAllocNode, StructGetNode, StructSetNode,
     MapAllocNode, MapGetNode, MapSetNode,
     ArrayAllocNode, ArrayGetNode, ArraySetNode
 )
-from src.vm import EigenVM, VMRef
-from src.ast import (
+from src.backend.vm import EigenVM, VMRef
+from src.frontend.ast import (
     ProgramNode, LetNode, VarDeclNode, LiteralNode, VarRefNode,
     BinaryOpNode, GateNode, MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, QFuncCallNode
 )
-from src.ir_graph import EQIRGraph
+from src.ir.ir_graph import EQIRGraph
 
 class TestEigenVMAndCompiler(unittest.TestCase):
 
@@ -96,7 +96,7 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         # Note: In our current compiler structure, qfunc decls are resolved to jump targets,
         # and ReturnNode returns None. But let's check function scoping.
         # Call: add_one(x)
-        from src.ast import QFuncDeclNode
+        from src.frontend.ast import QFuncDeclNode
         func_decl = QFuncDeclNode("add_one", [("val", "int")], [
             LetNode("res", "int", BinaryOpNode("+", VarRefNode("val"), LiteralNode(1, "int"))),
             ReturnNode()
@@ -225,6 +225,32 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         self.assertIn(c0, (0, 1))
         self.assertIn(c1, (0, 1))
         self.assertEqual(c0, c1)
+
+    def test_division_by_zero_check(self):
+        program = ProgramNode(1.0, None, [], [
+            LetNode("div_zero", "int", BinaryOpNode("/", LiteralNode(10, "int"), LiteralNode(0, "int")))
+        ])
+        instructions = self.compiler.compile_ast(program)
+        
+        with self.assertRaises(RuntimeError) as context:
+            self.vm.execute(instructions)
+            
+        self.assertIn("DivisionByZeroError: Division by zero.", str(context.exception))
+
+    def test_stack_overflow_check(self):
+        from src.frontend.ast import QFuncDeclNode
+        func_decl = QFuncDeclNode("recurse", [], [
+            QFuncCallNode("recurse", [])
+        ])
+        call_node = QFuncCallNode("recurse", [])
+        
+        program = ProgramNode(1.0, None, [], [func_decl, call_node])
+        instructions = self.compiler.compile_ast(program)
+        
+        with self.assertRaises(RuntimeError) as context:
+            self.vm.execute(instructions)
+            
+        self.assertIn("StackOverflowError: Maximum recursion depth (1000) exceeded.", str(context.exception))
 
 
 if __name__ == "__main__":

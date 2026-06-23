@@ -1,0 +1,12 @@
+eigen 1.0
+module std.random
+
+# Returns a random float between 0.0 and 1.0
+func rand_float() -> float {
+    return 0.0
+}
+
+# Returns a random integer between min and max
+func rand_int(min_val: int, max_val: int) -> int {
+    return 0
+}

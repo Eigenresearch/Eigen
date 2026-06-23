@@ -3,7 +3,6 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v2.2.*'
       - 'v2.3.*'
 
 permissions:
@@ -65,7 +64,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Windows-Installer
-          path: dist/Eigen-2.2-Windows-x64.exe
+          path: dist/Eigen-2.3-Windows-x64.exe
 
   build-linux:
     name: Build Linux AppImage
@@ -93,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Linux-AppImage
-          path: dist/Eigen-2.2-Linux.AppImage
+          path: dist/Eigen-2.3-Linux.AppImage
 
   build-macos:
     name: Build macOS PKG
@@ -116,7 +115,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macOS-PKG
-          path: dist/Eigen-2.2-macOS.pkg
+          path: dist/Eigen-2.3-macOS.pkg
 
   create-release:
     name: Create GitHub Release
@@ -148,25 +147,27 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/Eigen-2.2-Windows-x64.exe
-            dist/Eigen-2.2-Linux.AppImage
-            dist/Eigen-2.2-macOS.pkg
+            dist/Eigen-2.3-Windows-x64.exe
+            dist/Eigen-2.3-Linux.AppImage
+            dist/Eigen-2.3-macOS.pkg
           body: |
-            # Eigen 2.3 — Aurora Release
+            # Eigen 2.3 — Helios Release
             
-            Welcome to Eigen 2.3 — Aurora!
+            Welcome to Eigen 2.3 — Helios!
             
             This is a stabilized, performance-oriented, runtime-first hybrid classical-quantum programming language platform designed for serious development, research workloads, scalable experimentation, and transparent backend compatibility.
             
             ### Key Features
-            - **Fast VM Execution:** Table-driven dispatch and activation frame pooling.
-            - **Incremental Compiler Caching:** Fast caching of compile targets inside `.eigen_cache/`.
-            - **Optimized Simulator:** In-place exact simulation updates for 9-20 qubits without state corruption.
-            - **Benchmark Suite:** Included CLI command `eigen bench`.
+            - **MLIR Dialect Layer:** AST -> MLIR Dialects (func, arith, quantum, cf) -> EQIR DAG translation.
+            - **GPU Engine 2.0:** Integrated support for CUDA, ROCm, and Metal with automatic platform detection (`eigen run --gpu auto`).
+            - **Quantum Tensor Compiler:** Advanced simulation of large low-entanglement circuits via tensor graph optimizer.
+            - **Concurrency Scheduler:** Parallel block structures (`parallel { task f() }`) executed using a DAG scheduler.
+            - **LLVM / QIR Target:** Native compilation support mapping SSA forms directly to LLVM IR (`eigen build --llvm`).
+            - **Incremental Compiler Caching:** Fast caching of compile targets (AST, SSA, EQIR, ZX, EBC) inside `.eigen_cache/` to speed up rebuilds.
             
             ### Installers
-            - **Windows:** `Eigen-2.2-Windows-x64.exe`
-            - **Linux:** `Eigen-2.2-Linux.AppImage`
-            - **macOS:** `Eigen-2.2-macOS.pkg`
+            - **Windows:** `Eigen-2.3-Windows-x64.exe`
+            - **Linux:** `Eigen-2.3-Linux.AppImage`
+            - **macOS:** `Eigen-2.3-macOS.pkg`
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

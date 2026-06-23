@@ -2,8 +2,8 @@ import unittest
 import os
 import shutil
 import tempfile
-from src.main import get_project_hash, load_from_cache, save_to_cache
-from src.bytecode import Instruction
+from src.compiler import get_project_hash, load_from_cache, save_to_cache
+from src.backend.bytecode import Instruction
 
 class TestCache(unittest.TestCase):
     def setUp(self):

@@ -1,7 +1,7 @@
 import unittest
-from src.lexer import Lexer
-from src.parser import Parser
-from src.ast import ProgramNode, LetNode, VarDeclNode, GateNode, MeasureNode, IfNode
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.frontend.ast import ProgramNode, LetNode, VarDeclNode, GateNode, MeasureNode, IfNode
 
 class TestParser(unittest.TestCase):
     def test_parse_declarations(self):

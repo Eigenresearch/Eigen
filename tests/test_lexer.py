@@ -1,5 +1,5 @@
 import unittest
-from src.lexer import Lexer, TokenType
+from src.frontend.lexer import Lexer, TokenType
 
 class TestLexer(unittest.TestCase):
     def test_simple_program(self):

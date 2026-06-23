@@ -1,10 +1,10 @@
-# Eigen 2.1 Language Specification
+# Eigen 2.3 Language Specification
 
-This document provides the formal language specification for Eigen version 2.1.
+This document provides the formal language specification for Eigen version 2.3.
 
 ## 1. Syntax Grammar (EBNF)
 
-Below is the formal Extended Backus-Naur Form (EBNF) grammar specification for Eigen 2.1:
+Below is the formal Extended Backus-Naur Form (EBNF) grammar specification for Eigen 2.3:
 
 ```ebnf
 Program             = "eigen" Version [ ModuleDecl ] { ImportDecl } { Statement } EOF ;

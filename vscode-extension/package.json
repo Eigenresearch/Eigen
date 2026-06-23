@@ -1,0 +1,35 @@
+{
+  "name": "vscode-eigen",
+  "displayName": "Eigen Language Support",
+  "description": "VSCode extension providing syntax highlighting, hover diagnostics, and language server features for Eigen.",
+  "version": "2.3.0",
+  "publisher": "eigenresearch",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "eigen",
+        "aliases": [
+          "Eigen",
+          "eigen"
+        ],
+        "extensions": [
+          ".eig"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "eigen",
+        "scopeName": "source.eigen",
+        "path": "./syntaxes/eigen.tmLanguage.json"
+      }
+    ]
+  }
+}

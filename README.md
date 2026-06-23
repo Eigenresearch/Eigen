@@ -1,27 +1,40 @@
 # Eigen Programming Language
 
-Eigen is a domain-specific, hybrid classical-quantum programming language. It combines classical control flow, data structures, and exception handling with quantum operations, automatic DAG circuit optimization, and formal circuit equivalence checking.
+![Eigen Logo](Logo.jpg)
 
-Designed to move beyond superficial quantum syntax, Eigen provides a complete computational framework for writing, optimizing, simulating, and validating quantum algorithms on classical hardware.
-
----
-
-## Why Eigen?
-
-Eigen is not a quantum SDK.
-
-Eigen is a runtime-first hybrid classical-quantum programming language.
-
-* **Unlike OpenQASM 3**, Eigen provides a complete classical runtime (supporting recursion, structures, arrays, maps, and exception handling).
-* **Unlike Qiskit**, Eigen is a standalone language rather than a Python framework, enabling unified syntax checking, optimizations, and compilation to target bytecode.
-* **Unlike Silq**, Eigen emphasizes graph-based IR optimization (EQIR), runtime portability, and backend capability transparency.
-* **Unlike Q#**, Eigen focuses on a lightweight, dependencies-free virtual machine execution target (EBC) with built-in exact circuit equivalence checking.
+Eigen is a domain-specific, hybrid classical-quantum programming language designed to bridge the gap between high-level classical programming abstractions and physical quantum computation. Rather than acting as a simple quantum gate-assembly wrapper, Eigen provides a unified computational model. It combines a complete classical control runtime (supporting recursion, structural types, dynamic collections, and structured exceptions) with native quantum simulation, hardware-constrained routing, formal circuit verification, and an optimized execution pipeline.
 
 ---
 
-## Architecture Overview
+## Table of Contents
+1. [Why Eigen? (Competitive Paradigm Comparison)](#why-eigen-competitive-paradigm-comparison)
+2. [Ecosystem Architecture & Compilation Pipeline](#ecosystem-architecture--compilation-pipeline)
+3. [Language Feature Matrix](#language-feature-matrix)
+4. [Helios CLI Manual & Developer Tooling](#helios-cli-manual--developer-tooling)
+5. [Advanced Execution & Simulation Engines](#advanced-execution--simulation-engines)
+6. [Formal Verification & ZX-Calculus Engine](#formal-verification--zx-calculus-engine)
+7. [Native Rust Extension & Native Runtime Layer](#native-rust-extension--native-runtime-layer)
+8. [Incremental Cache & SSA LLVM Target](#incremental-cache--ssa-llvm-target)
+9. [Installation & Quick Start](#installation--quick-start)
+10. [Example Codebases](#example-codebases)
+11. [Detailed Language Specification Reference](#detailed-language-specification-reference)
 
-Below is the compilation-to-execution pipeline of the Eigen ecosystem:
+---
+
+## Why Eigen? (Competitive Paradigm Comparison)
+
+Quantum computing developer tools are historically split into host-language SDKs (like Qiskit or Pennylane) and low-level hardware representation formats (like OpenQASM). Eigen is designed as a standalone, domain-specific, hybrid classical-quantum language that offers native runtime guarantees.
+
+* **Unlike Qiskit**: Qiskit is a Python library, meaning type checking, syntax validation, and circuit optimization happen inside Python's runtime memory space. Eigen is a compiled language, enabling structured, static type verification of quantum assets, modular namespaces, and compilation to target EBC bytecode files or LLVM IR code before execution.
+* **Unlike OpenQASM 3.0**: OpenQASM 3.0 targets low-level hardware control with basic classical variables. Eigen supports a rich classical runtime including recursion, user-defined structures (`struct`), associative maps, dynamic arrays, and structured try-catch exception propagation.
+* **Unlike Silq**: Silq uses an AST-based type safety compiler to track uncomputation. Eigen focuses on optimization at the Intermediate Representation (IR) level via Control Flow Graphs (CFG), Single Static Assignment (SSA) forms, Multi-Level Intermediate Representation (MLIR) dialects, and Directed Acyclic Graph (EQIR) gate dependency analysis.
+* **Unlike Q#**: Q# relies on a heavy Microsoft compiler and .NET/LLVM execution stack. Eigen is lightweight and portable, compiling down to compact stack bytecode executed via a portable VM with an adaptive JIT engine or native Rust library.
+
+---
+
+## Ecosystem Architecture & Compilation Pipeline
+
+The pipeline below details the conversion of an Eigen source file into optimized quantum states or hardware-compatible instruction streams:
 
 ```mermaid
 graph TD
@@ -34,119 +47,169 @@ graph TD
     PipelineBranch -->|VM Execution| EBCCompiler[EBC Compiler]
     EBCCompiler -->|Bytecode EBC| VM[Eigen VM]
     VM <--> Simulator[Quantum Simulator]
+    VM <--> JIT[Adaptive JIT Engine]
+    
+    PipelineBranch -->|MLIR Dialect| MLIRGen[AST-to-MLIR Converter]
+    MLIRGen -->|MLIR Dialects| MLIROpt[MLIR to EQIR Translation]
+    
+    MLIROpt -->|Quantum DAG IR| Optimizer[EQIR DAG Optimizer]
+    Optimizer -->|Optimized EQIR| Runtime[Eigen Runtime]
+    Runtime <--> Simulator
     
     PipelineBranch -->|Transpilation| QiskitBackend[Qiskit Transpiler]
     QiskitBackend -->|Python Aer Script| Qiskit[Qiskit / AerSimulator]
     
-    PipelineBranch -->|Quantum DAG IR| EQIRGen[EQIR v1.1 Converter]
-    EQIRGen -->|Raw DAG IR| Optimizer[DAG Optimizer]
-    Optimizer -->|Optimized DAG IR| Runtime[Eigen Runtime]
-    Runtime <--> Simulator
+    PipelineBranch -->|SSA Compiler| SSACompiler[SSA Compiler]
+    SSACompiler -->|SSA Block Form| LLVMCompiler[LLVM/QIR Compiler]
+    LLVMCompiler -->|LLVM IR .ll| QIR[LLVM/QIR Native Targets]
     
     SubGraphEquiv[Equivalence Checker] <.-> Optimizer
 ```
 
 ---
 
-## Runtime Guarantees
+## Language Feature Matrix
 
-Eigen Runtime and VM provide full language support. Every language construct—including recursive functions, loops, structures, arrays, maps, and exception catch blocks—is executed natively by the Eigen VM. Classical execution is considered the source of truth, whereas backend exporters (like the Qiskit backend) are optional compatibility targets.
+The table below provides a capability comparison between Eigen and other primary quantum development architectures:
 
----
-
-## Backend Compatibility Matrix
-
-| Feature / Capability | Eigen Runtime / VM | Qiskit Transpiler |
-| -------------------- | ------------------ | ----------------- |
-| Quantum Gates        | Full               | Full              |
-| Measurements         | Full               | Full              |
-| Arrays               | Full               | Partial (Static)  |
-| Structs              | Full               | None              |
-| Maps                 | Full               | None              |
-| Recursion            | Full               | None              |
-| Exceptions           | Full               | None              |
-| Loops                | Full               | None              |
-| Imports              | Full               | Partial           |
+| Feature / Capability | Eigen 2.3 — Helios | Qiskit (Python SDK) | OpenQASM 3.0 | Silq | Q# |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Execution Model** | VM (EBC Bytecode) / Native Rust FFI / LLVM | Host Python Interpreter | Hardware / AST | Compiled Native | VM / LLVM |
+| **Classical State** | Full (Recursion, Exceptions, Structs, Maps, Dynamic Arrays) | Limited (Host Python environment) | Static / Limited | Limited (No exceptions/maps) | Dynamic / Limited |
+| **Simulators** | State-Vector, Sparse (sparsity-scaling), MPS Tensor Network | Aer Simulator | Simulator-dependent | Wavefunction | Sparse / State-Vector |
+| **VM Trace Engine** | Yes (Trace-Based Adaptive Execution, 2x-5x speedup) | No | No | No | No |
+| **IR Architecture** | AST &rarr; MLIR &rarr; EQIR DAG &rarr; SSA | DAGCircuit | AST / flat gates | AST | QIR (LLVM) |
+| **Verification Engine** | Unitary Equivalence & ZX-Calculus reduction | Equivalence library | None | Safe uncomputation | None |
+| **Tooling & LSP** | Interactive Debugger & JSON-RPC LSP Server | IDE extensions | Syntax highlighting | VS Code Extension | VS Code Extension |
+| **Package Manager** | Local/Remote Package Manager with `eigen.lock` verification | pip (Python) | None | None | dotnet/nuget |
+| **Exporters** | IBM QASM, IonQ, AWS Braket, Azure QIR | Qiskit-specific | Export-dependent | None | QIR / QASM |
 
 ---
 
-## Key Features
+## Helios CLI Manual & Developer Tooling
 
-- **Modular Syntax**: Versioning headers (`eigen 1.0`), module namespaces (`module quantum.bell`), and imports (`import quantum.bell`).
-- **Strict Typing**: A static type checker verifying bounds for `qubit`, `cbit`, `int`, and `float` variables.
-- **Graph-Based Intermediate Representation (EQIR v1.1)**: Quantum circuits are represented as Directed Acyclic Graphs (DAGs) of operations, capturing topological dependencies along qubit wires.
-- **Topological Runtime**: The Eigen Runtime executes instructions in topological order, avoiding artificial ordering constraints.
-- **State-Vector Simulator**: Pure Python complex-number quantum simulator supporting unitary gates (H, X, Y, Z, S, T), rotation gates (RX, RY, RZ), multi-qubit gates (CNOT, CZ, SWAP), and probabilistic wavefunction collapse.
-- **Circuit Optimizer**: Graph-level optimizations including redundant gate cancellation (e.g. consecutive Hadamards) and rotation merging (consecutive rotations about the same axis).
-- **Formal Verification**: Mathematically checks whether two circuits are equivalent up to a global phase (\(U_1 = e^{i\theta} U_2\)) using exact unitary matrix comparison (restricted to \(N \le 8\) qubits).
-- **Standard Library**: Built-in modules including Bell state, GHZ state, Deutsch algorithm oracles, and Grover diffusers.
+The unified `eigen` command line utility exposes all compilation, optimization, simulation, debugging, packaging, and analysis features.
+
+### Command Reference
+
+* **`eigen run <file.eig>`**: Compiles and executes an Eigen program.
+  - `--trace`: Enable trace prints showing step-by-step state vector changes and register values.
+  - `--backend <target>`: Export and run on target backend (e.g. `qiskit`, `qasm`, `braket`).
+  - `--gpu <platform>`: Select GPU acceleration platform (`auto` for auto-detect, `cuda`, `rocm`, `metal`, `none`).
+* **`eigen build`**: Compiles Eigen packages into EBC bytecode or LLVM files.
+  - `--llvm`: Compiles SSA blocks directly into LLVM Intermediate Representation (`.ll`).
+* **`eigen exec <file.ebc>`**: Executes precompiled EBC bytecode files directly in the VM environment.
+* **`eigen verify-equiv <file1.eig> <file2.eig>`**: Checks formal equivalence of two quantum circuits.
+  - `--method <unitary|zx>`: Selects verification method. `unitary` checks exact unitary matrix congruence; `zx` applies graph reduction simplifications.
+* **`eigen verify <file.eig>`**: Scans code correctness, syntax compliance, and semantic soundness, reporting warnings and errors.
+* **`eigen init <project-name>`**: Bootstraps a standard package layout with a template `eigen.toml` manifest file.
+* **`eigen install`**: Downloads, installs, and locks package dependencies specified in `eigen.toml` to `eigen.lock`.
+* **`eigen add <dependency>`**: Adds a dependency to the current manifest configuration.
+* **`eigen search <query>`**: Queries remote registry indexes for matching modules.
+* **`eigen fmt <file.eig>`**: Enforces style guides and auto-formats the source code.
+* **`eigen doc`**: Parses source code comments and prints API references or generates HTML/Markdown documentation.
+* **`eigen test`**: Recursively discovers and executes project unit tests.
+* **`eigen bench`**: Executes execution benchmarks and reports performance charts.
+* **`eigen profile <file.eig>`**: Profiles compiler passes, JIT tracing, VM runtime, and simulation memory.
+* **`eigen audit`**: Audits packages against target backend capabilities.
+  - `--strict`: In strict mode, compilation halts with code 1 if the target backend lacks support for any language constructs (e.g. structs on IBM QASM).
+* **`eigen doctor`**: Scans health metrics of local toolchains, Python/Rust configurations, and compiler sanity.
+* **`eigen lsp`**: Starts a JSON-RPC Language Server Protocol (LSP) daemon for IDE integration.
 
 ---
 
-## Getting Started
+## Advanced Execution & Simulation Engines
 
-### Installation
+Eigen features three specialized quantum simulation models to handle different circuit structures:
 
-Eigen requires **Python 3.10** or higher. There are no external dependencies, making it 100% portable.
+1. **State-Vector Simulator**: A contiguous double-precision state vector simulator. Suitable for general circuits up to $\approx 20$ qubits.
+2. **Sparse Simulator**: A mathematically exact simulator using sparse-matrix representations. Scales efficiently with sparsity rather than a fixed qubit size; ideal for low-weight or sparse-gate operations on up to 50+ qubits.
+3. **MPS (Matrix Product State) Tensor Network**: Simulates low-entanglement circuits up to 100+ qubits by decomposing the state vector using Singular Value Decomposition (SVD) and truncation dimensions.
+   - Entanglement entropy tracking.
+   - Cumulative truncation error logging.
+4. **GPU Engine 2.0**: Auto-detects and accelerates state operations using GPU acceleration (via CUDA, ROCm, or Metal depending on hardware).
 
-Clone the repository:
+### Trace-Based Adaptive VM JIT
+The VM contains a trace JIT engine. During bytecode loop execution, the tracer identifies repeating basic blocks, compiles them on-the-fly to optimized native bytecode paths, and caches them. This provides a 2x-5x execution speedup.
+
+---
+
+## Formal Verification & ZX-Calculus Engine
+
+The equivalence checker (`eigen verify-equiv`) verifies circuit similarity:
+
+1. **Fast-Reject Layer**: Builds and compares unitary matrices for small circuits to quickly catch discrepancies.
+2. **ZX-Calculus Graph Reduction**: Converts circuits into ZX graphs representing Z-spiders, X-spiders, and H-boxes. It applies simplification theorems:
+   - Spider fusion.
+   - Local complementation.
+   - Pivoting.
+   - Bialgebra and Hopf rules.
+   - Phase gadget fusion.
+
+If the simplified ZX graphs match, equivalence is formally proven. This is ideal for validating large Clifford+T circuits.
+
+---
+
+## Native Rust Extension & Native Runtime Layer
+
+To eliminate Python execution overhead, Eigen supports a compiled Rust extension library (`eigen_native` via PyO3):
+
+- **Native VM Loop**: Executes the EBC instruction set directly in a fast Rust loop (`execute_bytecode_native`).
+- **Native Simulators**: Offloads gate multiplication kernels (H, X, Y, Z, CNOT, CZ) to Rust.
+- **Fast Shortest-Path Router**: Accelerates topological swaps and routing on complex hardware coupling maps.
+- **Fast ZX Simplifier**: Performs graph operations directly in native memory.
+
+---
+
+## Incremental Cache & SSA LLVM Target
+
+Eigen 2.3 optimizes compilation speed and target adaptability:
+
+- **Incremental Cache**: Hashes AST, SSA, EQIR, ZX, and EBC files. If a file is unmodified, the compiler loads the cache directly, avoiding recompilation.
+- **LLVM / QIR Target**: Compiles SSA basic blocks into LLVM IR (`.ll`). This generates standard LLVM files referencing standard Quantum Intermediate Representation (QIR) bindings.
+
+---
+
+## Installation & Quick Start
+
+### 1. Prerequisites
+Ensure you have Python 3.10+ and a Rust toolchain (optional, for native modules) installed.
+
+### 2. Local Setup
+Clone the repository and install the development version:
 ```bash
 git clone https://github.com/Eigenresearch/Eigen.git
 cd Eigen
+pip install -e .
 ```
 
-### Running Tests
-Verify the installation by running the test suite (includes unit tests, conformance tests, and backend validation tests):
+### 3. Verification & Smoke Test
+Run the test suite to verify the installation:
 ```bash
-python -m unittest discover -s tests
+eigen test
 ```
 
-### Running an Example on VM
-Execute the Bell State creation program with tracing enabled to see step-by-step state amplitudes:
+### 4. Direct Execution
+Execute a hybrid quantum example on the VM with trace logging enabled:
 ```bash
-python src/main.py run examples/phase2_demo.eig --vm --trace
+eigen run examples/bell.eig --trace
 ```
 
-### Transpiling to Qiskit
-Transpile an Eigen program to a Python Qiskit Aer script:
+### 5. Compiling to LLVM IR
+Compile your code to standard LLVM IR / QIR:
 ```bash
-python src/main.py run examples/phase2_demo.eig --backend qiskit
+eigen build examples/bell.eig --llvm
 ```
 
 ---
 
-## Example Program: Bell State (`examples/phase2_demo.eig`)
+## Example Codebases
 
+### Bell State Execution (`examples/bell.eig`)
 ```eigen
-eigen 1.0
+eigen 2.3
+module quantum.bell
 
-# API Reference Demonstration: Person struct
-struct Person {
-    age: int,
-    score: float
-}
-
-# Classical recursive factorial function
-func factorial(n: int) -> int {
-    if n == 0 {
-        return 1
-    }
-    return n * factorial(n - 1)
-}
-
-# 1. Execute classical recursion
-let fact5: int = factorial(5)
-print fact5
-assert fact5 == 120
-
-# 2. Instantiate and mutate structure
-let p: Person = Person { age: 30, score: 95.5 }
-p.age = 31
-let page: int = p.age
-print page
-assert page == 31
-
-# 3. Create entangled quantum Bell state
 qubit q0
 qubit q1
 cbit c0
@@ -155,7 +218,6 @@ cbit c1
 H q0
 CNOT q0, q1
 
-# 4. Measure qubits and verify entanglement
 measure q0 -> c0
 measure q1 -> c1
 
@@ -163,3 +225,24 @@ print c0
 print c1
 assert c0 == c1
 ```
+
+### Hybrid Quantum-Classical Task Scheduler
+```eigen
+eigen 2.3
+
+func run_heavy_sim(id: int) -> int {
+    # Perform simulation steps
+    return id * 10
+}
+
+parallel {
+    task run_heavy_sim(1)
+    task run_heavy_sim(2)
+}
+```
+
+---
+
+## Detailed Language Specification Reference
+
+For a complete guide to grammar, language keywords, static type system rules, exceptions, standard library stubs, and MLIR configurations, refer to the [Language Specification](LANGUAGE.md).

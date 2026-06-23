@@ -1,8 +1,8 @@
 import unittest
-from src.lexer import Lexer
-from src.parser import Parser
-from src.ir_converter import EQIRConverter
-from src.optimizer import EQIROptimizer
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.ir.ir_converter import EQIRConverter
+from src.ir.optimizer import EQIROptimizer
 
 class TestOptimizer(unittest.TestCase):
     def test_gate_cancellation(self):

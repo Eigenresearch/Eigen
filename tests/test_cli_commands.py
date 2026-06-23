@@ -70,5 +70,32 @@ class TestCLICommands(unittest.TestCase):
             self.assertIn("factorial.eig", res.stdout)
             self.assertIn("fibonacci.eig", res.stdout)
 
+    def test_profile_command(self):
+        # Initialize a package first to get a template file
+        self.run_cli(["init", "profile_pkg"])
+        main_eig_path = os.path.join(self.temp_dir, "src", "main.eig")
+        
+        # Run profile on it
+        res = self.run_cli(["profile", main_eig_path])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("EIGEN RESOURCE PROFILE", res.stdout)
+        self.assertIn("Parse & Resolve Time", res.stdout)
+        self.assertIn("Typecheck Time", res.stdout)
+        self.assertIn("Peak Memory", res.stdout)
+        self.assertIn("Opcode Counts", res.stdout)
+
+    def test_audit_command(self):
+        # Initialize a package first to get a template file
+        self.run_cli(["init", "audit_pkg"])
+        
+        # Run audit on it
+        res = self.run_cli(["audit", "--backend", "qiskit"])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Compatibility Summary", res.stdout)
+        self.assertIn("Supported", res.stdout)
+        self.assertIn("Emulated", res.stdout)
+        self.assertIn("Unsupported", res.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

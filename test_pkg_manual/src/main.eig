@@ -1,0 +1,10 @@
+eigen 1.0
+
+# Template main entrypoint for Eigen package
+func main() -> int {
+    print "Hello from Eigen!"
+    return 0
+}
+
+let result: int = main()
+assert result == 0

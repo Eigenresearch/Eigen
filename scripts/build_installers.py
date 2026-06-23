@@ -48,7 +48,7 @@ def main():
     if system == 'windows':
         # Standalone executable is the installer
         win_exe = os.path.join(dist_dir, "eigen.exe")
-        target_win = os.path.join(dist_dir, "Eigen-2.2-Windows-x64.exe")
+        target_win = os.path.join(dist_dir, "Eigen-2.3-Windows-x64.exe")
         if os.path.exists(win_exe):
             if os.path.exists(target_win):
                 os.remove(target_win)
@@ -98,7 +98,7 @@ def main():
                 return
                 
         # Build AppImage
-        target_appimage = os.path.join(dist_dir, "Eigen-2.2-Linux.AppImage")
+        target_appimage = os.path.join(dist_dir, "Eigen-2.3-Linux.AppImage")
         if appimagetool_path.endswith(".AppImage"):
             print("Extracting appimagetool to avoid FUSE issues...")
             run_cmd([appimagetool_path, "--appimage-extract"])
@@ -115,11 +115,11 @@ def main():
         
         shutil.copy(os.path.join(dist_dir, "eigen"), os.path.join(usr_local_bin, "eigen"))
         
-        target_pkg = os.path.join(dist_dir, "Eigen-2.2-macOS.pkg")
+        target_pkg = os.path.join(dist_dir, "Eigen-2.3-macOS.pkg")
         pkgbuild_args = [
             "pkgbuild",
             "--identifier", "com.eigenresearch.eigen",
-            "--version", "2.2.0",
+            "--version", "2.3.0",
             "--root", pkg_root,
             target_pkg
         ]

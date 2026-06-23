@@ -1,7 +1,7 @@
 import unittest
-from src.lexer import Lexer
-from src.parser import Parser
-from src.type_checker import TypeChecker, TypeErrorException
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.semantic.type_checker import TypeChecker, TypeErrorException
 
 class TestTypeChecker(unittest.TestCase):
     def test_valid_types(self):

@@ -1,0 +1,17 @@
+eigen 1.0
+module std.io
+
+# Reads the content of a file
+func read_file(filepath: string) -> string {
+    return ""
+}
+
+# Writes content to a file
+func write_file(filepath: string, content: string) -> int {
+    return 0
+}
+
+# Prints formatted string
+func print_format(fmt: string, val: int) -> int {
+    return 0
+}

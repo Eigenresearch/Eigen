@@ -1,12 +1,14 @@
-from src.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph, EQIRNode
 from src.simulator import QuantumSimulator
 
 class EigenRuntime:
-    def __init__(self, trace_mode: bool = False):
-        self.simulator = QuantumSimulator()
+    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none'):
+        from src.noise.noise_model import NoiseModel
+        self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform)
         self.classical_store = {}  # cbit/int/float name -> value
         self.trace_mode = trace_mode
         self.trace_log = []
+        self.noise_model = noise_model if noise_model is not None else NoiseModel()
 
     def log_trace(self, msg: str):
         self.trace_log.append(msg)
@@ -30,6 +32,34 @@ class EigenRuntime:
                 amp_str = f"({real:.5f} {sign} {abs(imag):.5f}i)"
             parts.append(f"{amp_str} * |{state}> (prob={prob * 100:.1f}%)")
         return " + ".join(parts)
+
+    def evaluate_classical(self, expr) -> any:
+        if not isinstance(expr, str):
+            return expr
+        if expr in self.classical_store:
+            return self.classical_store[expr]
+        import re
+        if not re.match(r'^[a-zA-Z0-9_\s\(\)\=\!\+\-\*\/\<\>\.\,j]+$', expr):
+            return expr
+        
+        def repl(match):
+            word = match.group(0)
+            if word in ('True', 'False', 'None'):
+                return word
+            if word in self.classical_store:
+                val = self.classical_store[word]
+                if isinstance(val, bool):
+                    return str(val)
+                return repr(val)
+            if word.isidentifier():
+                return '0'
+            return word
+            
+        subbed = re.sub(r'[a-zA-Z_][a-zA-Z0-9_]*', repl, expr)
+        try:
+            return eval(subbed, {"__builtins__": None}, {})
+        except Exception:
+            return expr
 
     def execute(self, graph: EQIRGraph):
         nodes = graph.topological_sort()
@@ -88,6 +118,10 @@ class EigenRuntime:
                 else:
                     raise ValueError(f"Unknown gate type: {g_name}")
                 
+                # Apply global gate noise if active
+                for target in targets:
+                    self.noise_model.apply_gate_noise(self.simulator, target)
+                
                 args_str = f"({', '.join(map(str, args))})" if args else ""
                 self.log_trace(f"Applied gate: {g_name}{args_str} on {', '.join(targets)}")
                 self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
@@ -96,6 +130,7 @@ class EigenRuntime:
                 q_name = node.targets[0]
                 c_name = node.cbit_name
                 outcome = self.simulator.measure(q_name)
+                outcome = self.noise_model.apply_readout_noise(outcome)
                 self.classical_store[c_name] = outcome
                 self.log_trace(f"Measured qubit '{q_name}' -> stored in cbit '{c_name}' (value: {outcome})")
                 self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
@@ -104,17 +139,16 @@ class EigenRuntime:
                 print(f"[TRACE DIRECTIVE] Quantum State: {self.format_amplitudes()}")
                 
             elif node.type == 'PRINT':
-                val = node.print_expr
-                # If it's a string, it represents a variable reference
-                if isinstance(val, str):
-                    val = self.classical_store.get(val, f"<undefined variable '{val}'>")
+                val = self.evaluate_classical(node.print_expr)
                 print(f"[PRINT DIRECTIVE] {val}")
                 
             elif node.type == 'ASSERT':
                 left_ref, op, right_val = node.assert_cond
-                left_val = self.classical_store.get(left_ref, 0)
+                left_val = self.evaluate_classical(left_ref)
+                r_val = self.evaluate_classical(right_val)
+                
                 if op == '==':
-                    assert_ok = (left_val == right_val)
+                    assert_ok = (left_val == r_val)
                 else:
                     assert_ok = False
                     

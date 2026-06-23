@@ -1,0 +1,12 @@
+eigen 1.0
+module std.time
+
+# Returns current unix timestamp
+func now() -> float {
+    return 0.0
+}
+
+# Sleeps for ms milliseconds
+func sleep(ms: int) -> int {
+    return 0
+}

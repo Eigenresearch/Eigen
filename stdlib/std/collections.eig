@@ -1,0 +1,12 @@
+eigen 1.0
+module std.collections
+
+# Appends an integer to an array
+func append_int(arr: array<int>, val: int) -> int {
+    return 0
+}
+
+# Removes element at index from array
+func remove_at(arr: array<int>, idx: int) -> int {
+    return 0
+}

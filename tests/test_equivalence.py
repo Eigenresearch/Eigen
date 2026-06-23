@@ -1,7 +1,7 @@
 import unittest
-from src.lexer import Lexer
-from src.parser import Parser
-from src.ir_converter import EQIRConverter
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.ir.ir_converter import EQIRConverter
 from src.equivalence import EquivalenceChecker
 
 class TestEquivalence(unittest.TestCase):

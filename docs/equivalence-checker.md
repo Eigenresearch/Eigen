@@ -67,3 +67,11 @@ Equivalence verification is fully guaranteed to complete successfully for any va
 | Classical Condition Check | `FULL` | `PARTIAL` (static only) | `NONE` |
 | Dynamic Control Flow | `FULL` (via VM) | `NONE` | `NONE` |
 | Noise Operations | `FULL` (via VM) | `NONE` | `NONE` |
+
+---
+
+## 6. Canonical Hash Warning
+
+> [!WARNING]
+> **Canonical Hash Is Not a Mathematical Proof of Equivalence**
+> While two identical canonical graph hashes indicate a structural match, a canonical hash match alone is *not* a mathematically rigorous proof of equivalence. Two distinct quantum operations can occasionally map to the same hash representation (collisions). The Equivalence Checker uses hash matching only as a *fast-reject* pre-filtering heuristic, and always falls back to full mathematical unitary comparison or rewrite-based ZX reductions to verify correctness. Do not rely on hash equality alone for formal verification.

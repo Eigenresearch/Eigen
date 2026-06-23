@@ -1,5 +1,5 @@
 import time
-from src.ir_graph import EQIRGraph
+from src.ir.ir_graph import EQIRGraph
 
 class EQIRProfiler:
     def __init__(self):

@@ -28,7 +28,7 @@ If the program contains unsupported features (like structs or recursion), the tr
 ## 2. Examples Breakdown
 
 ### 2.1 Phase 2 Demo (`examples/phase2_demo.eig`)
-Showcases the features of the Eigen 2.1 language:
+Showcases the features of the Eigen 2.3 language:
 - Classical recursion (factorial)
 - Struct declaration, initialization, and field mutation
 - Quantum Bell state preparation

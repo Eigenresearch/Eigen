@@ -1,10 +1,10 @@
 import unittest
 import time
-from src.lexer import Lexer
-from src.parser import Parser
-from src.type_checker import TypeChecker
-from src.ebc_compiler import EBCCompiler
-from src.vm import EigenVM
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.semantic.type_checker import TypeChecker
+from src.backend.ebc_compiler import EBCCompiler
+from src.backend.vm import EigenVM
 
 class TestPerformance(unittest.TestCase):
     def test_vm_execution_performance(self):

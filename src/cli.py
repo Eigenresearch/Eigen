@@ -1,0 +1,119 @@
+import sys
+import os
+import argparse
+from src.compiler import get_workspace_root
+
+COMMAND_REGISTRY = {}
+
+def register_command(name):
+    def decorator(func):
+        COMMAND_REGISTRY[name] = func
+        return func
+    return decorator
+
+# Load all command handlers to trigger their @register_command decorations
+import src.commands
+
+def main():
+    parser = argparse.ArgumentParser(description="Eigen Language Command Line Interface (v2.3 — Helios)")
+    parser.add_argument("--strict", action="store_true", help="Enable strict backend capability matrix checks")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Run command
+    run_parser = subparsers.add_parser("run", help="Compile and execute an Eigen (.eig) or bytecode (.ebc) file")
+    run_parser.add_argument("file", help="Path to the source file")
+    run_parser.add_argument("--optimize", action="store_true", help="Enable EQIR v1.1 DAG optimization pass")
+    run_parser.add_argument("--trace", action="store_true", help="Enable execution step tracing")
+    run_parser.add_argument("--vm", action="store_true", help="Execute using the Eigen VM (EBC)")
+    run_parser.add_argument("--backend", choices=["sim", "qiskit", "ibmq", "sparse", "mps", "auto"], default="auto", help="Execution backend target")
+    run_parser.add_argument("--strict", action="store_true", help="Enforce strict backend capability validation")
+    run_parser.add_argument("--noise", choices=["depolarizing", "bit_flip", "phase_flip", "amplitude_damping", "readout_error"], help="Stochastic noise model target")
+    run_parser.add_argument("--noise-prob", type=float, default=0.0, help="Noise probability/rate")
+    run_parser.add_argument("--gpu", choices=["auto", "cuda", "rocm", "metal", "none"], default="none", help="GPU acceleration engine target")
+
+    # Debug command
+    debug_parser = subparsers.add_parser("debug", help="Debug Eigen source file interactively")
+    debug_parser.add_argument("file", help="Path to the source file")
+
+    # Verify-equiv command
+    equiv_parser = subparsers.add_parser("verify-equiv", help="Verify if two Eigen programs are mathematically equivalent")
+    equiv_parser.add_argument("file1", help="Path to first .eig file")
+    equiv_parser.add_argument("file2", help="Path to second .eig file")
+    equiv_parser.add_argument("--optimize", action="store_true", help="Enable optimization before verification")
+
+    # Estimate command
+    estimate_parser = subparsers.add_parser("estimate", help="Statically estimate quantum resources of an Eigen program")
+    estimate_parser.add_argument("file", help="Path to .eig file")
+
+    # Packaging commands
+    init_parser = subparsers.add_parser("init", help="Initialize a new Eigen package")
+    init_parser.add_argument("name", nargs="?", help="Name of the package")
+
+    add_parser = subparsers.add_parser("add", help="Add a dependency to eigen.toml")
+    add_parser.add_argument("dependency", help="Name of the dependency")
+    add_parser.add_argument("--ver", default="0.1.0", help="Dependency version")
+
+    subparsers.add_parser("install", help="Install and lock package dependencies")
+    
+    search_parser = subparsers.add_parser("search", help="Search the remote package registry")
+    search_parser.add_argument("query", help="Package search keyword")
+
+    build_parser = subparsers.add_parser("build", help="Build current package or compile .eig to .ebc")
+    build_parser.add_argument("file", nargs="?", help="Path to .eig file to compile to .ebc")
+    build_parser.add_argument("--optimize", action="store_true", help="Enable SSA IR optimizations on bytecode")
+    build_parser.add_argument("--llvm", action="store_true", help="Compile to LLVM IR (.ll) instead of EBC bytecode")
+
+    # Formatting and Docs commands
+    fmt_parser = subparsers.add_parser("fmt", help="Format an Eigen source file")
+    fmt_parser.add_argument("file", help="Path to the file to format")
+
+    doc_parser = subparsers.add_parser("doc", help="Generate API documentation from Eigen comments")
+    doc_parser.add_argument("file", help="Path to the source file")
+
+    # Testing command
+    subparsers.add_parser("test", help="Run the Eigen unit test suite")
+
+    # Exec command
+    exec_parser = subparsers.add_parser("exec", help="Execute compiled EBC bytecode (.ebc) directly on VM")
+    exec_parser.add_argument("file", help="Path to compiled EBC file")
+    exec_parser.add_argument("--trace", action="store_true", help="Enable VM trace mode")
+
+    # Bench command
+    subparsers.add_parser("bench", help="Run the benchmark suite and report performance results")
+
+    # Profile command
+    profile_parser = subparsers.add_parser("profile", help="Run the memory and time execution profiler")
+    profile_parser.add_argument("file", help="Path to the source file")
+    profile_parser.add_argument("--flamegraph", action="store_true", help="Output ASCII flamegraph of compiler/runtime phases")
+
+    # Doctor command
+    subparsers.add_parser("doctor", help="Diagnose local compiler setup and environment")
+
+    # Reproduce command
+    subparsers.add_parser("reproduce", help="Generate research reproducibility audit log")
+
+    # Verify command
+    verify_parser = subparsers.add_parser("verify", help="Static verification of Eigen source file")
+    verify_parser.add_argument("file", help="Path to .eig file to verify")
+
+    # Audit command
+    audit_parser = subparsers.add_parser("audit", help="Audit project manifest and capability usage")
+    audit_parser.add_argument("--strict", action="store_true", help="Fail compilation on any capability warnings")
+    audit_parser.add_argument("--research", action="store_true", help="Output research reproducibility report")
+    audit_parser.add_argument("--backend", default="qiskit", choices=["qiskit", "ibmq"], help="Target backend to audit compatibility against")
+
+    # LSP command
+    subparsers.add_parser("lsp", help="Run basic Language Server Protocol host")
+
+    args = parser.parse_args()
+    workspace_root = get_workspace_root()
+
+    # Dispatch to registered command handler
+    if args.command in COMMAND_REGISTRY:
+        COMMAND_REGISTRY[args.command](args, workspace_root)
+    else:
+        print(f"Error: Unknown command '{args.command}'", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

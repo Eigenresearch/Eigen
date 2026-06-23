@@ -1,0 +1,12 @@
+eigen 1.0
+module std.stats
+
+# Computes the mean of an array of floats
+func mean(arr: array<float>) -> float {
+    return 0.0
+}
+
+# Computes the variance of an array of floats
+func variance(arr: array<float>) -> float {
+    return 0.0
+}

@@ -1,4 +1,4 @@
-from src.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph, EQIRNode
 from src.simulator import QuantumSimulator
 
 class EquivalenceChecker:
@@ -91,7 +91,7 @@ class EquivalenceChecker:
         n_qubits = len(all_qubits)
         if n_qubits > 8:
             # Fallback: Rewrite-Based / Canonicalization Equivalence Check
-            from src.optimizer import EQIROptimizer
+            from src.ir.optimizer import EQIROptimizer
             opt = EQIROptimizer()
             g1_opt = opt.optimize(graph1)
             g2_opt = opt.optimize(graph2)

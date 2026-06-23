@@ -1,4 +1,4 @@
-# Eigen 2.1 Runtime & VM Specification
+# Eigen 2.3 Runtime & VM Specification
 
 This document details the architecture and operational mechanics of the **Eigen Runtime** and the **Eigen VM** execution engines.
 
@@ -36,9 +36,11 @@ The topological runtime executes static, inlined quantum DAGs:
 ## 2. Quantum Simulator Integration
 
 Both the VM and the Runtime integrate with the `simulator.py` core to execute quantum gates:
-- **State Vector Representation**: Manages the system wavefunction as a 1D array of \(2^N\) complex amplitudes.
-- **Unitary Gate Application**: Computes Kronecker products of gates and multiplies them against the state vector.
-- **Measurement and Wavefunction Collapse**: Collapses the wavefunction probabilistically and returns classical bit outcomes.
+- **State Vector Representation**: Manages the system wavefunction dynamically using a tiered model:
+  - **$\le 20$ qubits**: Represented as a dense 1D array of \(2^N\) complex amplitudes.
+  - **$> 20$ qubits**: Switches to a sparse hash map representation mapping active states (with amplitudes $> 10^{-12}$) to complex values, enabling large scale simulations for highly sparse workloads. (Note: Dense superposition-heavy circuits remain exponential; the sparse simulator scales with sparsity, not a fixed qubit count limit.)
+- **Unitary Gate Application**: Applies gates exactly to the dense vector or sparse map representation.
+- **Measurement and Wavefunction Collapse**: Collapses the wavefunction probabilistically and returns classical bit outcomes, normalizing the resulting dense or sparse state.
 - **Decoherence Noise**: Integrates depolarizing and bitflip noise channels directly into the state-vector transformations.
 
 ---

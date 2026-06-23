@@ -1,11 +1,11 @@
 import unittest
 import ast as py_ast
-from src.lexer import Lexer
-from src.parser import Parser
-from src.type_checker import TypeChecker
-from src.ir_converter import EQIRConverter
-from src.qiskit_backend import QiskitBackend
-from src.import_resolver import ImportResolver
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
+from src.semantic.type_checker import TypeChecker
+from src.ir.ir_converter import EQIRConverter
+from src.backend.qiskit_backend import QiskitBackend
+from src.semantic.import_resolver import ImportResolver
 
 class TestBackendTranspilationValidation(unittest.TestCase):
     def transpile_code(self, source: str) -> tuple[str, object]:

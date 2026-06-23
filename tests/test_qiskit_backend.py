@@ -1,6 +1,6 @@
 import unittest
-from src.ir_graph import EQIRGraph
-from src.qiskit_backend import QiskitBackend
+from src.ir.ir_graph import EQIRGraph
+from src.backend.qiskit_backend import QiskitBackend
 
 class TestQiskitBackend(unittest.TestCase):
     def test_transpile_bell_state(self):

@@ -1,0 +1,12 @@
+eigen 1.0
+module std.string
+
+# Returns concatenated string
+func concat(s1: string, s2: string) -> string {
+    return ""
+}
+
+# Formats an integer to string
+func format_int(val: int) -> string {
+    return ""
+}

@@ -13,3 +13,9 @@ dist/
 *.spec
 *.ebc
 *.exe
+
+# Ignore crash logs
+crash-*.log
+.venv/
+eigen_lang.egg-info/
+native/rust/target/

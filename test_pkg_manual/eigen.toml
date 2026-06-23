@@ -1,0 +1,5 @@
+[package]
+name = "test_pkg_manual"
+version = "1.0.0"
+
+[dependencies]
