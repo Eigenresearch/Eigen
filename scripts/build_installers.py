@@ -60,6 +60,7 @@ def main():
 
     elif system == 'linux':
         # Create AppImage
+        os.environ["ARCH"] = "x86_64"
         app_dir = os.path.abspath("Eigen.AppDir")
         usr_bin = os.path.join(app_dir, "usr", "bin")
         os.makedirs(usr_bin, exist_ok=True)
