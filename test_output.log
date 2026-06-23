@@ -1,0 +1,615 @@
+test_transpiled_execution_smoke_test (backend_validation.test_backend_transpilation.TestBackendTranspilationValidation) ... ok
+test_transpiled_valid_python_syntax (backend_validation.test_backend_transpilation.TestBackendTranspilationValidation) ... ok
+test_binary_garbage (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_comment_stress (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_deeply_nested_braces (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_empty_input (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_extremely_long_identifier (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_gate_without_target (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_incomplete_func (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_incomplete_let (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_incomplete_measure (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_mixed_valid_invalid (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_newlines_stress (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_null_bytes (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_only_numbers (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_only_operators (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_random_ascii_strings (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_random_token_sequences (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_repeated_keywords (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_single_keyword (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_unbalanced_braces (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_unicode_characters (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+test_whitespace_only (fuzz.test_parser_fuzz.TestParserFuzz) ... ok
+optimizer.test_dead_gate_elimination (unittest.loader._FailedTest) ... ERROR
+optimizer.test_gate_fusion (unittest.loader._FailedTest) ... ERROR
+optimizer.test_optimizer_equivalence (unittest.loader._FailedTest) ... ERROR
+property.test_property_equivalence (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_collections (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_exceptions (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_hybrid (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_imports (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_measurement (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_qfunc (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_recursion (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_runtime_errors (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_structs (unittest.loader._FailedTest) ... ERROR
+runtime_conformance.test_trace_print_assert (unittest.loader._FailedTest) ... ERROR
+test_cache_save_and_load (test_cache.TestCache) ... ok
+test_audit_command (test_cli_commands.TestCLICommands) ... FAIL
+test_bench_command (test_cli_commands.TestCLICommands) ... FAIL
+test_build_and_exec_command (test_cli_commands.TestCLICommands) ... FAIL
+test_init_command (test_cli_commands.TestCLICommands) ... FAIL
+test_profile_command (test_cli_commands.TestCLICommands) ... FAIL
+test_debugger (unittest.loader._FailedTest) ... ERROR
+test_equivalence (unittest.loader._FailedTest) ... ERROR
+test_invalid_character (test_lexer.TestLexer) ... ok
+test_operators (test_lexer.TestLexer) ... ok
+test_simple_program (test_lexer.TestLexer) ... ok
+test_memory_safety (unittest.loader._FailedTest) ... ERROR
+test_gate_cancellation (test_optimizer.TestOptimizer) ... ok
+test_rotation_merging (test_optimizer.TestOptimizer) ... ok
+test_parse_declarations (test_parser.TestParser) ... ok
+test_parse_gates_and_measures (test_parser.TestParser) ... ok
+test_parse_if_stmt (test_parser.TestParser) ... ok
+test_performance (unittest.loader._FailedTest) ... ERROR
+test_phase2 (unittest.loader._FailedTest) ... ERROR
+test_transpile_bell_state (test_qiskit_backend.TestQiskitBackend) ... ok
+test_adjacent_cnot_no_swaps (test_routing.TestBasicSwapRouter) ... ok
+test_empty_circuit (test_routing.TestBasicSwapRouter) ... ok
+test_initial_and_final_mapping (test_routing.TestBasicSwapRouter) ... ok
+test_multiple_gates_routing (test_routing.TestBasicSwapRouter) ... ok
+test_non_adjacent_cnot_inserts_swaps (test_routing.TestBasicSwapRouter) ... ok
+test_non_adjacent_long_distance (test_routing.TestBasicSwapRouter) ... ok
+test_routed_circuit_summary (test_routing.TestBasicSwapRouter) ... ok
+test_single_qubit_gates_no_swaps (test_routing.TestBasicSwapRouter) ... ok
+test_too_many_qubits_raises (test_routing.TestBasicSwapRouter) ... ok
+test_bidirectional_edges (test_routing.TestCouplingMap) ... ok
+test_custom_topology (test_routing.TestCouplingMap) ... ok
+test_distance_grid (test_routing.TestCouplingMap) ... ok
+test_distance_linear (test_routing.TestCouplingMap) ... ok
+test_grid_connectivity (test_routing.TestCouplingMap) ... ok
+test_grid_creation (test_routing.TestCouplingMap) ... ok
+test_heavy_hex (test_routing.TestCouplingMap) ... ok
+test_linear_connectivity (test_routing.TestCouplingMap) ... ok
+test_linear_creation (test_routing.TestCouplingMap) ... ok
+test_neighbors_grid (test_routing.TestCouplingMap) ... ok
+test_neighbors_linear (test_routing.TestCouplingMap) ... ok
+test_shortest_path_adjacent (test_routing.TestCouplingMap) ... ok
+test_shortest_path_linear (test_routing.TestCouplingMap) ... ok
+test_shortest_path_same_node (test_routing.TestCouplingMap) ... ok
+test_adjacent_no_swaps (test_routing.TestGreedyRouter) ... ok
+test_greedy_vs_basic_produces_valid_result (test_routing.TestGreedyRouter) ... ok
+test_grid_topology (test_routing.TestGreedyRouter) ... ok
+test_non_adjacent_inserts_swaps (test_routing.TestGreedyRouter) ... ok
+test_single_qubit_only (test_routing.TestGreedyRouter) ... ok
+test_route_empty_graph (test_routing.TestRouteEQIRGraph) ... ok
+test_route_requires_swaps (test_routing.TestRouteEQIRGraph) ... ok
+test_route_simple_circuit (test_routing.TestRouteEQIRGraph) ... ok
+test_route_too_few_physical_qubits (test_routing.TestRouteEQIRGraph) ... ok
+test_route_with_greedy (test_routing.TestRouteEQIRGraph) ... ok
+test_scaled_suite (unittest.loader._FailedTest) ... ERROR
+test_simulator (unittest.loader._FailedTest) ... ERROR
+test_common_subexpression_elimination (test_ssa.TestSSAIRBuilder) ... ok
+test_conditional_branch_phi (test_ssa.TestSSAIRBuilder) ... ok
+test_constant_propagation_and_folding (test_ssa.TestSSAIRBuilder) ... ok
+test_copy_propagation (test_ssa.TestSSAIRBuilder) ... ok
+test_dead_store_elimination (test_ssa.TestSSAIRBuilder) ... ok
+test_sccp_branch_elimination (test_ssa.TestSSAIRBuilder) ... ok
+test_simple_ssa_rename (test_ssa.TestSSAIRBuilder) ... ok
+test_gate_on_non_qubit (test_type_checker.TestTypeChecker) ... ok
+test_measure_target_mismatch (test_type_checker.TestTypeChecker) ... ok
+test_parameter_count_mismatch (test_type_checker.TestTypeChecker) ... ok
+test_valid_types (test_type_checker.TestTypeChecker) ... ok
+test_vm (unittest.loader._FailedTest) ... ERROR
+test_incremental_caching (test_weak_spots_fixes.TestWeakSpotsFixes) ... ok
+test_llvm_compiler_simple (test_weak_spots_fixes.TestWeakSpotsFixes) ... ok
+test_task_scheduler_dag (test_weak_spots_fixes.TestWeakSpotsFixes) ... ok
+test_cnot_identities (test_zx.TestZXCalculus) ... ok
+test_hadamard_identities (test_zx.TestZXCalculus) ... ok
+
+======================================================================
+ERROR: optimizer.test_dead_gate_elimination (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: optimizer.test_dead_gate_elimination
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/optimizer/test_dead_gate_elimination.py", line 6, in <module>
+    from src.equivalence import EquivalenceChecker
+  File "/home/runner/work/Eigen/Eigen/src/equivalence.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: optimizer.test_gate_fusion (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: optimizer.test_gate_fusion
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/optimizer/test_gate_fusion.py", line 6, in <module>
+    from src.equivalence import EquivalenceChecker
+  File "/home/runner/work/Eigen/Eigen/src/equivalence.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: optimizer.test_optimizer_equivalence (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: optimizer.test_optimizer_equivalence
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/optimizer/test_optimizer_equivalence.py", line 6, in <module>
+    from src.equivalence import EquivalenceChecker
+  File "/home/runner/work/Eigen/Eigen/src/equivalence.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: property.test_property_equivalence (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: property.test_property_equivalence
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/property/test_property_equivalence.py", line 9, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_collections (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_collections
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_collections.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_exceptions (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_exceptions
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_exceptions.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_hybrid (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_hybrid
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_hybrid.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_imports (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_imports
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_imports.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_measurement (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_measurement
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_measurement.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_qfunc (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_qfunc
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_qfunc.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_recursion (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_recursion
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_recursion.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_runtime_errors (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_runtime_errors
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_runtime_errors.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_structs (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_structs
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_structs.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: runtime_conformance.test_trace_print_assert (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: runtime_conformance.test_trace_print_assert
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/test_trace_print_assert.py", line 2, in <module>
+    from tests.runtime_conformance.conformance_helper import run_eigen_code
+  File "/home/runner/work/Eigen/Eigen/tests/runtime_conformance/conformance_helper.py", line 5, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_debugger (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_debugger
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_debugger.py", line 5, in <module>
+    from src.debugger.debugger import EigenDebugger
+  File "/home/runner/work/Eigen/Eigen/src/debugger/debugger.py", line 3, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_equivalence (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_equivalence
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_equivalence.py", line 5, in <module>
+    from src.equivalence import EquivalenceChecker
+  File "/home/runner/work/Eigen/Eigen/src/equivalence.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_memory_safety (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_memory_safety
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_memory_safety.py", line 4, in <module>
+    from src.backend.vm import EigenVM, UnsupportedBytecodeVersionError
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_performance (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_performance
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_performance.py", line 7, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_phase2 (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_phase2
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_phase2.py", line 6, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_scaled_suite (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_scaled_suite
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_scaled_suite.py", line 13, in <module>
+    from src.backend.vm import EigenVM
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_simulator (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_simulator
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_simulator.py", line 3, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+ERROR: test_vm (unittest.loader._FailedTest)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_vm
+Traceback (most recent call last):
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 436, in _find_test_path
+    module = self._get_module_from_name(name)
+  File "/opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/unittest/loader.py", line 377, in _get_module_from_name
+    __import__(name)
+  File "/home/runner/work/Eigen/Eigen/tests/test_vm.py", line 9, in <module>
+    from src.backend.vm import EigenVM, VMRef
+  File "/home/runner/work/Eigen/Eigen/src/backend/vm.py", line 2, in <module>
+    from src.simulator import QuantumSimulator
+  File "/home/runner/work/Eigen/Eigen/src/simulator.py", line 5, in <module>
+    from src.tensor_network.mps import MPSSimulator
+  File "/home/runner/work/Eigen/Eigen/src/tensor_network/mps.py", line 1, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+======================================================================
+FAIL: test_audit_command (test_cli_commands.TestCLICommands)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/Eigen/Eigen/tests/test_cli_commands.py", line 93, in test_audit_command
+    self.assertEqual(res.returncode, 0)
+AssertionError: 1 != 0
+
+======================================================================
+FAIL: test_bench_command (test_cli_commands.TestCLICommands)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/Eigen/Eigen/tests/test_cli_commands.py", line 68, in test_bench_command
+    self.assertEqual(res.returncode, 0)
+AssertionError: 1 != 0
+
+======================================================================
+FAIL: test_build_and_exec_command (test_cli_commands.TestCLICommands)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/Eigen/Eigen/tests/test_cli_commands.py", line 49, in test_build_and_exec_command
+    self.assertEqual(res.returncode, 0)
+AssertionError: 1 != 0
+
+======================================================================
+FAIL: test_init_command (test_cli_commands.TestCLICommands)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/Eigen/Eigen/tests/test_cli_commands.py", line 28, in test_init_command
+    self.assertEqual(res.returncode, 0)
+AssertionError: 1 != 0
+
+======================================================================
+FAIL: test_profile_command (test_cli_commands.TestCLICommands)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/runner/work/Eigen/Eigen/tests/test_cli_commands.py", line 80, in test_profile_command
+    self.assertEqual(res.returncode, 0)
+AssertionError: 1 != 0
+
+----------------------------------------------------------------------
+Ran 109 tests in 0.388s
+
+FAILED (failures=5, errors=22)
+[PRINT DIRECTIVE] cbit c1: c1
+[PRINT DIRECTIVE] cbit c0: c0
+Simulation results counts: {'00': 512, '11': 512}
