@@ -24,6 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          python -m pip install .
 
       - name: Run Test Suite
         run: |
@@ -56,6 +57,11 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
       - name: Build Windows Installer
         run: |
           python scripts/build_installers.py > win_build.log 2>&1 || (type win_build.log && exit 1)
@@ -78,6 +84,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
 
       - name: Install appimagetool dependencies
         run: |
@@ -106,6 +117,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
 
       - name: Build macOS PKG
         run: |
