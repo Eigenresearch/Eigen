@@ -180,6 +180,75 @@ class TestBasicSwapRouter(unittest.TestCase):
         self.assertIn('initial_mapping', summary)
         self.assertIn('final_mapping', summary)
 
+    def test_routed_circuit_summary_exact_values(self):
+        """Verify exact summary JSON for CNOT(q0,q2) on linear-3."""
+        cm = CouplingMap.linear(3)
+        router = BasicSwapRouter(cm)
+        ops = [{'gate': 'CNOT', 'targets': ['q0', 'q2']}]
+        result = router.route(ops, ['q0', 'q1', 'q2'])
+        # Trace: path(0,2)=[0,1,2] -> SWAP(0,1) -> CNOT(1,2)
+        expected_summary = {
+            'total_gates': 2,
+            'swap_count': 1,
+            'initial_mapping': {'q0': 0, 'q1': 1, 'q2': 2},
+            'final_mapping': {'q0': 1, 'q1': 0, 'q2': 2},
+        }
+        self.assertEqual(result.summary(), expected_summary)
+        # Verify exact operation sequence
+        self.assertEqual(result.operations, [
+            ('SWAP', [0, 1], []),
+            ('CNOT', [1, 2], []),
+        ])
+
+    def test_long_distance_summary_exact_values(self):
+        """Verify exact summary JSON for CNOT(q0,q4) on linear-5."""
+        cm = CouplingMap.linear(5)
+        router = BasicSwapRouter(cm)
+        ops = [{'gate': 'CNOT', 'targets': ['q0', 'q4']}]
+        result = router.route(ops, ['q0', 'q1', 'q2', 'q3', 'q4'])
+        # Trace: path(0,4)=[0,1,2,3,4] -> SWAP(0,1),SWAP(1,2),SWAP(2,3) -> CNOT(3,4)
+        expected_summary = {
+            'total_gates': 4,
+            'swap_count': 3,
+            'initial_mapping': {'q0': 0, 'q1': 1, 'q2': 2, 'q3': 3, 'q4': 4},
+            'final_mapping': {'q0': 3, 'q1': 0, 'q2': 1, 'q3': 2, 'q4': 4},
+        }
+        self.assertEqual(result.summary(), expected_summary)
+        self.assertEqual(result.operations, [
+            ('SWAP', [0, 1], []),
+            ('SWAP', [1, 2], []),
+            ('SWAP', [2, 3], []),
+            ('CNOT', [3, 4], []),
+        ])
+
+    def test_multi_gate_cascade_exact_values(self):
+        """Verify exact output for H + adjacent CNOT + non-adjacent CNOT."""
+        cm = CouplingMap.linear(4)
+        router = BasicSwapRouter(cm)
+        ops = [
+            {'gate': 'H', 'targets': ['q0']},
+            {'gate': 'CNOT', 'targets': ['q0', 'q1']},
+            {'gate': 'CNOT', 'targets': ['q0', 'q3']},
+        ]
+        result = router.route(ops, ['q0', 'q1', 'q2', 'q3'])
+        # H(q0) -> phys 0, no swap
+        # CNOT(q0,q1) -> phys 0,1 adjacent, no swap
+        # CNOT(q0,q3) -> phys 0,3 path=[0,1,2,3] -> SWAP(0,1),SWAP(1,2) -> CNOT(2,3)
+        expected_summary = {
+            'total_gates': 5,
+            'swap_count': 2,
+            'initial_mapping': {'q0': 0, 'q1': 1, 'q2': 2, 'q3': 3},
+            'final_mapping': {'q0': 2, 'q1': 0, 'q2': 1, 'q3': 3},
+        }
+        self.assertEqual(result.summary(), expected_summary)
+        self.assertEqual(result.operations, [
+            ('H', [0], []),
+            ('CNOT', [0, 1], []),
+            ('SWAP', [0, 1], []),
+            ('SWAP', [1, 2], []),
+            ('CNOT', [2, 3], []),
+        ])
+
 
 class TestGreedyRouter(unittest.TestCase):
 

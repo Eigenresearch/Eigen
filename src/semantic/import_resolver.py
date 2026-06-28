@@ -57,23 +57,21 @@ class ImportResolver:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         
         def parse_file(file_path: str) -> ProgramNode:
-            try:
-                mtime = os.path.getmtime(file_path)
-            except Exception:
-                mtime = 0.0
-
-            cached = _PARSED_AST_CACHE.get(file_path)
-            if cached and cached[0] == mtime:
-                return cached[1]
-
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+
+            import hashlib
+            content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+            cached = _PARSED_AST_CACHE.get(file_path)
+            if cached and cached[0] == content_hash:
+                return cached[1]
 
             lexer = Lexer(content)
             tokens = lexer.tokenize()
             parser = Parser(tokens)
             ast = parser.parse()
-            _PARSED_AST_CACHE[file_path] = (mtime, ast)
+            _PARSED_AST_CACHE[file_path] = (content_hash, ast)
             return ast
 
         def dfs_resolve(module_name: str, file_path: str):

@@ -2,6 +2,7 @@ import unittest
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.ir.ir_converter import EQIRConverter
+from src.ir.ir_graph import EQIRGraph
 from src.equivalence import EquivalenceChecker
 
 class TestEquivalence(unittest.TestCase):
@@ -64,6 +65,29 @@ class TestEquivalence(unittest.TestCase):
         
         checker = EquivalenceChecker()
         self.assertTrue(checker.are_equivalent(c1, c2))
+
+    def test_direct_negative_cases(self):
+        checker = EquivalenceChecker()
+        
+        # H vs X
+        g1 = EQIRGraph()
+        g1.add_operation('ALLOC', targets=["q0"])
+        g1.add_operation('GATE', gate_name='H', targets=["q0"])
+        g2 = EQIRGraph()
+        g2.add_operation('ALLOC', targets=["q0"])
+        g2.add_operation('GATE', gate_name='X', targets=["q0"])
+        self.assertFalse(checker.are_equivalent(g1, g2))
+        
+        # CNOT vs SWAP
+        g3 = EQIRGraph()
+        g3.add_operation('ALLOC', targets=["q0"])
+        g3.add_operation('ALLOC', targets=["q1"])
+        g3.add_operation('GATE', gate_name='CNOT', targets=["q0", "q1"])
+        g4 = EQIRGraph()
+        g4.add_operation('ALLOC', targets=["q0"])
+        g4.add_operation('ALLOC', targets=["q1"])
+        g4.add_operation('GATE', gate_name='SWAP', targets=["q0", "q1"])
+        self.assertFalse(checker.are_equivalent(g3, g4))
 
 if __name__ == "__main__":
     unittest.main()

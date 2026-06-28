@@ -42,11 +42,12 @@ def profile_command(args, workspace_root):
     t_typecheck = (time.perf_counter() - t0) * 1000.0
     
     t0 = time.perf_counter()
-    converter = EQIRConverter()
-    graph = converter.convert(ast)
+    from src.compiler import compile_to_eqir
+    graph, ast = compile_to_eqir(args.file, workspace_root)
     t_eqir = (time.perf_counter() - t0) * 1000.0
     
     t0 = time.perf_counter()
+    # Note: EQIROptimizer is already integrated into the compiler/optimizations, or can be run here
     optimizer = EQIROptimizer()
     graph = optimizer.optimize(graph)
     t_opt = (time.perf_counter() - t0) * 1000.0
@@ -54,8 +55,6 @@ def profile_command(args, workspace_root):
     t0 = time.perf_counter()
     compiler = EBCCompiler()
     instrs = compiler.compile_eqir(graph)
-    from src.ir.ssa.optimizer import optimize_ebc
-    instrs = optimize_ebc(instrs)
     t_ebc_compile = (time.perf_counter() - t0) * 1000.0
     
     vm = EigenVM()
@@ -94,6 +93,10 @@ def profile_command(args, workspace_root):
     print(f"Call Depth Peak:       {len(vm.call_stack)}")
     print(f"Quantum Ops:           {quantum_ops} gates")
     print(f"Opcode Counts:         {opcode_counts_str}")
+    print("-" * 60)
+    print(f"JIT Executions:        {vm.jit_hits}")
+    print(f"JIT Deopts:            {vm.jit_deopts}")
+    print(f"JIT Compiled Blocks:   {len(vm.jit.GLOBAL_CACHE.cache)}")
     print("=" * 60)
 
     if getattr(args, 'flamegraph', False):

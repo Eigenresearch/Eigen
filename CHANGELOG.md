@@ -2,31 +2,35 @@
 
 All notable changes to the Eigen programming language project will be documented in this file.
 
+## [2.4.0] - 2026-06-29
+
+Release 2.4.0 "Mone" brings a completely decoupled, high-performance compilation and execution pipeline, a zero-copy native Rust frontend, Salsa-inspired incremental compiler caching, JIT v2 optimizations, and standalone LLVM/QIR native executable compilation.
+
+### Added
+- **Zero-CPython Standalone AOT Compiler:** Supports compiling to standalone machine binaries (`.exe` on Windows) free of CPython dependencies using a PyO3 feature gate and `cargo build --no-default-features`.
+- **Zero-Copy Rust Frontend:** Zero-copy lexer slicing and Pratt-precedence parser implemented in native Rust, yielding a 9.7x compile speedup while instantiating standard mutable Python AST structures.
+- **Salsa-Query Caching Database:** Tracks file content hashes (SHA-256) recursively to check intermediate compilation step validity (AST, SSA, EQIR, ZX, EBC) and bypass recompilation.
+- **QIR Specification Compliant Emission:** Generates standard opaque pointer declarations and function bindings (`__quantum__rt__qubit_allocate`, etc.) with `--qir` CLI build option.
+- **JIT v2 Loop Optimizations:** Implements loop-invariant code motion (LICM), constant folding, trace specialization, and shape/type guards with deoptimization fallbacks.
+- **QFT Binary Conformance:** Added Quantum Fourier Transform example in `examples/qft.eig` and verified AOT compilation.
+
+### Fixed
+- **MSVC link.exe Compatibility:** Replaced invalid `/DEBUG:NONE` options with `/RELEASE` (and `/OPT:REF` for symbol stripping) and resolved LTO static library linkage mismatches.
+- **Windows Path Mount Bug:** Resolved `os.path.relpath` ValueError on Windows when paths cross different drive mounts (e.g. `C:` and `D:`).
+- **Stale AST Cache Bug:** Replaced timestamp-based AST caching in `ImportResolver` with file content hashing to handle sub-second writes.
+- **Early Dependency Wiping Bug:** Fixed early dependency resets in `QueryDb.execute_query` before cache check evaluation.
+
+## [2.3.0] - 2026-06-23
+
+Release 2.3.0 "Helios" features VM integer opcode dispatch, memory layout optimizations using slots, and advanced simulation backends.
+
+### Added
+- **VM Opcode Optimizations:** Flat list-based opcode routing and integer-keyed instruction mapping replacing slow string dictionary lookups.
+- **Memory Footprint Optimization:** Implemented `__slots__` layout for `Instruction`, `ActivationFrame`, and `HeapObject` to reduce memory churn.
+- **Advanced Simulators:** Added Sparse Simulator and Matrix Product State (MPS) Tensor Network Simulator.
+- **GPU Acceleration:** CUDA/ROCm/Metal state vector simulation support.
+- **Formal Verification v2:** ZX-Calculus graph reduction engine (spider fusion, local complementation, pivoting, phase gadgets).
+
 ## [1.0.0] - 2026-06-22
 
 Initial release of Eigen v1.0 MVP, featuring a modular compiler frontend, a graph-based Intermediate Representation (EQIR v1.1), an optimizer, a state-vector simulator, and a mathematical equivalence checker.
-
-### Added
-- **Compiler Frontend**:
-  - `lexer.py` character scanner with column and line tracking.
-  - `parser.py` recursive descent parser translating source to AST.
-  - `import_resolver.py` supporting dotted module paths (e.g. `import quantum.bell`) and recursive path resolution in `stdlib/` and workspace.
-  - `type_checker.py` validating safety checks for `qubit`, `cbit`, `int`, and `float` variables.
-- **EQIR v1.1 (Eigen Quantum Intermediate Representation v1)**:
-  - Directed Acyclic Graph (DAG) wire dependency structure in `ir_graph.py`.
-  - Inlining of quantum function calls (`qfunc`) into flat DAG representations in `ir_converter.py`.
-- **DAG Optimizer**:
-  - Redundant self-inverse gate cancellation (`H; H` and `X; X`).
-  - Consecutive rotation gate merging (`RX(a); RX(b) -> RX(a+b)`).
-- **Quantum State-Vector Simulator**:
-  - `simulator.py` supporting standard gates (H, X, Y, Z, S, T), rotation gates (RX, RY, RZ), 2-qubit gates (CNOT, CZ, SWAP), and probabilistic measurement wavefunction collapse.
-- **Eigen Runtime**:
-  - Topological scheduling of graph nodes.
-  - Tracing mode printing complex amplitude states and bit changes.
-  - Assertions validation.
-- **Equivalence Checker**:
-  - Mathematical verification of circuit equivalence up to 8 qubits using exact unitary matrix comparison.
-- **Standard Library**:
-  - Modules for Bell state, GHZ state, Deutsch algorithm oracles, and Grover diffuser.
-- **Test Suite**:
-  - 19 unit tests checking all compiler, optimizer, and simulator features.

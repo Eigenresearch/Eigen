@@ -42,6 +42,11 @@ class Parser:
         return tok
 
     def parse(self) -> ProgramNode:
+        from src.frontend.ast import NATIVE_AVAILABLE
+        if NATIVE_AVAILABLE and hasattr(self.tokens, "source") and self.tokens.source is not None:
+            import eigen_native
+            return eigen_native.parse_native(self.tokens.source)
+
         # File must start with version header: "eigen 1.0" or similar
         self.consume(TokenType.EIGEN, "Expected 'eigen' header directive at start of file")
         version_tok = self.match(TokenType.FLOAT_LIT, TokenType.INT_LIT)

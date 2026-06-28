@@ -23,7 +23,7 @@ class CFGBuilder:
         # 1. Identify leaders (start indices of basic blocks)
         leaders = {0}
         for idx, inst in enumerate(instructions):
-            if inst.opcode in (Opcode.JMP, Opcode.JMP_IF_FALSE, Opcode.JMP_IF_TRUE, Opcode.CALL):
+            if inst.opcode in (Opcode.JMP, Opcode.JMP_IF_FALSE, Opcode.JMP_IF_TRUE):
                 # Target is a leader
                 if isinstance(inst.arg, int):
                     leaders.add(inst.arg)
@@ -32,6 +32,10 @@ class CFGBuilder:
                 # Instruction after jump is a leader
                 if idx + 1 < len(instructions):
                     leaders.add(idx + 1)
+            elif inst.opcode == Opcode.CALL:
+                # Target of call is a leader (function entry)
+                if isinstance(inst.arg, tuple) and isinstance(inst.arg[0], int):
+                    leaders.add(inst.arg[0])
             elif inst.opcode in (Opcode.RET, Opcode.HALT):
                 if idx + 1 < len(instructions):
                     leaders.add(idx + 1)

@@ -1,10 +1,11 @@
 import random
 
 class NoiseModel:
-    def __init__(self, noise_type: str = None, noise_prob: float = 0.0):
+    def __init__(self, noise_type: str = None, noise_prob: float = 0.0, rng=None):
         # noise_type: 'depolarizing', 'bit_flip', 'phase_flip', 'amplitude_damping', 'readout_error'
         self.noise_type = noise_type
         self.noise_prob = noise_prob
+        self.rng = rng if rng is not None else random.Random()
 
     def apply_gate_noise(self, simulator, qubit_name: str):
         if not self.noise_type or self.noise_prob <= 0.0:
@@ -13,14 +14,14 @@ class NoiseModel:
         if self.noise_type == 'readout_error':
             return  # Readout error is only applied at measurement time
             
-        r = random.random()
+        r = self.rng.random()
         if r < self.noise_prob:
             if self.noise_type == 'bit_flip':
                 simulator.X(qubit_name)
             elif self.noise_type == 'phase_flip':
                 simulator.Z(qubit_name)
             elif self.noise_type == 'depolarizing':
-                ch = random.choice(['X', 'Y', 'Z'])
+                ch = self.rng.choice(['X', 'Y', 'Z'])
                 if ch == 'X':
                     simulator.X(qubit_name)
                 elif ch == 'Y':
@@ -36,7 +37,7 @@ class NoiseModel:
 
     def apply_readout_noise(self, outcome: int) -> int:
         if self.noise_type == 'readout_error' and self.noise_prob > 0.0:
-            r = random.random()
+            r = self.rng.random()
             if r < self.noise_prob:
                 return 1 - outcome
         return outcome

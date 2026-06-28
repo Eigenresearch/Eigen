@@ -1,5 +1,6 @@
 from src.ir.ir_graph import EQIRGraph, EQIRNode
 from src.simulator import QuantumSimulator
+from src.zx.exceptions import IndeterminateEquivalenceError
 
 class EquivalenceChecker:
     def __init__(self):
@@ -90,22 +91,9 @@ class EquivalenceChecker:
         
         n_qubits = len(all_qubits)
         if n_qubits > 8:
-            # Fallback: Rewrite-Based / Canonicalization Equivalence Check
-            from src.ir.optimizer import EQIROptimizer
-            opt = EQIROptimizer()
-            g1_opt = opt.optimize(graph1)
-            g2_opt = opt.optimize(graph2)
-            
-            gates1 = [n for n in g1_opt.topological_sort() if n.type == 'GATE']
-            gates2 = [n for n in g2_opt.topological_sort() if n.type == 'GATE']
-            
-            if len(gates1) != len(gates2):
-                return False
-                
-            for gt1, gt2 in zip(gates1, gates2):
-                if gt1.gate_name != gt2.gate_name or gt1.targets != gt2.targets or gt1.args != gt2.args or gt1.condition != gt2.condition:
-                    return False
-            return True
+            from src.zx.zx_equivalence import ZXEquivalenceChecker
+            zx_checker = ZXEquivalenceChecker()
+            return zx_checker.are_equivalent(graph1, graph2)
             
         if n_qubits == 0:
             return True  # Trivially equivalent

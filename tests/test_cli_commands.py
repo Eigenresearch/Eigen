@@ -96,6 +96,42 @@ class TestCLICommands(unittest.TestCase):
         self.assertIn("Emulated", res.stdout)
         self.assertIn("Unsupported", res.stdout)
 
+    def test_verify_equiv_command_cli(self):
+        # 1. Equivalent files
+        file1_path = os.path.join(self.temp_dir, "f1.eig")
+        file2_path = os.path.join(self.temp_dir, "f2.eig")
+        with open(file1_path, "w", encoding="utf-8") as f:
+            f.write("eigen 1.0\nqubit q0\nH q0\nH q0\n")
+        with open(file2_path, "w", encoding="utf-8") as f:
+            f.write("eigen 1.0\nqubit q0\n")
+            
+        res = self.run_cli(["verify-equiv", file1_path, file2_path])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("Mathematically EQUIVALENT", res.stdout)
+        
+        # 2. Non-equivalent files
+        with open(file2_path, "w", encoding="utf-8") as f:
+            f.write("eigen 1.0\nqubit q0\nX q0\n")
+        res = self.run_cli(["verify-equiv", file1_path, file2_path])
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("NOT EQUIVALENT", res.stdout)
+        
+        # 3. Indeterminate files (N > 16 qubits)
+        large1_path = os.path.join(self.temp_dir, "large1.eig")
+        large2_path = os.path.join(self.temp_dir, "large2.eig")
+        
+        large_source = "eigen 1.0\n" + "\n".join(f"qubit q{i}" for i in range(17)) + "\n"
+        large_source1 = large_source + "T q0\n"
+        large_source2 = large_source + "T q1\n"
+        
+        with open(large1_path, "w", encoding="utf-8") as f:
+            f.write(large_source1)
+        with open(large2_path, "w", encoding="utf-8") as f:
+            f.write(large_source2)
+            
+        res = self.run_cli(["verify-equiv", large1_path, large2_path])
+        self.assertEqual(res.returncode, 3) # INDETERMINATE exit code 3
+        self.assertIn("INDETERMINATE", res.stdout)
 
 if __name__ == "__main__":
     unittest.main()

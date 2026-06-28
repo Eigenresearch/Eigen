@@ -489,7 +489,19 @@ class EBCCompiler:
                 self.emit(Opcode.Q_ALLOC, node.targets[0])
             elif node.type == 'GATE':
                 for arg in node.args:
-                    self.emit(Opcode.LOAD_CONST, arg)
+                    if isinstance(arg, (int, float, complex)):
+                        self.emit(Opcode.LOAD_CONST, arg)
+                    elif isinstance(arg, str):
+                        from src.frontend.lexer import Lexer
+                        from src.frontend.parser import Parser
+                        try:
+                            tokens = Lexer(arg).tokenize()
+                            if tokens and tokens[-1].type.name == 'EOF':
+                                tokens.pop()
+                            expr_node = Parser(tokens).parse_expr()
+                            self.visit_ast(expr_node)
+                        except Exception:
+                            self.emit(Opcode.LOAD_CONST, arg)
                 self.emit(Opcode.Q_GATE, (node.gate_name, node.targets))
             elif node.type == 'MEASURE':
                 self.emit(Opcode.Q_MEASURE, (node.targets[0], node.cbit_name))
@@ -556,5 +568,7 @@ class EBCCompiler:
                     if resolved_idx is None:
                         raise ValueError(f"Unresolved label: {instr.arg}")
                     instr.arg = resolved_idx
+
+        self.resolved_qfuncs = {name: label_to_index[label] for name, label in self.qfuncs.items() if label in label_to_index}
 
         return final_instructions

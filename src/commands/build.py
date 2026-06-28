@@ -11,30 +11,53 @@ from src.packager import EigenPackager
 @register_command("build")
 def build_command(args, workspace_root):
     if args.file:
+        if getattr(args, 'qir', False):
+            print(f"Compiling '{args.file}' to QIR LLVM IR...")
+            from src.aot.compiler import AOTCompiler
+            seed_val = getattr(args, 'seed', 0)
+            aot_comp = AOTCompiler()
+            llvm_module = aot_comp._compile_to_llvm_module(args.file, workspace_root, optimize=args.optimize, seed=seed_val, emit_qir=True)
+            out_path = args.file.rsplit('.', 1)[0] + ".qir.ll"
+            with open(out_path, 'w', encoding='utf-8') as f:
+                f.write(str(llvm_module))
+            print(f"QIR LLVM IR dumped successfully: '{out_path}'")
+            return
+
+        from src.compiler import get_db, to_ebc
+        
+        if getattr(args, 'explain_cache', False):
+            db = get_db(workspace_root)
+            target_query = "optimize" if args.optimize else "to_ebc"
+            db.explain_cache(target_query, args.file)
+            
         if getattr(args, 'llvm', False):
             print(f"Compiling '{args.file}' to LLVM IR (.ll)...")
         else:
             print(f"Compiling '{args.file}' to EBC bytecode...")
             
-        with open(args.file, 'r', encoding='utf-8') as f:
-            content = f.read()
-        lexer = Lexer(content)
-        parser = Parser(lexer.tokenize())
-        ast = parser.parse()
-        
-        resolver = ImportResolver(workspace_root)
-        ast = resolver.resolve(ast)
-        
-        type_checker = TypeChecker()
-        type_checker.check(ast)
-        
-        compiler = EBCCompiler()
-        instrs = compiler.compile_ast(ast)
+        db = get_db(workspace_root)
         if args.optimize:
             from src.ir.ssa.optimizer import optimize_ebc
-            instrs = optimize_ebc(instrs)
+            def run_optimize(fp, wr):
+                ebc_instrs = to_ebc(fp, wr)
+                return optimize_ebc(ebc_instrs)
+            instrs = db.execute_query("optimize", args.file, run_optimize, args.file, workspace_root)
+        else:
+            instrs = to_ebc(args.file, workspace_root)
         
-        if getattr(args, 'llvm', False):
+        if getattr(args, 'aot', False):
+            from src.aot.compiler import AOTCompiler
+            seed_val = getattr(args, 'seed', 0)
+            aot_comp = AOTCompiler()
+            if getattr(args, 'emit_llvm', False):
+                llvm_module = aot_comp._compile_to_llvm_module(args.file, workspace_root, optimize=args.optimize, seed=seed_val)
+                out_path = args.file.rsplit('.', 1)[0] + ".ll"
+                with open(out_path, 'w', encoding='utf-8') as f:
+                    f.write(str(llvm_module))
+                print(f"LLVM IR dumped successfully: '{out_path}'")
+            exe_path = aot_comp.compile(args.file, workspace_root, optimize=args.optimize, seed=seed_val)
+            print(f"AOT Compilation successful: '{exe_path}'")
+        elif getattr(args, 'llvm', False):
             from src.ir.ssa.ssa_builder import SSABuilder
             from src.backend.llvm_compiler import LLVMCompiler
             

@@ -1,4 +1,6 @@
-class ASTNode:
+import abc
+
+class ASTNode(metaclass=abc.ABCMeta):
     pass
 
 class ProgramNode(ASTNode):
@@ -326,3 +328,9 @@ class TaskStatementNode(ASTNode):
 
     def __repr__(self):
         return f"TaskStatementNode(call={self.call})"
+
+try:
+    import eigen_native
+    NATIVE_AVAILABLE = True
+except ImportError:
+    NATIVE_AVAILABLE = False

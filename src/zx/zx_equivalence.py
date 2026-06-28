@@ -1,7 +1,215 @@
 # ZX-Calculus based Equivalence Checker using Z-spiders and H-boxes
 import math
+import cmath
+import sys
+import random
 from src.zx.zx_graph import ZXGraph
 from src.ir.ir_graph import EQIRGraph
+from src.simulator import QuantumSimulator
+from src.zx.exceptions import IndeterminateEquivalenceError
+
+class Pauli:
+    def __init__(self, n: int, phase: int = 0):
+        self.n = n
+        self.x = [False] * n
+        self.z = [False] * n
+        self.phase = phase  # 0: +1, 1: +i, 2: -1, 3: -i
+        
+    def copy(self):
+        p = Pauli(self.n, self.phase)
+        p.x = list(self.x)
+        p.z = list(self.z)
+        return p
+
+    def apply_H(self, k: int):
+        if self.x[k] and self.z[k]:
+            self.phase = (self.phase + 2) % 4
+        self.x[k], self.z[k] = self.z[k], self.x[k]
+        
+    def apply_S(self, k: int):
+        if self.x[k]:
+            if self.z[k]:
+                self.phase = (self.phase + 3) % 4
+            else:
+                self.phase = (self.phase + 1) % 4
+            self.z[k] = not self.z[k]
+
+    def apply_X(self, k: int):
+        if self.z[k]:
+            self.phase = (self.phase + 2) % 4
+
+    def apply_Y(self, k: int):
+        if self.x[k] != self.z[k]:
+            self.phase = (self.phase + 2) % 4
+
+    def apply_Z(self, k: int):
+        if self.x[k]:
+            self.phase = (self.phase + 2) % 4
+
+    def apply_CNOT(self, c: int, t: int):
+        self.x[t] = self.x[t] ^ self.x[c]
+        self.z[c] = self.z[c] ^ self.z[t]
+
+    def apply_CZ(self, c: int, t: int):
+        self.z[t] = self.z[t] ^ self.x[c]
+        self.z[c] = self.z[c] ^ self.x[t]
+
+    def apply_SWAP(self, q1: int, q2: int):
+        self.x[q1], self.x[q2] = self.x[q2], self.x[q1]
+        self.z[q1], self.z[q2] = self.z[q2], self.z[q1]
+
+def apply_RY_pi2(p, k, sign=1):
+    old_x = p.x[k]
+    old_z = p.z[k]
+    if old_x and not old_z:
+        p.z[k] = True
+        if sign == -1:
+            p.phase = (p.phase + 2) % 4
+    elif not old_x and old_z:
+        p.x[k] = True
+        p.z[k] = False
+        if sign == 1:
+            p.phase = (p.phase + 2) % 4
+    elif old_x and old_z:
+        p.x[k] = False
+        if sign == 1:
+            p.phase = (p.phase + 2) % 4
+
+def is_clifford_circuit(graph: EQIRGraph) -> bool:
+    clifford_gates = {'H', 'S', 'X', 'Y', 'Z', 'CNOT', 'CZ', 'SWAP'}
+    for node in graph.nodes.values():
+        if node.type == 'GATE':
+            g_name = node.gate_name
+            if g_name in clifford_gates:
+                continue
+            elif g_name in ('RX', 'RY', 'RZ'):
+                if not node.args:
+                    continue
+                angle = node.args[0]
+                k = round(angle / (math.pi / 2))
+                if not math.isclose(angle, k * math.pi / 2, abs_tol=1e-6):
+                    return False
+            elif g_name == 'T':
+                return False
+            else:
+                return False
+    return True
+
+def check_clifford_equivalence(graph1: EQIRGraph, graph2: EQIRGraph) -> bool:
+    qubits1 = set()
+    for node in graph1.nodes.values():
+        if node.type == 'ALLOC':
+            qubits1.add(node.targets[0])
+    qubits2 = set()
+    for node in graph2.nodes.values():
+        if node.type == 'ALLOC':
+            qubits2.add(node.targets[0])
+            
+    qubits = sorted(list(qubits1 | qubits2))
+    N = len(qubits)
+    if N == 0:
+        return True
+    qubit_map = {q: idx for idx, q in enumerate(qubits)}
+    
+    generators = []
+    for i in range(N):
+        p = Pauli(N)
+        p.x[i] = True
+        generators.append(p)
+    for i in range(N):
+        p = Pauli(N)
+        p.z[i] = True
+        generators.append(p)
+        
+    def apply_gate(g_name, targets, args):
+        t_idxs = [qubit_map[t] for t in targets]
+        for p in generators:
+            if g_name == 'H':
+                p.apply_H(t_idxs[0])
+            elif g_name == 'S':
+                p.apply_S(t_idxs[0])
+            elif g_name == 'X':
+                p.apply_X(t_idxs[0])
+            elif g_name == 'Y':
+                p.apply_Y(t_idxs[0])
+            elif g_name == 'Z':
+                p.apply_Z(t_idxs[0])
+            elif g_name == 'CNOT':
+                p.apply_CNOT(t_idxs[0], t_idxs[1])
+            elif g_name == 'CZ':
+                p.apply_CZ(t_idxs[0], t_idxs[1])
+            elif g_name == 'SWAP':
+                p.apply_SWAP(t_idxs[0], t_idxs[1])
+            elif g_name in ('RX', 'RY', 'RZ'):
+                angle = args[0] if args else 0.0
+                k = round(angle / (math.pi / 2)) % 4
+                if g_name == 'RZ':
+                    if k == 1: p.apply_S(t_idxs[0])
+                    elif k == 2: p.apply_Z(t_idxs[0])
+                    elif k == 3:
+                        p.apply_S(t_idxs[0])
+                        p.apply_Z(t_idxs[0])
+                elif g_name == 'RX':
+                    if k == 1:
+                        p.apply_H(t_idxs[0])
+                        p.apply_S(t_idxs[0])
+                        p.apply_H(t_idxs[0])
+                    elif k == 2:
+                        p.apply_X(t_idxs[0])
+                    elif k == 3:
+                        p.apply_H(t_idxs[0])
+                        p.apply_S(t_idxs[0])
+                        p.apply_Z(t_idxs[0])
+                        p.apply_H(t_idxs[0])
+                elif g_name == 'RY':
+                    if k == 1:
+                        apply_RY_pi2(p, t_idxs[0], 1)
+                    elif k == 2:
+                        p.apply_Y(t_idxs[0])
+                    elif k == 3:
+                        apply_RY_pi2(p, t_idxs[0], -1)
+
+    for node in graph1.topological_sort():
+        if node.type == 'GATE':
+            apply_gate(node.gate_name, node.targets, node.args)
+            
+    nodes2 = graph2.topological_sort()
+    for node in reversed(nodes2):
+        if node.type == 'GATE':
+            g_name = node.gate_name
+            targets = node.targets
+            args = node.args
+            
+            if g_name == 'S':
+                apply_gate('S', targets, args)
+                apply_gate('Z', targets, args)
+            elif g_name in ('RX', 'RY', 'RZ'):
+                neg_args = [-args[0]] if args else []
+                apply_gate(g_name, targets, neg_args)
+            else:
+                apply_gate(g_name, targets, args)
+                
+    pi = {}
+    for i in range(N):
+        x_trues = [j for j in range(N) if generators[i].x[j]]
+        z_trues = [j for j in range(N) if generators[i].z[j]]
+        if len(x_trues) != 1 or z_trues:
+            return False
+        j = x_trues[0]
+        if generators[i].phase != 0:
+            return False
+            
+        x_trues_z = [k for k in range(N) if generators[N+i].x[k]]
+        z_trues_z = [k for k in range(N) if generators[N+i].z[k]]
+        if x_trues_z or len(z_trues_z) != 1 or z_trues_z[0] != j:
+            return False
+        if generators[N+i].phase != 0:
+            return False
+            
+        pi[i] = j
+        
+    return len(set(pi.values())) == N
+
 
 class ZXEquivalenceChecker:
     def __init__(self):
@@ -10,8 +218,9 @@ class ZXEquivalenceChecker:
     def circuit_to_zx(self, graph: EQIRGraph) -> ZXGraph:
         zx = ZXGraph()
         qubit_wires = {}
+        qubit_to_input = {}
+        qubit_to_output = {}
         
-        # Sort nodes topologically
         nodes = graph.topological_sort()
         
         for node in nodes:
@@ -19,8 +228,8 @@ class ZXEquivalenceChecker:
                 q = node.targets[0]
                 v = zx.add_vertex('Boundary')
                 zx.inputs.append(v.id)
+                qubit_to_input[q] = v.id
                 
-                # Start each wire with a Z spider
                 z = zx.add_vertex('Z')
                 zx.add_edge(v.id, z.id)
                 qubit_wires[q] = z.id
@@ -34,14 +243,12 @@ class ZXEquivalenceChecker:
                     prev_z_id = qubit_wires[q]
                     
                     if g_name == 'H':
-                        # prev_Z -> H -> next_Z
                         h = zx.add_vertex('H')
                         next_z = zx.add_vertex('Z')
                         zx.add_edge(prev_z_id, h.id)
                         zx.add_edge(h.id, next_z.id)
                         qubit_wires[q] = next_z.id
                     elif g_name == 'X':
-                        # X is H -> Z(1.0) -> H
                         h1 = zx.add_vertex('H')
                         z = zx.add_vertex('Z', 1.0)
                         h2 = zx.add_vertex('H')
@@ -53,7 +260,6 @@ class ZXEquivalenceChecker:
                         zx.add_edge(h2.id, next_z.id)
                         qubit_wires[q] = next_z.id
                     elif g_name == 'Z':
-                        # Z(1.0) is just a phase on Z spider
                         z = zx.add_vertex('Z', 1.0)
                         next_z = zx.add_vertex('Z')
                         zx.add_edge(prev_z_id, z.id)
@@ -72,7 +278,6 @@ class ZXEquivalenceChecker:
                         zx.add_edge(z.id, next_z.id)
                         qubit_wires[q] = next_z.id
                     elif g_name == 'RX':
-                        # H -> Z(phase) -> H
                         phase = args[0] / math.pi if args else 0.0
                         h1 = zx.add_vertex('H')
                         z = zx.add_vertex('Z', phase)
@@ -97,8 +302,6 @@ class ZXEquivalenceChecker:
                     c_prev = qubit_wires[c]
                     t_prev = qubit_wires[t]
                     
-                    # CNOT has Z spider on c and X spider on t connected by an edge.
-                    # In Z/H representation, this is a Z spider on c and Z spider on t connected by an H-box.
                     z_c = zx.add_vertex('Z')
                     z_t = zx.add_vertex('Z')
                     h = zx.add_vertex('H')
@@ -142,12 +345,14 @@ class ZXEquivalenceChecker:
                     q1, q2 = targets[0], targets[1]
                     qubit_wires[q1], qubit_wires[q2] = qubit_wires[q2], qubit_wires[q1]
 
-        # Add output boundary vertices
         for q, last_v_id in qubit_wires.items():
             out_v = zx.add_vertex('Boundary')
             zx.add_edge(last_v_id, out_v.id)
             zx.outputs.append(out_v.id)
+            qubit_to_output[q] = out_v.id
             
+        zx.qubit_to_input = qubit_to_input
+        zx.qubit_to_output = qubit_to_output
         return zx
 
     def simplify(self, zx: ZXGraph):
@@ -161,7 +366,6 @@ class ZXEquivalenceChecker:
         except ImportError:
             native = None
         
-        # Repeatedly simplify to fixed-point
         while True:
             if native is not None:
                 edges = []
@@ -182,7 +386,7 @@ class ZXEquivalenceChecker:
             
             changed = False
             
-            # 1. Z-spider fusion (adjacent Z spiders merge)
+            # 1. Z-spider fusion
             for v_id in list(zx.vertices.keys()):
                 if v_id not in zx.vertices:
                     continue
@@ -207,7 +411,7 @@ class ZXEquivalenceChecker:
             if changed:
                 continue
 
-            # 2. Identity spider removal: Z-spider with phase 0 and exactly 2 neighbors
+            # 2. Identity spider removal
             for v_id in list(zx.vertices.keys()):
                 if v_id not in zx.vertices:
                     continue
@@ -222,8 +426,7 @@ class ZXEquivalenceChecker:
             if changed:
                 continue
 
-            # 3. H-box cancellation: two adjacent H-boxes cancel to an identity wire
-            # H1 - H2  ->  wire
+            # 3. H-box cancellation
             for v_id in list(zx.vertices.keys()):
                 if v_id not in zx.vertices:
                     continue
@@ -262,7 +465,7 @@ class ZXEquivalenceChecker:
                 changed = True
                 continue
 
-            # 6. Hopf rule: parallel H-box cancellation between two Z-spiders
+            # 6. Hopf rule
             for u_id in list(zx.vertices.keys()):
                 if u_id not in zx.vertices:
                     continue
@@ -321,19 +524,266 @@ class ZXEquivalenceChecker:
                 break
 
     def are_equivalent(self, graph1: EQIRGraph, graph2: EQIRGraph) -> bool:
+        # Check number of qubits
+        qubits1 = set()
+        for node in graph1.nodes.values():
+            if node.type == 'ALLOC':
+                qubits1.add(node.targets[0])
+        qubits2 = set()
+        for node in graph2.nodes.values():
+            if node.type == 'ALLOC':
+                qubits2.add(node.targets[0])
+                
+        all_qubits = sorted(list(qubits1 | qubits2))
+        N = len(all_qubits)
+        
+        # 1. Clifford/tableau check
+        if is_clifford_circuit(graph1) and is_clifford_circuit(graph2):
+            if check_clifford_equivalence(graph1, graph2):
+                return True
+                
+        # 2. ZX double-graph check
         zx1 = self.circuit_to_zx(graph1)
         zx2 = self.circuit_to_zx(graph2)
         
-        self.simplify(zx1)
-        self.simplify(zx2)
+        if set(zx1.qubit_to_input.keys()) == set(zx2.qubit_to_input.keys()):
+            dg = ZXGraph()
+            g1_map = {}
+            g2_map = {}
+            
+            for v_id, v in zx1.vertices.items():
+                new_v = dg.add_vertex(v.type, v.phase)
+                g1_map[v_id] = new_v.id
+            for v_id, v in zx1.vertices.items():
+                for neighbor_id in v.neighbors:
+                    dg.add_edge(g1_map[v_id], g1_map[neighbor_id])
+                    
+            for v_id, v in zx2.vertices.items():
+                phase = (-v.phase) % 2.0 if v.type in ('Z', 'X') else v.phase
+                new_v = dg.add_vertex(v.type, phase)
+                g2_map[v_id] = new_v.id
+            for v_id, v in zx2.vertices.items():
+                for neighbor_id in v.neighbors:
+                    dg.add_edge(g2_map[v_id], g2_map[neighbor_id])
+                    
+            for q in zx1.qubit_to_input.keys():
+                out1_id = g1_map[zx1.qubit_to_output[q]]
+                out2_id = g2_map[zx2.qubit_to_output[q]]
+                
+                n1_list = list(dg.vertices[out1_id].neighbors)
+                n2_list = list(dg.vertices[out2_id].neighbors)
+                if n1_list and n2_list:
+                    n1 = n1_list[0]
+                    n2 = n2_list[0]
+                    dg.add_edge(n1, n2)
+                dg.remove_vertex(out1_id)
+                dg.remove_vertex(out2_id)
+                
+            dg.inputs = [g1_map[v_id] for v_id in zx1.inputs]
+            dg.outputs = [g2_map[v_id] for v_id in zx2.inputs]
+            
+            self.simplify(dg)
+            
+            # Check if double graph reduces to identity wires (potentially up to permutation)
+            input_to_output = {}
+            output_to_input = {}
+            valid_reduction = True
+            
+            for in_id in dg.inputs:
+                if in_id not in dg.vertices:
+                    valid_reduction = False
+                    break
+                v = dg.vertices[in_id]
+                if len(v.neighbors) != 1:
+                    valid_reduction = False
+                    break
+                neighbor_id = list(v.neighbors)[0]
+                if neighbor_id not in dg.outputs:
+                    valid_reduction = False
+                    break
+                input_to_output[in_id] = neighbor_id
+                
+            if valid_reduction:
+                for out_id in dg.outputs:
+                    if out_id not in dg.vertices:
+                        valid_reduction = False
+                        break
+                    v = dg.vertices[out_id]
+                    if len(v.neighbors) != 1:
+                        valid_reduction = False
+                        break
+                    neighbor_id = list(v.neighbors)[0]
+                    if neighbor_id not in dg.inputs:
+                        valid_reduction = False
+                        break
+                    output_to_input[out_id] = neighbor_id
+                    
+            if valid_reduction:
+                if len(input_to_output) == len(dg.inputs) and len(output_to_input) == len(dg.outputs):
+                    # Check other vertices are isolated
+                    all_isolated = True
+                    for v_id, v in dg.vertices.items():
+                        if v_id not in dg.inputs and v_id not in dg.outputs:
+                            if len(v.neighbors) > 0:
+                                all_isolated = False
+                                break
+                    if all_isolated:
+                        return True
+                        
+        # 3. Fallback checks (simulation/state-propagation)
+        if N > 16:
+            raise IndeterminateEquivalenceError(f"Circuit has {N} > 16 qubits. ZX equivalence checker cannot verify it without hanging.")
+            
+        if N <= 12:
+            return self.check_via_unitary_simulation(graph1, graph2, all_qubits)
+        else:
+            return self.check_via_state_propagation(graph1, graph2, all_qubits)
+
+    def check_via_unitary_simulation(self, graph1: EQIRGraph, graph2: EQIRGraph, all_qubits: list[str]) -> bool:
+        # Full unitary matrix comparison (logic similar to EquivalenceChecker)
+        U1 = self.generate_unitary(graph1, all_qubits)
+        U2 = self.generate_unitary(graph2, all_qubits)
         
-        # Structural check
-        if len(zx1.vertices) != len(zx2.vertices):
+        dim = len(U1)
+        max_val = 0.0
+        max_idx = (0, 0)
+        for r in range(dim):
+            for c in range(dim):
+                val = abs(U2[r][c])
+                if val > max_val:
+                    max_val = val
+                    max_idx = (r, c)
+                    
+        r_max, c_max = max_idx
+        v2 = U2[r_max][c_max]
+        if abs(v2) < 1e-12:
             return False
             
-        phases1 = sorted([round(v.phase, 4) for v in zx1.vertices.values() if v.type == 'Z'])
-        phases2 = sorted([round(v.phase, 4) for v in zx2.vertices.values() if v.type == 'Z'])
-        if phases1 != phases2:
+        v1 = U1[r_max][c_max]
+        global_phase = v1 / v2
+        if abs(abs(global_phase) - 1.0) > 1e-5:
             return False
             
+        for r in range(dim):
+            for c in range(dim):
+                if abs(U1[r][c] - global_phase * U2[r][c]) > 1e-5:
+                    return False
         return True
+
+    def generate_unitary(self, graph: EQIRGraph, qubit_order: list[str]) -> list[list[complex]]:
+        dim = 2 ** len(qubit_order)
+        U = [[0.0j for _ in range(dim)] for _ in range(dim)]
+        nodes = graph.topological_sort()
+        
+        for col in range(dim):
+            sim = QuantumSimulator()
+            for qubit in qubit_order:
+                sim.allocate_qubit(qubit)
+            sim.state_vector = [0.0j] * dim
+            sim.state_vector[col] = 1.0 + 0.0j
+            
+            for node in nodes:
+                if node.type == 'GATE':
+                    self.apply_gate_to_sim(sim, node)
+                    
+            final_state = sim.get_state_vector()
+            for row in range(dim):
+                U[row][col] = final_state[row]
+        return U
+
+    def apply_gate_to_sim(self, sim, node):
+        g_name = node.gate_name
+        targets = node.targets
+        args = node.args
+        if g_name == 'H': sim.H(targets[0])
+        elif g_name == 'X': sim.X(targets[0])
+        elif g_name == 'Y': sim.Y(targets[0])
+        elif g_name == 'Z': sim.Z(targets[0])
+        elif g_name == 'S': sim.S(targets[0])
+        elif g_name == 'T': sim.T(targets[0])
+        elif g_name == 'RX': sim.RX(targets[0], args[0])
+        elif g_name == 'RY': sim.RY(targets[0], args[0])
+        elif g_name == 'RZ': sim.RZ(targets[0], args[0])
+        elif g_name == 'CNOT': sim.CNOT(targets[0], targets[1])
+        elif g_name == 'CZ': sim.CZ(targets[0], targets[1])
+        elif g_name == 'SWAP': sim.SWAP(targets[0], targets[1])
+
+    def check_via_state_propagation(self, graph1: EQIRGraph, graph2: EQIRGraph, all_qubits: list[str]) -> bool:
+        # Check equivalence by executing G1 o G2^\dagger on |0>^{\otimes N}, |+>^{\otimes N},
+        # and 3 Haar-random entangled states, verifying that the overlap is near 1.
+        N = len(all_qubits)
+        dim = 2 ** N
+        
+        def prep_zero():
+            vec = [0.0j] * dim
+            vec[0] = 1.0 + 0.0j
+            return vec
+            
+        def prep_plus():
+            val = (1.0 / math.sqrt(2)) ** N
+            return [complex(val, 0.0)] * dim
+            
+        def prep_haar(seed_val):
+            rng = random.Random(seed_val)
+            vec = []
+            norm_sq = 0.0
+            for _ in range(dim):
+                u1 = rng.uniform(0.001, 1.0)
+                u2 = rng.uniform(0.001, 1.0)
+                r1 = math.sqrt(-2.0 * math.log(u1)) * math.cos(2.0 * math.pi * u2)
+                r2 = math.sqrt(-2.0 * math.log(u1)) * math.sin(2.0 * math.pi * u2)
+                c = complex(r1, r2)
+                vec.append(c)
+                norm_sq += r1 * r1 + r2 * r2
+            norm = math.sqrt(norm_sq)
+            return [c / norm for c in vec]
+
+        initial_states = [
+            prep_zero(),
+            prep_plus(),
+            prep_haar(12345),
+            prep_haar(67890),
+            prep_haar(54321)
+        ]
+        
+        for initial_state in initial_states:
+            sim = QuantumSimulator()
+            for q in all_qubits:
+                sim.allocate_qubit(q)
+                
+            sim.state_vector = initial_state
+            
+            for node in graph1.topological_sort():
+                if node.type == 'GATE':
+                    self.apply_gate_to_sim(sim, node)
+            for node in reversed(graph2.topological_sort()):
+                if node.type == 'GATE':
+                    self.apply_adjoint_gate_to_sim(sim, node)
+                    
+            final_state = sim.get_state_vector()
+            
+            overlap = sum(i.conjugate() * f for i, f in zip(initial_state, final_state))
+            if abs(abs(overlap) - 1.0) > 1e-4:
+                return False
+                
+        return True
+
+    def apply_adjoint_gate_to_sim(self, sim, node):
+        g_name = node.gate_name
+        targets = node.targets
+        args = node.args
+        if g_name == 'H': sim.H(targets[0])
+        elif g_name == 'X': sim.X(targets[0])
+        elif g_name == 'Y': sim.Y(targets[0])
+        elif g_name == 'Z': sim.Z(targets[0])
+        elif g_name == 'S':
+            sim.apply_1qubit_gate(targets[0], [[1.0, 0.0], [0.0, -1j]])
+        elif g_name == 'T':
+            sim.apply_1qubit_gate(targets[0], [[1.0, 0.0], [0.0, 0.7071067811865475 - 0.7071067811865475j]])
+        elif g_name in ('RX', 'RY', 'RZ'):
+            if g_name == 'RX': sim.RX(targets[0], -args[0])
+            elif g_name == 'RY': sim.RY(targets[0], -args[0])
+            elif g_name == 'RZ': sim.RZ(targets[0], -args[0])
+        elif g_name == 'CNOT': sim.CNOT(targets[0], targets[1])
+        elif g_name == 'CZ': sim.CZ(targets[0], targets[1])
+        elif g_name == 'SWAP': sim.SWAP(targets[0], targets[1])

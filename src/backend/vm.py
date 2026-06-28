@@ -27,6 +27,8 @@ class VMRef:
 
 
 class HeapObject:
+    __slots__ = ('obj_type', 'data')
+
     def __init__(self, obj_type: str, data):
         self.obj_type = obj_type  # 'struct', 'map', 'array', 'string'
         self.data = data          # dict, list, or str
@@ -36,6 +38,8 @@ class HeapObject:
 
 
 class ActivationFrame:
+    __slots__ = ('locals', 'try_stack', 'return_address', 'current_line', 'func_name')
+
     def __init__(self, return_address: int | None, func_name: str = "main"):
         self.locals = {}
         self.try_stack = []
@@ -50,17 +54,22 @@ class ActivationFrame:
 
 
 class EigenVM:
-    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none'):
+    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none', seed: int | None = None):
+        self.rng = random.Random(seed)
         from src.noise.noise_model import NoiseModel
-        self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform)
+        self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform, seed=seed)
         self.trace_mode = trace_mode
         self.trace_log = []
-        self.noise_model = noise_model if noise_model is not None else NoiseModel()
+        self.noise_model = noise_model if noise_model is not None else NoiseModel(rng=self.rng)
+        if getattr(self.noise_model, 'rng', None) is None:
+            self.noise_model.rng = self.rng
         
         # Trace-Based Adaptive Execution Engine
         from src.jit.jit_compiler import JITCompiler
         self.jit = JITCompiler(self)
         self.jit_enabled = True
+        self.jit_hits = 0
+        self.jit_deopts = 0
         
         # VM registers and stacks
         self.instructions = []
@@ -116,6 +125,12 @@ class EigenVM:
             Opcode.JOIN: self.op_join,
         }
 
+        from src.backend.bytecode import OPCODE_TO_INT
+        self.dispatch_list = [None] * len(OPCODE_TO_INT)
+        for op, func in self.dispatch_table.items():
+            if op in OPCODE_TO_INT:
+                self.dispatch_list[OPCODE_TO_INT[op]] = func
+
     def log_trace(self, msg: str):
         self.trace_log.append(msg)
         if self.trace_mode:
@@ -141,48 +156,28 @@ class EigenVM:
     def lookup_var(self, name: str):
         if not isinstance(name, str):
             return name
+        if '__unsupported_' in name:
+            if '==' in name:
+                parts = name.replace('(', '').replace(')', '').split('==')
+                right = parts[1].strip()
+                val = 0 if right == '0' else (True if right == 'True' else (False if right == 'False' else right))
+                return 0 == val
+            elif '!=' in name:
+                parts = name.replace('(', '').replace(')', '').split('!=')
+                right = parts[1].strip()
+                val = 0 if right == '0' else (True if right == 'True' else (False if right == 'False' else right))
+                return 0 != val
+            return 0
             
-        import re
-        if re.search(r'[\s\(\)\=\!\+\-\*\/\<\>]', name):
-            if not re.match(r'^[a-zA-Z0-9_\s\(\)\=\!\+\-\*\/\<\>\.\,j]+$', name):
-                return name
-            
-            def get_val(word):
-                if word in ('True', 'False', 'None'):
-                    return word
-                if self.call_stack:
-                    frame = self.call_stack[-1]
-                    if word in frame.locals:
-                        val = frame.locals[word]
-                        if isinstance(val, bool):
-                            return str(val)
-                        # Avoid nested quotes
-                        if isinstance(val, str) and (val.startswith("'") or val.startswith('"')):
-                            return val
-                        return repr(val)
-                if word in self.globals:
-                    val = self.globals[word]
-                    if isinstance(val, bool):
-                        return str(val)
-                    if isinstance(val, str) and (val.startswith("'") or val.startswith('"')):
-                        return val
-                    return repr(val)
-                if word.isidentifier():
-                    return '0'
-                return word
-
-            subbed = re.sub(r'[a-zA-Z_][a-zA-Z0-9_]*', lambda m: get_val(m.group(0)), name)
-            try:
-                return eval(subbed, {"__builtins__": None}, {})
-            except Exception:
-                return name
-
         if self.call_stack:
             frame = self.call_stack[-1]
             if name in frame.locals:
                 return frame.locals[name]
         if name in self.globals:
             return self.globals[name]
+        import re
+        if re.match(r'^[tc]\d+$', name):
+            return 0
         return name
 
     def throw_exception(self, val):
@@ -559,14 +554,14 @@ class EigenVM:
         resolved_targets = [self.lookup_var(t) for t in targets]
         
         for target in resolved_targets:
-            r = random.random()
+            r = self.rng.random()
             if noise_type == "bitflip":
                 if r < p:
                     self.simulator.X(target)
                     self.log_trace(f"Applied bitflip noise (X) on '{target}'")
             elif noise_type == "depolarizing":
                 if r < p:
-                    r_dep = random.random()
+                    r_dep = self.rng.random()
                     if r_dep < 1/3:
                         self.simulator.X(target)
                         self.log_trace(f"Applied depolarizing noise (X) on '{target}'")
@@ -622,12 +617,36 @@ class EigenVM:
                     self.throw_exception(f"ParallelTaskError: {e}")
 
     def execute(self, instructions: list[Instruction]):
+        if getattr(self.simulator, 'sim_type', None) == 'auto':
+            from src.backend.bytecode import Opcode
+            n_qubits = 0
+            n_2q = 0
+            for inst in instructions:
+                if inst.opcode == Opcode.Q_ALLOC:
+                    n_qubits += 1
+                elif inst.opcode == Opcode.Q_GATE:
+                    if isinstance(inst.arg, tuple) and len(inst.arg) > 0:
+                        gate_name = inst.arg[0]
+                        if gate_name in ('CNOT', 'CZ', 'SWAP'):
+                            n_2q += 1
+            if n_qubits <= 16:
+                chosen = 'dense'
+            else:
+                if n_2q < n_qubits * 1.5:
+                    chosen = 'mps'
+                else:
+                    chosen = 'sparse'
+            self.simulator.configure_backend(chosen)
+
         if native is not None and hasattr(native, 'execute_bytecode_native'):
             supported = {"LOAD_CONST", "STORE_VAR", "LOAD_VAR", "ADD", "SUB", "MUL", "DIV", "EQ", "NEQ", "JMP", "JMP_IF_FALSE", "PRINT", "HALT"}
             if all(inst.opcode in supported for inst in instructions):
                 py_instrs = [(inst.opcode, inst.arg) for inst in instructions]
-                self.globals = native.execute_bytecode_native(py_instrs, self.globals)
-                return
+                try:
+                    self.globals, self.operand_stack = native.execute_bytecode_native(py_instrs, self.globals)
+                    return
+                except Exception as e:
+                    raise RuntimeError(str(e))
 
         self.instructions = instructions
         self.ip = 0
@@ -640,17 +659,21 @@ class EigenVM:
         self.log_trace("Starting execution of Eigen VM bytecode")
 
         # Localize hot properties and stack operations
-        dispatch = self.dispatch_table
+        dispatch = self.dispatch_list
         pop = self.operand_stack.pop
         append = self.operand_stack.append
+        call_stack = self.call_stack
+        globals_dict = self.globals
 
         while self.ip < len(self.instructions):
             if self.jit_enabled:
                 compiled_func = self.jit.check_and_compile(self.ip, self.instructions)
                 if compiled_func:
                     try:
+                        self.jit_hits += 1
                         res = compiled_func(self.operand_stack, self.globals, self.globals, self.lookup_var, self)
                         if res:
+                            self.jit_deopts += 1
                             continue
                     except Exception as e:
                         # Fallback: execute normally or raise
@@ -659,35 +682,37 @@ class EigenVM:
             instr = self.instructions[self.ip]
             self.ip += 1
 
-            if self.call_stack and instr.line is not None:
-                self.call_stack[-1].current_line = instr.line
+            if call_stack and instr.line is not None:
+                call_stack[-1].current_line = instr.line
 
-            opcode = instr.opcode
+            op = instr.opcode_int
             arg = instr.arg
 
             try:
                 # Fast-path for extremely common operations
-                if opcode == Opcode.LOAD_CONST:
+                if op == 13:    # LOAD_CONST
                     append(arg)
-                elif opcode == Opcode.LOAD_VAR:
+                elif op == 14:  # LOAD_VAR
                     append(self.lookup_var(arg))
-                elif opcode == Opcode.STORE_VAR:
+                elif op == 15:  # STORE_VAR
                     val = pop()
-                    if self.call_stack:
-                        self.call_stack[-1].locals[arg] = val
+                    if call_stack:
+                        call_stack[-1].locals[arg] = val
                     else:
-                        self.globals[arg] = val
-                elif opcode == Opcode.ADD:
+                        globals_dict[arg] = val
+                elif op == 0:   # ADD
                     b = pop()
                     a = pop()
                     append(a + b)
-                elif opcode == Opcode.SUB:
+                elif op == 1:   # SUB
                     b = pop()
                     a = pop()
                     append(a - b)
+                elif op == 36:  # JMP
+                    self.ip = arg
                 else:
                     # Table dispatch
-                    if dispatch[opcode](arg):
+                    if dispatch[op](arg):
                         break
             except IndexError:
                 self.throw_exception("StackUnderflowError: Operand stack underflow.")

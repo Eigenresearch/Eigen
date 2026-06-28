@@ -1,5 +1,11 @@
 # Ignore research paper as requested
-papers/eigen-research-paper.md
+papers/
+paper_gen/
+paper.pdf
+paper_build.md
+test_math.md
+test_math.pdf
+photo_2026-06-23_17-28-06.jpg
 
 # Ignore caches
 __pycache__/

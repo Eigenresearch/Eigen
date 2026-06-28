@@ -5,7 +5,7 @@ use std::collections::HashMap;
 pub fn execute_bytecode_native(
     instructions: Vec<(String, Option<PyObject>)>,
     mut variables: HashMap<String, PyObject>
-) -> PyResult<HashMap<String, PyObject>> {
+) -> PyResult<(HashMap<String, PyObject>, Vec<PyObject>)> {
     let mut stack: Vec<PyObject> = Vec::new();
     let mut ip = 0;
     
@@ -41,41 +41,41 @@ pub fn execute_bytecode_native(
                 "ADD" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let res = v1.as_ref(py).call_method1("__add__", (v2,))?;
+                    let res = v1.bind(py).call_method1("__add__", (v2,))?;
                     stack.push(res.into());
                 }
                 "SUB" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let res = v1.as_ref(py).call_method1("__sub__", (v2,))?;
+                    let res = v1.bind(py).call_method1("__sub__", (v2,))?;
                     stack.push(res.into());
                 }
                 "MUL" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let res = v1.as_ref(py).call_method1("__mul__", (v2,))?;
+                    let res = v1.bind(py).call_method1("__mul__", (v2,))?;
                     stack.push(res.into());
                 }
                 "DIV" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let is_zero: bool = v2.as_ref(py).rich_compare(0, pyo3::class::basic::CompareOp::Eq)?.extract()?;
+                    let is_zero: bool = v2.bind(py).rich_compare(0, pyo3::class::basic::CompareOp::Eq)?.extract()?;
                     if is_zero {
-                        return Err(pyo3::exceptions::PyZeroDivisionError::new_err("DivisionByZero"));
+                        return Err(pyo3::exceptions::PyZeroDivisionError::new_err("DivisionByZeroError: Division by zero."));
                     }
-                    let res = v1.as_ref(py).call_method1("__truediv__", (v2,))?;
+                    let res = v1.bind(py).call_method1("__truediv__", (v2,))?;
                     stack.push(res.into());
                 }
                 "EQ" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let res = v1.as_ref(py).rich_compare(v2, pyo3::class::basic::CompareOp::Eq)?;
+                    let res = v1.bind(py).rich_compare(v2, pyo3::class::basic::CompareOp::Eq)?;
                     stack.push(res.into());
                 }
                 "NEQ" => {
                     let v2 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
                     let v1 = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
-                    let res = v1.as_ref(py).rich_compare(v2, pyo3::class::basic::CompareOp::Ne)?;
+                    let res = v1.bind(py).rich_compare(v2, pyo3::class::basic::CompareOp::Ne)?;
                     stack.push(res.into());
                 }
                 "JMP" => {
@@ -97,10 +97,9 @@ pub fn execute_bytecode_native(
                     }
                 }
                 "PRINT" => {
-                    if let Some(val) = stack.pop() {
-                        let val_str: String = val.as_ref(py).str()?.extract()?;
-                        println!("[PRINT DIRECTIVE] {}", val_str);
-                    }
+                    let val = stack.pop().ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("StackUnderflow"))?;
+                    let val_str: String = val.bind(py).str()?.extract()?;
+                    println!("[PRINT DIRECTIVE] {}", val_str);
                 }
                 "HALT" => {
                     break;
@@ -111,5 +110,5 @@ pub fn execute_bytecode_native(
         }
         Ok(())
     })?;
-    Ok(variables)
+    Ok((variables, stack))
 }

@@ -252,6 +252,160 @@ class TestEigenVMAndCompiler(unittest.TestCase):
             
         self.assertIn("StackOverflowError: Maximum recursion depth (1000) exceeded.", str(context.exception))
 
+    def test_jit_global_caching_and_lru(self):
+        # 1. Clear JIT Cache to start clean
+        from src.jit.jit_compiler import JITCompiler
+        JITCompiler.GLOBAL_CACHE.clear()
+        JITCompiler.GLOBAL_EXEC_COUNTS.clear()
+        
+        # 2. Create a basic loop program to trigger JIT compilation
+        # let i: int = 0
+        # while i < 15 {
+        #     let i: int = i + 1
+        # }
+        # Note: hot_threshold is 10, so a loop of 15 iterations will trigger check_and_compile multiple times.
+        let_i = LetNode("i", "int", LiteralNode(0, "int"))
+        while_node = WhileNode(
+            BinaryOpNode("<", VarRefNode("i"), LiteralNode(15, "int")),
+            [LetNode("i", "int", BinaryOpNode("+", VarRefNode("i"), LiteralNode(1, "int")))]
+        )
+        program = ProgramNode(1.0, None, [], [let_i, while_node])
+        instructions = self.compiler.compile_ast(program)
+        
+        # Verify execution and check cache contents
+        vm1 = EigenVM()
+        vm1.execute(instructions)
+        self.assertEqual(vm1.lookup_var("i"), 15)
+        
+        # Check that we have something in the JIT compiler's global cache
+        self.assertGreater(len(JITCompiler.GLOBAL_CACHE.cache), 0)
+        
+        # Check that we have global execution counts
+        self.assertGreater(len(JITCompiler.GLOBAL_EXEC_COUNTS), 0)
+        
+        # 3. Create a second VM instance and run again - it should reuse the cached block (no clearing on run)
+        old_cache_len = len(JITCompiler.GLOBAL_CACHE.cache)
+        vm2 = EigenVM()
+        vm2.execute(instructions)
+        self.assertEqual(vm2.lookup_var("i"), 15)
+        
+        # Cache length should remain the same (or we lookup the cached block)
+        self.assertEqual(len(JITCompiler.GLOBAL_CACHE.cache), old_cache_len)
+        
+        # 4. Test LRU eviction: set maxsize to 2 and add 3 elements
+        from src.jit.jit_compiler import LRUCache
+        lru = LRUCache(maxsize=2)
+        lru.put("a", 1)
+        lru.put("b", 2)
+        # Access "a" to make "b" least recently used
+        lru.get("a")
+        # Put "c" -> "b" should be evicted
+        lru.put("c", 3)
+        
+        self.assertEqual(lru.get("a"), 1)
+        self.assertIsNone(lru.get("b"))
+        self.assertEqual(lru.get("c"), 3)
+
+    def test_jit_v2_constant_folding(self):
+        from src.jit.jit_compiler import JITCompiler
+        from src.backend.bytecode import Instruction, Opcode
+        jit = JITCompiler(self.vm)
+        
+        # 2 + 3 * 4 -> should fold 3 * 4 to 12, then 2 + 12 to 14
+        instrs = [
+            Instruction(Opcode.LOAD_CONST, 2),
+            Instruction(Opcode.LOAD_CONST, 3),
+            Instruction(Opcode.LOAD_CONST, 4),
+            Instruction(Opcode.MUL, None),
+            Instruction(Opcode.ADD, None)
+        ]
+        
+        folded = jit.fold_constants(instrs)
+        self.assertEqual(len(folded), 1)
+        self.assertEqual(folded[0].opcode, Opcode.LOAD_CONST)
+        self.assertEqual(folded[0].arg, 14)
+
+    def test_jit_v2_inlining(self):
+        from src.jit.jit_compiler import JITCompiler
+        from src.backend.bytecode import Instruction, Opcode
+        
+        # Define a simple function: func add_one(x) { return x + 1 }
+        # EBC:
+        # func_add_one:
+        #   ENTER_FRAME
+        #   STORE_VAR x
+        #   LOAD_VAR x
+        #   LOAD_CONST 1
+        #   ADD
+        #   RET
+        instructions = [
+            Instruction(Opcode.JMP, 7), # Jump to main_start
+            Instruction(Opcode.ENTER_FRAME, None),
+            Instruction(Opcode.STORE_VAR, "x"),
+            Instruction(Opcode.LOAD_VAR, "x"),
+            Instruction(Opcode.LOAD_CONST, 1),
+            Instruction(Opcode.ADD, None),
+            Instruction(Opcode.RET, None),
+            # main_start:
+            Instruction(Opcode.LOAD_CONST, 5),
+            Instruction(Opcode.CALL, (1, "add_one", 1)),
+            Instruction(Opcode.STORE_VAR, "res"),
+            Instruction(Opcode.HALT, None)
+        ]
+        
+        self.vm.instructions = instructions
+        jit = JITCompiler(self.vm)
+        
+        # Test inlining target 1 (entry of add_one call)
+        inlined = jit.inline_function(1, 1, "add_one")
+        self.assertIsNotNone(inlined)
+        
+        # Should contain parameter stores and body, without ENTER_FRAME and RET
+        opcodes = [inst.opcode for inst in inlined]
+        self.assertEqual(opcodes, [Opcode.STORE_VAR, Opcode.LOAD_VAR, Opcode.LOAD_CONST, Opcode.ADD])
+        
+        # Verify variables are renamed/namespaced
+        self.assertTrue(inlined[0].arg.startswith("x_add_one_inline_"))
+
+    def test_jit_v2_type_guards_and_deopt(self):
+        from src.jit.jit_compiler import JITCompiler
+        from src.backend.bytecode import Instruction, Opcode
+        
+        # Loop program that modifies type of 'val':
+        # val = 5 (int)
+        # val = 3.14 (float)
+        # JIT should compile while 'val' is int, then deopt/fallback when it becomes float.
+        # We simulate this behavior:
+        instructions = [
+            Instruction(Opcode.LOAD_VAR, "val"),
+            Instruction(Opcode.LOAD_CONST, 1),
+            Instruction(Opcode.ADD, None),
+            Instruction(Opcode.STORE_VAR, "res"),
+            Instruction(Opcode.HALT, None)
+        ]
+        
+        self.vm.instructions = instructions
+        self.vm.globals = {"val": 5}
+        
+        jit = JITCompiler(self.vm)
+        compiled = jit.compile_block(instructions[:-1]) # compile LOAD_VAR, LOAD_CONST, ADD, STORE_VAR
+        self.assertIsNotNone(compiled)
+        
+        # Execute once with int val -> res should be 6
+        stack = []
+        globals_map = {"val": 5}
+        def lookup_var(name):
+            return globals_map[name]
+            
+        res = compiled(stack, globals_map, globals_map, lookup_var, self.vm)
+        self.assertFalse(res) # completed without change of control flow (vm.ip update)
+        self.assertEqual(globals_map.get("res"), 6)
+        
+        # Now change val to float 3.14 -> JIT guard should trigger and return True (deopt)
+        globals_map["val"] = 3.14
+        res = compiled(stack, globals_map, globals_map, lookup_var, self.vm)
+        self.assertTrue(res) # guard failed -> returned True to VM to fallback
 
 if __name__ == "__main__":
     unittest.main()
+

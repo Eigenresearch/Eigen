@@ -5,6 +5,8 @@ from src.compiler import compile_to_eqir
 from src.ir.optimizer import EQIROptimizer
 from src.equivalence import EquivalenceChecker
 
+from src.zx.exceptions import IndeterminateEquivalenceError
+
 @register_command("verify-equiv")
 def verify_equiv_command(args, workspace_root):
     graph1, _ = compile_to_eqir(args.file1, workspace_root)
@@ -41,6 +43,11 @@ def verify_equiv_command(args, workspace_root):
         else:
             print("\nResult: NOT EQUIVALENT [FAIL]")
         print("=" * 50)
+    except IndeterminateEquivalenceError as e:
+        print("\nResult: INDETERMINATE (Circuit too large or complex to verify) [WARNING]")
+        print(f"Details: {e}")
+        print("=" * 50)
+        sys.exit(3)
     except Exception as e:
         print(f"Equivalence Verification Error: {e}", file=sys.stderr)
         sys.exit(1)

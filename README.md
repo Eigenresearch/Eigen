@@ -1,8 +1,11 @@
-# Eigen Programming Language
+# Eigen Programming Language — Release 2.4 «Mone»
 
-![Eigen Logo](Logo.jpg)
+[![CI Build](https://github.com/Eigenresearch/Eigen/actions/workflows/release.yml/badge.svg)](https://github.com/Eigenresearch/Eigen/actions)
+[![Release Version](https://img.shields.io/badge/release-2.4.0--Mone-blue.svg)](https://github.com/Eigenresearch/Eigen)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Coverage](https://img.shields.io/badge/coverage-86%25-brightgreen.svg)](pyproject.toml)
 
-Eigen is a domain-specific, hybrid classical-quantum programming language designed to bridge the gap between high-level classical programming abstractions and physical quantum computation. Rather than acting as a simple quantum gate-assembly wrapper, Eigen provides a unified computational model. It combines a complete classical control runtime (supporting recursion, structural types, dynamic collections, and structured exceptions) with native quantum simulation, hardware-constrained routing, formal circuit verification, and an optimized execution pipeline.
+> **«Faster. Harder. Less Python.»** — Release 2.4 "Mone" brings a completely decoupled, high-performance compilation and execution pipeline that eliminates Python overhead from critical execution paths, introduces a zero-copy native Rust frontend, implements a Salsa-inspired incremental compiler query database, and enables standalone LLVM/QIR native executable compilation.
 
 ---
 
@@ -13,11 +16,11 @@ Eigen is a domain-specific, hybrid classical-quantum programming language design
 4. [Helios CLI Manual & Developer Tooling](#helios-cli-manual--developer-tooling)
 5. [Advanced Execution & Simulation Engines](#advanced-execution--simulation-engines)
 6. [Formal Verification & ZX-Calculus Engine](#formal-verification--zx-calculus-engine)
-7. [Native Rust Extension & Native Runtime Layer](#native-rust-extension--native-runtime-layer)
+7. [Native Rust Extension & Standalone Decoupling](#native-rust-extension--standalone-decoupling)
 8. [Incremental Cache & SSA LLVM Target](#incremental-cache--ssa-llvm-target)
 9. [Installation & Quick Start](#installation--quick-start)
 10. [Example Codebases](#example-codebases)
-11. [Detailed Language Specification Reference](#detailed-language-specification-reference)
+11. [Release 2.4.0 Roadmap Status](#release-240-roadmap-status)
 
 ---
 
@@ -38,9 +41,9 @@ The pipeline below details the conversion of an Eigen source file into optimized
 
 ```mermaid
 graph TD
-    Source[Eigen Source .eig] --> Lexer[Lexer]
-    Lexer -->|Tokens| Parser[Parser]
-    Parser -->|AST| ImportResolver[Import Resolver]
+    Source[Eigen Source .eig] --> Lexer[Rust Lexer]
+    Lexer -->|Tokens| Parser[Rust Pratt Parser]
+    Parser -->|Python AST| ImportResolver[Import Resolver]
     ImportResolver -->|Merged AST| TypeChecker[Type Checker]
     TypeChecker -->|Typed AST| PipelineBranch{Execution Target}
     
@@ -72,12 +75,12 @@ graph TD
 
 The table below provides a capability comparison between Eigen and other primary quantum development architectures:
 
-| Feature / Capability | Eigen 2.3 — Helios | Qiskit (Python SDK) | OpenQASM 3.0 | Silq | Q# |
+| Feature / Capability | Eigen 2.4 — Mone | Qiskit (Python SDK) | OpenQASM 3.0 | Silq | Q# |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Execution Model** | VM (EBC Bytecode) / Native Rust FFI / LLVM | Host Python Interpreter | Hardware / AST | Compiled Native | VM / LLVM |
+| **Execution Model** | VM (EBC) / Native Rust FFI / LLVM / QIR AOT | Host Python Interpreter | Hardware / AST | Compiled Native | VM / LLVM |
 | **Classical State** | Full (Recursion, Exceptions, Structs, Maps, Dynamic Arrays) | Limited (Host Python environment) | Static / Limited | Limited (No exceptions/maps) | Dynamic / Limited |
 | **Simulators** | State-Vector, Sparse (sparsity-scaling), MPS Tensor Network | Aer Simulator | Simulator-dependent | Wavefunction | Sparse / State-Vector |
-| **VM Trace Engine** | Yes (Trace-Based Adaptive Execution, 2x-5x speedup) | No | No | No | No |
+| **VM Trace Engine** | Yes (Trace JIT v2, Loop-Invariant Code Motion, specialization) | No | No | No | No |
 | **IR Architecture** | AST &rarr; MLIR &rarr; EQIR DAG &rarr; SSA | DAGCircuit | AST / flat gates | AST | QIR (LLVM) |
 | **Verification Engine** | Unitary Equivalence & ZX-Calculus reduction | Equivalence library | None | Safe uncomputation | None |
 | **Tooling & LSP** | Interactive Debugger & JSON-RPC LSP Server | IDE extensions | Syntax highlighting | VS Code Extension | VS Code Extension |
@@ -96,8 +99,15 @@ The unified `eigen` command line utility exposes all compilation, optimization, 
   - `--trace`: Enable trace prints showing step-by-step state vector changes and register values.
   - `--backend <target>`: Export and run on target backend (e.g. `qiskit`, `qasm`, `braket`).
   - `--gpu <platform>`: Select GPU acceleration platform (`auto` for auto-detect, `cuda`, `rocm`, `metal`, `none`).
-* **`eigen build`**: Compiles Eigen packages into EBC bytecode or LLVM files.
+  - `--aot`: Direct JIT compilation and native execution of classical/quantum code.
+* **`eigen build <file.eig>`**: Compiles Eigen packages into EBC bytecode or LLVM files.
   - `--llvm`: Compiles SSA blocks directly into LLVM Intermediate Representation (`.ll`).
+  - `--qir`: Generates QIR-compliant LLVM IR with opaque pointers.
+  - `--aot`: Generates native standalone machine binaries (`.exe` on Windows).
+  - `--opt-level <O0/O1/O2/O3>`: Set LLVM compiler optimization levels (default: `O2`).
+  - `--lto`: Apply Link-Time Optimization during compilation (native GCC/Clang targets).
+  - `--strip`: Strip symbols from the compiled binary to minimize size.
+  - `--explain-cache`: Query status explaining incremental compilation steps and cache validity.
 * **`eigen exec <file.ebc>`**: Executes precompiled EBC bytecode files directly in the VM environment.
 * **`eigen verify-equiv <file1.eig> <file2.eig>`**: Checks formal equivalence of two quantum circuits.
   - `--method <unitary|zx>`: Selects verification method. `unitary` checks exact unitary matrix congruence; `zx` applies graph reduction simplifications.
@@ -110,9 +120,10 @@ The unified `eigen` command line utility exposes all compilation, optimization, 
 * **`eigen doc`**: Parses source code comments and prints API references or generates HTML/Markdown documentation.
 * **`eigen test`**: Recursively discovers and executes project unit tests.
 * **`eigen bench`**: Executes execution benchmarks and reports performance charts.
+  - `--frontend`: Profile and compare the performance of the Python parser vs. the zero-copy Rust parser.
 * **`eigen profile <file.eig>`**: Profiles compiler passes, JIT tracing, VM runtime, and simulation memory.
 * **`eigen audit`**: Audits packages against target backend capabilities.
-  - `--strict`: In strict mode, compilation halts with code 1 if the target backend lacks support for any language constructs (e.g. structs on IBM QASM).
+  - `--strict`: In strict mode, compilation halts with code 1 if the target backend lacks support for any language constructs.
 * **`eigen doctor`**: Scans health metrics of local toolchains, Python/Rust configurations, and compiler sanity.
 * **`eigen lsp`**: Starts a JSON-RPC Language Server Protocol (LSP) daemon for IDE integration.
 
@@ -129,8 +140,12 @@ Eigen features three specialized quantum simulation models to handle different c
    - Cumulative truncation error logging.
 4. **GPU Engine 2.0**: Auto-detects and accelerates state operations using GPU acceleration (via CUDA, ROCm, or Metal depending on hardware).
 
-### Trace-Based Adaptive VM JIT
-The VM contains a trace JIT engine. During bytecode loop execution, the tracer identifies repeating basic blocks, compiles them on-the-fly to optimized native bytecode paths, and caches them. This provides a 2x-5x execution speedup.
+### Trace-Based Adaptive VM JIT v2
+The VM contains a trace JIT engine. During bytecode loop execution, the JIT:
+- Identifies hot basic blocks and compiles them to optimized native bytecode loops.
+- Automatically performs loop-invariant code motion (LICM) and constant folding inside traces.
+- Inserts shape and type guards to specialize execution, falling back to deoptimization paths when guards fail.
+This provides a 2x-5x execution speedup.
 
 ---
 
@@ -150,37 +165,43 @@ If the simplified ZX graphs match, equivalence is formally proven. This is ideal
 
 ---
 
-## Native Rust Extension & Native Runtime Layer
+## Native Rust Extension & Standalone Decoupling
 
-To eliminate Python execution overhead, Eigen supports a compiled Rust extension library (`eigen_native` via PyO3):
+Eigen includes a highly optimized Rust native layer (`eigen_native`) integrated via PyO3 for Python environments, which can also be compiled completely free of CPython dependency:
 
-- **Native VM Loop**: Executes the EBC instruction set directly in a fast Rust loop (`execute_bytecode_native`).
-- **Native Simulators**: Offloads gate multiplication kernels (H, X, Y, Z, CNOT, CZ) to Rust.
-- **Fast Shortest-Path Router**: Accelerates topological swaps and routing on complex hardware coupling maps.
-- **Fast ZX Simplifier**: Performs graph operations directly in native memory.
+- **Zero CPython Dependency:** Compiling the native module with:
+  ```bash
+  cargo build --release --no-default-features
+  ```
+  Removes all Python runtime checks, PyO3 bindings, and GIL references. This yields a static library that can be linked with standalone executables compiled via LLVM, preventing runtime access violations.
+- **Zero-Copy Parser:** Written in recursive-descent/Pratt parser format, it slices tokens directly from byte streams without string allocations and constructs standard mutable Python AST structures.
+- **SIMD Gates & Rayon Parallelism:** Core gates (H, X, Y, Z, CNOT) are accelerated with AVX2/AVX512 runtime detection and partitioned threads using Rayon for sizes above $16,384$ amplitudes.
 
 ---
 
 ## Incremental Cache & SSA LLVM Target
 
-Eigen 2.3 optimizes compilation speed and target adaptability:
-
-- **Incremental Cache**: Hashes AST, SSA, EQIR, ZX, and EBC files. If a file is unmodified, the compiler loads the cache directly, avoiding recompilation.
-- **LLVM / QIR Target**: Compiles SSA basic blocks into LLVM IR (`.ll`). This generates standard LLVM files referencing standard Quantum Intermediate Representation (QIR) bindings.
+- **Incremental Compiler Cache:** Implements a query-based (Salsa-inspired) compilation database that hashes file contents (SHA-256) recursively. If a file and its dependencies are unchanged, AST parsing, Type Checking, and EQIR generation steps are bypassed and loaded directly from cache.
+- **LLVM / QIR Target:** Compiles SSA basic blocks into LLVM IR (`.ll`). This generates standard LLVM files referencing standard Quantum Intermediate Representation (QIR) bindings.
 
 ---
 
 ## Installation & Quick Start
 
 ### 1. Prerequisites
-Ensure you have Python 3.10+ and a Rust toolchain (optional, for native modules) installed.
+Ensure you have Python 3.10+ and a Rust compiler toolchain (to build native modules) installed.
 
 ### 2. Local Setup
-Clone the repository and install the development version:
+Clone the repository and install the development version using `uv` or `pip`:
 ```bash
 git clone https://github.com/Eigenresearch/Eigen.git
 cd Eigen
 pip install -e .
+```
+To compile the native Rust module in development mode:
+```bash
+cd native/rust
+maturin develop
 ```
 
 ### 3. Verification & Smoke Test
@@ -195,54 +216,115 @@ Execute a hybrid quantum example on the VM with trace logging enabled:
 eigen run examples/bell.eig --trace
 ```
 
-### 5. Compiling to LLVM IR
+### 5. Compiling to LLVM IR & QIR
 Compile your code to standard LLVM IR / QIR:
 ```bash
-eigen build examples/bell.eig --llvm
+eigen build examples/bell.eig --llvm --qir
 ```
+
+---
+
+## Performance Benchmarks
+
+### VM vs. AOT Execution Time
+
+Standalone native executables compiled with `eigen build <file> --aot` bypass the VM loop completely. Fixed startup overhead (~9 ms under Windows) is amortized for longer-running execution loops:
+
+| Program | VM (ms) | AOT (ms) | Speedup |
+|---|---|---|---|
+| fib(22) classical | 411.89 ms | 22.84 ms | **18.04x** |
+| Bell pair (500 shots) | 125.52 ms | 9.26 ms | **13.55x** |
+| Grover 2-qubit (500 iter) | 138.50 ms | 10.65 ms | **13.01x** |
+| factorial(12) x 10000 classical | 917.54 ms | 20.80 ms | **44.10x** |
+
+### Parser Benchmarks (Python vs. Rust)
+
+Comparing file parse speeds for various codebases (1k, 10k, 100k lines of code):
+
+| Code Size (Lines) | Python Parser (ms) | Rust Parser (ms) | Speedup |
+|---|---|---|---|
+| 1k | 21.29 ms | 2.21 ms | **9.7x** |
+| 10k | 181.56 ms | 29.20 ms | **6.2x** |
+| 100k | 2010.79 ms | 479.98 ms | **4.2x** |
 
 ---
 
 ## Example Codebases
 
-### Bell State Execution (`examples/bell.eig`)
+### Quantum Fourier Transform (`examples/qft.eig`)
 ```eigen
-eigen 2.3
-module quantum.bell
+eigen 2.4
+module quantum.qft
 
+# Apply 3-qubit QFT
+qubit q0
+qubit q1
+qubit q2
+
+H q0
+RZ q0, 1.57079632679 # pi/2
+CNOT q1, q0
+RZ q0, 0.78539816339 # pi/4
+CNOT q2, q0
+
+H q1
+RZ q1, 1.57079632679 # pi/2
+CNOT q2, q1
+
+H q2
+SWAP q0, q2
+```
+
+### Grover's Algorithm (`examples/grover.eig`)
+```eigen
+eigen 2.4
+module quantum.grover
+
+# Grover Search for state |11>
 qubit q0
 qubit q1
 cbit c0
 cbit c1
 
+# Initialization
 H q0
+H q1
+
+# Oracle (flips phase of |11>)
+H q1
 CNOT q0, q1
+H q1
+
+# Diffusion (H -> X -> CZ -> X -> H)
+H q0
+H q1
+X q0
+X q1
+H q1
+CNOT q0, q1
+H q1
+X q0
+X q1
+H q0
+H q1
 
 measure q0 -> c0
 measure q1 -> c1
-
-print c0
-print c1
-assert c0 == c1
-```
-
-### Hybrid Quantum-Classical Task Scheduler
-```eigen
-eigen 2.3
-
-func run_heavy_sim(id: int) -> int {
-    # Perform simulation steps
-    return id * 10
-}
-
-parallel {
-    task run_heavy_sim(1)
-    task run_heavy_sim(2)
-}
 ```
 
 ---
 
-## Detailed Language Specification Reference
+## Release 2.4.0 Roadmap Status
 
-For a complete guide to grammar, language keywords, static type system rules, exceptions, standard library stubs, and MLIR configurations, refer to the [Language Specification](LANGUAGE.md).
+* **[x] Phase M1 (Rust Frontend & Decoupled AOT Compiler):** Pratt parser, FFI decoupling, trace support.
+* **[x] Phase M2 (Native Kernels v2 & SIMD):** Rayon parallel loops, sparse optimization.
+* **[x] Phase M3 (Incremental Compilation 2.0 & JIT v2):** Salsa-query caching, guards, LICM.
+* **[x] Phase M4 (AOT Expansion & QIR Integration):** O2/O3, LTO, strip, MSVC link.exe fixes, QFT binary execution.
+* **[ ] Phase M5 (Generics & Routing):** Monomorphization, SABRE routing, circuit visualization.
+* **[ ] Phase M6 (VS Code Extension & LSP):** LSP inline diagnostics and auto-fixes.
+* **[ ] Phase M7 (Doc website & Release):** Mike versioning deployment.
+
+---
+
+## License
+Eigen is released under the [MIT License](LICENSE).

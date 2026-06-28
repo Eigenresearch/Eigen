@@ -82,6 +82,17 @@ class TypeChecker:
         return False
 
     def check(self, program: ProgramNode):
+        from src.frontend.ast import NATIVE_AVAILABLE
+        if NATIVE_AVAILABLE and hasattr(program, "source") and program.source is not None:
+            import eigen_native
+            try:
+                from src.compiler import get_workspace_root
+                workspace_root = get_workspace_root()
+                eigen_native.type_check_source(program.source, workspace_root)
+                return
+            except TypeError as e:
+                raise TypeErrorException(f"Type Error: {str(e)}")
+
         self.global_qfuncs = {}
         self.global_funcs = {}
         self.global_structs = {}
@@ -195,7 +206,7 @@ class TypeChecker:
                 numeric_types = {"int", "float", "cbit"}
                 if left_type not in numeric_types or right_type not in numeric_types:
                     self.error(f"Binary operation '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
-                if node.op == "/" or left_type == "float" or right_type == "float":
+                if left_type == "float" or right_type == "float":
                     return "float"
                 return "int"
 

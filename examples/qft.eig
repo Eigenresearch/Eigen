@@ -1,0 +1,25 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+H q0
+CNOT q0, q1
+RZ q1, 1.57079632679
+H q1
+CNOT q1, q2
+RZ q2, 0.78539816339
+H q2
+
+cbit c0
+cbit c1
+cbit c2
+
+measure q0 -> c0
+measure q1 -> c1
+measure q2 -> c2
+
+print c0
+print c1
+print c2

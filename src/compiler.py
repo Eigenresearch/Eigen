@@ -15,45 +15,45 @@ def get_workspace_root() -> str:
     return os.getcwd()
 
 def get_project_hash(filepath: str, workspace_root: str) -> str:
-    visited_files = set()
-    files_to_process = [os.path.abspath(filepath)]
-    stdlib_root = os.path.join(workspace_root, "stdlib")
-    hasher = hashlib.sha256()
-    processed_contents = []
+    resolver = ImportResolver(workspace_root)
+    visited_files = {}
     
-    while files_to_process:
-        current_path = files_to_process.pop(0)
-        if current_path in visited_files:
-            continue
-        visited_files.add(current_path)
+    def process_file(file_path: str):
+        abs_path = os.path.abspath(file_path)
+        if abs_path in visited_files:
+            return
         
-        if not os.path.isfile(current_path):
-            continue
-            
-        with open(current_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        try:
+            with open(abs_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception:
+            return
         
-        processed_contents.append((current_path, content))
+        visited_files[abs_path] = content
         
-        for line in content.splitlines():
-            line = line.strip()
-            if line.startswith("import "):
-                parts = line.split()
-                if len(parts) >= 2:
-                    module_name = parts[1]
-                    relative_path = module_name.replace('.', '/') + ".eig"
-                    local_path = os.path.join(workspace_root, relative_path)
-                    if os.path.isfile(local_path):
-                        files_to_process.append(os.path.abspath(local_path))
-                    else:
-                        stdlib_path = os.path.join(stdlib_root, relative_path)
-                        if os.path.isfile(stdlib_path):
-                            files_to_process.append(os.path.abspath(stdlib_path))
-                            
-    processed_contents.sort(key=lambda x: x[0])
-    for path, content in processed_contents:
+        try:
+            lexer = Lexer(content)
+            tokens = lexer.tokenize()
+            parser = Parser(tokens)
+            ast = parser.parse()
+            for imp in ast.imports:
+                try:
+                    sub_file = resolver.resolve_module_file(imp.module_path)
+                    process_file(sub_file)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    process_file(filepath)
+    
+    if not visited_files:
+        return get_file_hash(filepath)
+        
+    hasher = hashlib.sha256()
+    for path in sorted(visited_files.keys()):
         hasher.update(path.encode('utf-8'))
-        hasher.update(content.encode('utf-8'))
+        hasher.update(visited_files[path].encode('utf-8'))
         
     return hasher.hexdigest()
 
@@ -66,84 +66,158 @@ def get_file_hash(filepath: str) -> str:
         pass
     return hasher.hexdigest()
 
+from src.compiler_db import QueryDb
+
+_DBS = {}
+
+def get_db(workspace_root: str) -> QueryDb:
+    global _DBS
+    workspace_root = os.path.abspath(workspace_root)
+    if workspace_root not in _DBS:
+        _DBS[workspace_root] = QueryDb(workspace_root)
+    return _DBS[workspace_root]
+
+def query_parse(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    db.add_input_file(filepath)
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read()
+    lexer = Lexer(content)
+    tokens = lexer.tokenize()
+    parser = Parser(tokens)
+    return parser.parse()
+
+def parse(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    return db.execute_query("parse", filepath, query_parse, filepath, workspace_root)
+
+def query_resolve_imports(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    ast = parse(filepath, workspace_root)
+    resolver = ImportResolver(workspace_root)
+    resolved_ast = resolver.resolve(ast)
+    for imp in resolved_ast.imports:
+        try:
+            sub_file = resolver.resolve_module_file(imp.module_path)
+            db.add_input_file(sub_file)
+        except Exception:
+            pass
+    return resolved_ast
+
+def resolve_imports(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    return db.execute_query("resolve_imports", filepath, query_resolve_imports, filepath, workspace_root)
+
+def query_type_check(filepath: str, workspace_root: str):
+    ast = resolve_imports(filepath, workspace_root)
+    type_checker = TypeChecker()
+    type_checker.check(ast)
+    return ast
+
+def type_check(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    return db.execute_query("type_check", filepath, query_type_check, filepath, workspace_root)
+
+def query_to_eqir(filepath: str, workspace_root: str):
+    ast = type_check(filepath, workspace_root)
+    from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
+    mlir_converter = ASTToMLIRConverter()
+    mlir_module = mlir_converter.convert(ast)
+    eqir_converter = MLIRToEQIRConverter()
+    graph = eqir_converter.convert(mlir_module)
+    return graph, ast
+
+def to_eqir(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    return db.execute_query("to_eqir", filepath, query_to_eqir, filepath, workspace_root)
+
 def load_from_cache(filepath: str, workspace_root: str, cache_type: str):
-    import pickle
-    try:
-        file_hash = get_file_hash(filepath)
-        cache_dir = os.path.join(workspace_root, ".eigen_cache")
-        cache_path = os.path.join(cache_dir, f"{file_hash}.{cache_type}")
-        if os.path.isfile(cache_path):
-            if cache_type in ("ast", "ssa", "zx"):
-                with open(cache_path, 'rb') as f:
-                    return pickle.load(f)
-            else:
-                with open(cache_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                if cache_type == "ebc":
-                    if isinstance(data, dict) and data.get("major") == 3:
-                        return [Instruction.from_dict(d) for d in data["instructions"]]
-                    elif isinstance(data, list):
-                        return [Instruction.from_dict(d) for d in data]
-                elif cache_type == "eqir":
-                    return EQIRGraph.from_dict(data)
-    except Exception:
-        pass
+    db = get_db(workspace_root)
+    # 1. Try legacy manual load
+    query_key = f"{cache_type}:{filepath}"
+    record = db.records.get(query_key)
+    if record:
+        valid, _ = db.verify_record(query_key)
+        if valid:
+            cache_path = os.path.join(workspace_root, record["cache_file"])
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, "rb") as f:
+                        import pickle
+                        return pickle.load(f)
+                except Exception:
+                    pass
+                    
+    # 2. Try the QueryDb to_eqir check (for backwards compatibility with eqir query type)
+    if cache_type == "eqir":
+        eqir_key = f"to_eqir:{filepath}"
+        record = db.records.get(eqir_key)
+        if record:
+            valid, _ = db.verify_record(eqir_key)
+            if valid:
+                cache_path = os.path.join(workspace_root, record["cache_file"])
+                if os.path.exists(cache_path):
+                    res = db.read_cache_file(cache_path, "to_eqir")
+                    if res:
+                        return res[0]
     return None
 
 def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
+    # Support manual legacy saving using pickle
+    db = get_db(workspace_root)
+    query_key = f"{cache_type}:{filepath}"
+    
+    db.current_query = query_key
+    db.records[query_key] = {
+        "cache_file": "",
+        "result_hash": "",
+        "input_files": {},
+        "dependencies": []
+    }
+    db.add_input_file(filepath)
+    
+    # Compute result hash
+    import hashlib
     import pickle
+    hasher = hashlib.sha256()
     try:
-        file_hash = get_file_hash(filepath)
-        cache_dir = os.path.join(workspace_root, ".eigen_cache")
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_path = os.path.join(cache_dir, f"{file_hash}.{cache_type}")
-        if cache_type in ("ast", "ssa", "zx"):
-            with open(cache_path, 'wb') as f:
-                pickle.dump(obj, f)
-        else:
-            if cache_type == "ebc":
-                data = {
-                    "major": 3,
-                    "minor": 0,
-                    "instructions": [inst.to_dict() for inst in obj]
-                }
-            elif cache_type == "eqir":
-                data = obj.to_dict()
-            else:
-                return
-            with open(cache_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
+        hasher.update(pickle.dumps(obj))
     except Exception:
-        pass
+        hasher.update(str(obj).encode('utf-8'))
+    result_hash = hasher.hexdigest()
+    
+    cache_file = os.path.join(db.cache_dir, f"manual_{result_hash}.{cache_type}")
+    os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+    with open(cache_file, "wb") as f:
+        pickle.dump(obj, f)
+        
+    try:
+        rel_cache = os.path.relpath(cache_file, db.workspace_root)
+    except ValueError:
+        rel_cache = os.path.abspath(cache_file)
+        
+    db.records[query_key]["cache_file"] = rel_cache
+    db.records[query_key]["result_hash"] = result_hash
+    db.current_query = None
+    db.save()
+
+def query_to_ebc(filepath: str, workspace_root: str):
+    graph, ast = to_eqir(filepath, workspace_root)
+    from src.backend.ebc_compiler import EBCCompiler
+    compiler = EBCCompiler()
+    return compiler.compile_ast(ast)
+
+def to_ebc(filepath: str, workspace_root: str):
+    db = get_db(workspace_root)
+    return db.execute_query("to_ebc", filepath, query_to_ebc, filepath, workspace_root)
 
 def compile_to_eqir(filepath: str, workspace_root: str) -> tuple:
     if not os.path.isfile(filepath):
         print(f"Error: File '{filepath}' not found.", file=sys.stderr)
         sys.exit(1)
-        
-    with open(filepath, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    lexer = Lexer(content)
-    tokens = tokens = lexer.tokenize()
-    parser = Parser(tokens)
-    ast = parser.parse()
-
-    resolver = ImportResolver(workspace_root)
-    ast = resolver.resolve(ast)
-
-    type_checker = TypeChecker()
+    
     try:
-        type_checker.check(ast)
+        return to_eqir(filepath, workspace_root)
     except TypeErrorException as e:
         print(f"Type Verification Failed:\n{e}", file=sys.stderr)
         sys.exit(1)
-
-    from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
-    mlir_converter = ASTToMLIRConverter()
-    mlir_module = mlir_converter.convert(ast)
-    
-    eqir_converter = MLIRToEQIRConverter()
-    graph = eqir_converter.convert(mlir_module)
-    
-    return graph, ast

@@ -1,6 +1,9 @@
 import enum
 import re
 
+class TokensList(list):
+    pass
+
 class TokenType(enum.Enum):
     # Directives
     EIGEN = "eigen"
@@ -385,4 +388,6 @@ class Lexer:
             self.error(f"Unexpected character: {repr(char)}")
 
         tokens.append(Token(TokenType.EOF, "", self.line, self.column))
-        return tokens
+        tokens_list = TokensList(tokens)
+        tokens_list.source = self.source
+        return tokens_list

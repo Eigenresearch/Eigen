@@ -113,7 +113,16 @@ class SSAOptimizer:
                             if op == Opcode.ADD: folded_val = v1 + v2
                             elif op == Opcode.SUB: folded_val = v1 - v2
                             elif op == Opcode.MUL: folded_val = v1 * v2
-                            elif op == Opcode.DIV: folded_val = v1 / v2 if v2 != 0 else None
+                            elif op == Opcode.DIV:
+                                if v2 == 0:
+                                    folded_val = None
+                                elif isinstance(v1, int) and isinstance(v2, int):
+                                    if v1 == -9223372036854775808 and v2 == -1:
+                                        folded_val = None
+                                    else:
+                                        folded_val = v1 // v2
+                                else:
+                                    folded_val = v1 / v2
                             elif op == Opcode.EQ: folded_val = v1 == v2
                             elif op == Opcode.NEQ: folded_val = v1 != v2
                             elif op == Opcode.LT: folded_val = v1 < v2

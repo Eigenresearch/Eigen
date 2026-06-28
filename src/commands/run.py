@@ -12,6 +12,19 @@ from src.backend.ebc_compiler import EBCCompiler
 
 @register_command("run")
 def run_command(args, workspace_root):
+    if getattr(args, 'aot', False):
+        from src.aot.compiler import AOTCompiler
+        seed_val = getattr(args, 'seed', 0)
+        if seed_val is None:
+            seed_val = 0
+        aot = AOTCompiler()
+        try:
+            aot.jit_execute(args.file, workspace_root, seed=seed_val)
+            return
+        except Exception as e:
+            print(f"WARNING: AOT JIT failed ({e}), falling back to VM", file=sys.stderr)
+            args.vm = True
+
     if args.file.endswith('.ebc'):
         print(f"Executing EBC bytecode file '{args.file}' on VM...")
         with open(args.file, 'r', encoding='utf-8') as f:
@@ -23,7 +36,8 @@ def run_command(args, workspace_root):
         from src.noise.noise_model import NoiseModel
         noise_model = NoiseModel(args.noise, args.noise_prob)
         gpu_platform = getattr(args, 'gpu', 'none')
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform)
+        seed_val = getattr(args, 'seed', None)
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val)
         vm.execute(instructions)
         return
 
@@ -103,8 +117,9 @@ def run_command(args, workspace_root):
         from src.noise.noise_model import NoiseModel
         noise_model = NoiseModel(args.noise, args.noise_prob)
         gpu_platform = getattr(args, 'gpu', 'none')
+        seed_val = getattr(args, 'seed', None)
         
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform)
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val)
         if sim_backend_type == 'sparse':
             vm.simulator.is_sparse = True
         try:
@@ -120,8 +135,9 @@ def run_command(args, workspace_root):
         from src.noise.noise_model import NoiseModel
         noise_model = NoiseModel(args.noise, args.noise_prob)
         gpu_platform = getattr(args, 'gpu', 'none')
+        seed_val = getattr(args, 'seed', None)
         
-        runtime = EigenRuntime(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform)
+        runtime = EigenRuntime(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val)
         if sim_backend_type == 'sparse':
             runtime.simulator.is_sparse = True
         try:

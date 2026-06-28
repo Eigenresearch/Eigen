@@ -1,6 +1,6 @@
-# Eigen 2.3 — Helios Language Specification & Developer Reference
+# Eigen 2.4 — Mone Language Specification & Developer Reference
 
-This document provides the authoritative language specification and developer reference for **Eigen 2.3 — Helios**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, and native acceleration.
+This document provides the authoritative language specification and developer reference for **Eigen 2.4 — Mone**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, and native acceleration.
 
 ---
 
@@ -30,6 +30,7 @@ Comments in Eigen are single-line and begin with a `#` symbol. They can appear a
 # This is a full-line comment
 let x: int = 10  # This is an inline comment
 ```
+Doc-comments begin with three hash marks `###` or double slash and three slashes `///` and are processed by the documentation generator.
 
 ### 2.3 Identifiers
 Identifiers are names given to variables, functions, quantum subroutines, fields, modules, and structures.
@@ -70,7 +71,7 @@ Eigen uses a static, checked type system. The type checker enforces correctness 
 
 ### 3.2 Quantum Types
 - **`qubit`**: A reference to a physical or simulated quantum bit.
-  - **Non-Copiable**: Qubits cannot be copied, reassigned, or passed by value. They must be allocated and referenced by name.
+  - **Non-Copiable / Linear Type**: Qubits cannot be copied, reassigned, or passed by value. They must be allocated and referenced by name. This guarantees physical conservation laws.
 - **`cbit`**: A classical bit (storing `0` or `1`) representing the output of a quantum measurement.
   - **Compatibility**: `cbit` variables can be compared directly with integer constants or variables, and can be coerced to `int` in assignments.
 
@@ -133,7 +134,7 @@ let alice_score: float = scores["Alice"]
 
 ## 4. Extended Backus-Naur Form (EBNF) Grammar
 
-Below is the formal syntactic grammar of Eigen 2.3:
+Below is the formal syntactic grammar of Eigen 2.4:
 
 ```ebnf
 Program             = "eigen" Version [ ModuleDecl ] { ImportDecl } { Statement } EOF ;
@@ -219,7 +220,7 @@ LogicalAndExpr      = EqualityExpr { "and" EqualityExpr } ;
 EqualityExpr        = RelationalExpr { ( "==" | "!=" ) RelationalExpr } ;
 RelationalExpr      = AdditiveExpr { ( "<" | ">" | "<=" | ">=" ) AdditiveExpr } ;
 AdditiveExpr        = MultiplicativeExpr { ( "+" | "-" ) MultiplicativeExpr } ;
-MultiplicativeExpr  = UnaryExpr { ( "*" | "/" ) UnaryExpr } ;
+AdditiveExpr        = MultiplicativeExpr { ( "*" | "/" ) UnaryExpr } ;
 UnaryExpr           = [ "-" | "+" | "not" ] AccessExpr ;
 AccessExpr          = PrimaryExpr { "." Identifier | "[" Expression "]" | "(" [ ExprList ] ")" } ;
 
@@ -328,8 +329,11 @@ func add_numbers(a: int, b: int) -> int {
 }
 ```
 
-### 6.2 Recursion
-Eigen functions natively support recursion. Activation frames are allocated on the VM call stack and resolved upon returning.
+### 6.2 Scope Rules
+Eigen resolves variables lexically. Block statements bounded by braces `{}` form closures; variables declared within blocks cannot be accessed outside them. 
+
+### 6.3 Recursion & Memory Limits
+Eigen functions natively support recursion. Activation frames are allocated on the VM call stack. The maximum call frame recursion depth under the VM is capped at $10,000$ to prevent system stack overflow:
 ```eigen
 func fibonacci(n: int) -> int {
     if n <= 1 {
@@ -339,15 +343,15 @@ func fibonacci(n: int) -> int {
 }
 ```
 
-### 6.3 Local Variable Bindings
+### 6.4 Local Variable Bindings
 Variables are defined using the `let` keyword, requiring a type annotation and initialization:
 ```eigen
 let count: int = 0
 let weight: float = 78.3
-let name: string = "Helios"
+let name: string = "Mone"
 ```
 
-### 6.4 Conditional Branching
+### 6.5 Conditional Branching
 `if` and `else` blocks allow conditional execution based on boolean expressions.
 ```eigen
 if weight > 100.0 {
@@ -357,7 +361,7 @@ if weight > 100.0 {
 }
 ```
 
-### 6.5 Iteration (Loops)
+### 6.6 Iteration (Loops)
 Eigen supports both `while` loops and collection iteration with `for`.
 
 ```eigen
@@ -469,18 +473,9 @@ Timing functions:
 - `now() -> float`: Unix epoch timestamp.
 - `sleep(ms: int) -> int`: Blocks the thread for `ms` milliseconds.
 
-### 9.8 Quantum Library Helpers
-Predefined quantum algorithms and circuit structures:
-- `quantum.bell`: Bell state creation helper.
-- `quantum.deutsch`: Oracles for Deutsch-Jozsa algorithms.
-- `quantum.ghz`: GHZ (Greenberger-Horne-Zeilinger) state algorithms.
-- `quantum.grover`: Iteration structures for Grover's search.
-
 ---
 
-## 10. Compiler & IR Pipeline
-
-Eigen's compiler transforms source code through multiple levels of intermediate representation before execution:
+## 10. Compiler & Optimization Pipeline
 
 ```
 [ Eigen Source ]
@@ -504,8 +499,8 @@ Eigen's compiler transforms source code through multiple levels of intermediate 
 [ Eigen VM / JIT ]        [ Native Target Code ]
 ```
 
-### 10.1 Abstract Syntax Tree (AST)
-The parser checks the grammar and generates a hierarchical tree structure. The AST includes structures for loops, variables, quantum gates, parallel blocks, and exceptions.
+### 10.1 Abstract Syntax Tree (AST) & Zero-Copy Pratt Parsing
+The native compiler front-end (implemented in Rust) utilizes a zero-copy Pratt parser that parses token references from byte streams without text duplication. It produces 100% compliant and mutable AST objects.
 
 ### 10.2 MLIR Dialect Layer
 The compiler translates the AST into a structured Multi-Level Intermediate Representation (MLIR) matching standard dialects:
@@ -514,99 +509,21 @@ The compiler translates the AST into a structured Multi-Level Intermediate Repre
 - **`quantum` dialect**: Allocations and quantum gate operations.
 - **`cf` dialect**: Control flow transitions between basic blocks.
 
-This intermediate layer simplifies target compiler mapping and code optimization.
-
 ### 10.3 EQIR DAG
 Quantum gates are extracted into the **Equivalent Quantum Intermediate Representation (EQIR)** graph. This is a Directed Acyclic Graph representing gate dependencies, enabling gate fusion, commutation rewrites, and dead-gate cancellation.
 
-### 10.4 EBC Bytecode & Virtual Machine
-The default compilation target is **Eigen Bytecode (EBC)**. The bytecode is compiled to instruction objects executed by the VM dispatch loop.
-- **Trace-Based JIT**: The JIT compiler monitors active basic blocks. If a loop is executed repeatedly, the tracer captures the execution bytecode and compiles it to native Python routines, accelerating execution by 2x to 5x.
-- **Native Rust Execution**: When PyO3-based `eigen_native` is compiled, EBC execution is offloaded directly to a highly optimized native C/Rust execution thread loop.
-
-### 10.5 LLVM / QIR Generation
-Using `eigen build --llvm`, the compiler generates standard LLVM IR / Quantum Intermediate Representation (QIR). This generates clean SSA LLVM files referencing QIR runtime function declarations (e.g. `@__quantum__qis__h__body`).
-
-### 10.6 Caching System
-To accelerate incremental rebuilds, the compilation pipeline serializes intermediate stages to disk under `.eigen_cache/` matching file hashes:
+### 10.4 Caching System & Query DB
+To accelerate incremental rebuilds, the compilation pipeline serializes intermediate stages to disk under `.eigen_cache/` matching cryptographic file hashes (SHA-256):
 - `*.ast`: Binary pickle format of parsed AST.
 - `*.ssa`: Basic block structures.
 - `*.eqir`: Serialized JSON graph layout.
 - `*.zx`: Simplified Clifford graph layouts.
 - `*.ebc`: Instruction sets.
 
----
+### 10.5 JIT v2 Loop Optimizations
+Traces are monitored by an adaptive VM loop compiler:
+- **Loop-Invariant Code Motion (LICM):** Code instructions that produce identical values inside loops are automatically moved out of the loop block.
+- **Trace Specialization:** Inserts shape and type guards. In the case of guard failure, execution jumps back to deoptimized classical paths.
 
-## 11. Code Examples
-
-### 11.1 Complete Bell State & Classical Assertion
-```eigen
-eigen 2.3
-module quantum.bell
-
-# Create Bell State, measure, and assert entanglement
-qubit q0
-qubit q1
-cbit c0
-cbit c1
-
-H q0
-CNOT q0, q1
-
-measure q0 -> c0
-measure q1 -> c1
-
-print c0
-print c1
-assert c0 == c1
-```
-
-### 11.2 Classical Recursion, Struct Mutation, and Exception Handling
-```eigen
-eigen 2.3
-
-struct Configuration {
-    max_steps: int,
-    tolerance: float
-}
-
-func calculate_factorial(n: int) -> int {
-    if n <= 0 {
-        return 1
-    }
-    return n * calculate_factorial(n - 1)
-}
-
-try {
-    let conf: Configuration = Configuration { max_steps: 100, tolerance: 0.0001 }
-    conf.max_steps = 150
-    
-    let result: int = calculate_factorial(5)
-    print result
-    assert result == 120
-    
-    if conf.max_steps > 100 {
-        throw "ConfigStepsExceededException"
-    }
-} catch err {
-    print "Exception trapped successfully:"
-    print err
-}
-```
-
-### 11.3 Parallel Simulation Block
-```eigen
-eigen 2.3
-
-func run_phase_estimation(angle: float) -> int {
-    # Simulation code
-    let steps: int = 1000
-    return steps
-}
-
-parallel {
-    task run_phase_estimation(0.314)
-    task run_phase_estimation(0.785)
-    task run_phase_estimation(1.570)
-}
-```
+### 10.6 Standalone LLVM & QIR Generation
+Using `eigen build <file.eig> --aot --qir`, basic SSA blocks are converted into LLVM assembly conforming to standard QIR specification schemas. The resulting code compiles directly to standalone machine executables (`.exe` on Windows, native binaries on Linux/macOS) free of CPython dependencies.

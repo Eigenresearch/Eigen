@@ -1,14 +1,18 @@
+import random
 from src.ir.ir_graph import EQIRGraph, EQIRNode
 from src.simulator import QuantumSimulator
 
 class EigenRuntime:
-    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none'):
+    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none', seed: int | None = None):
+        self.rng = random.Random(seed)
         from src.noise.noise_model import NoiseModel
-        self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform)
+        self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform, seed=seed)
         self.classical_store = {}  # cbit/int/float name -> value
         self.trace_mode = trace_mode
         self.trace_log = []
-        self.noise_model = noise_model if noise_model is not None else NoiseModel()
+        self.noise_model = noise_model if noise_model is not None else NoiseModel(rng=self.rng)
+        if getattr(self.noise_model, 'rng', None) is None:
+            self.noise_model.rng = self.rng
 
     def log_trace(self, msg: str):
         self.trace_log.append(msg)
@@ -62,6 +66,24 @@ class EigenRuntime:
             return expr
 
     def execute(self, graph: EQIRGraph):
+        if getattr(self.simulator, 'sim_type', None) == 'auto':
+            n_qubits = 0
+            n_2q = 0
+            for node in graph.nodes.values():
+                if node.type == 'ALLOC':
+                    n_qubits += 1
+                elif node.type == 'GATE':
+                    if node.gate_name in ('CNOT', 'CZ', 'SWAP'):
+                        n_2q += 1
+            if n_qubits <= 16:
+                chosen = 'dense'
+            else:
+                if n_2q < n_qubits * 1.5:
+                    chosen = 'mps'
+                else:
+                    chosen = 'sparse'
+            self.simulator.configure_backend(chosen)
+
         nodes = graph.topological_sort()
         
         self.log_trace("Starting execution of EQIR v1.1 Graph")

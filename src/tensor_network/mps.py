@@ -1,15 +1,30 @@
 import numpy as np
 import math
 import random
+import cmath
+
+def native_svd(matrix_2d):
+    try:
+        import eigen_native
+        # Convert 2D complex numpy array/list to nested lists of (real, imag)
+        raw_mat = [[(float(val.real), float(val.imag)) for val in row] for row in matrix_2d]
+        u_raw, s_raw, vh_raw = eigen_native.compute_svd_native(raw_mat)
+        U = np.array([[complex(r, i) for r, i in row] for row in u_raw], dtype=complex)
+        S = np.array(s_raw, dtype=float)
+        Vh = np.array([[complex(r, i) for r, i in row] for row in vh_raw], dtype=complex)
+        return U, S, Vh
+    except Exception:
+        return np.linalg.svd(matrix_2d, full_matrices=False)
 
 class MPSSimulator:
-    def __init__(self, max_bond_dim=32):
+    def __init__(self, max_bond_dim=32, seed=None):
         self.tensors = []       # List of np.ndarray of shape (left_bond, 2, right_bond)
         self.qubits = []        # List of qubit names in chain order
         self.qubit_map = {}     # qubit_name -> chain index
         self.max_bond_dim = max_bond_dim
         self.cumulative_truncation_error = 0.0
         self.last_entropy = 0.0
+        self.rng = random.Random(seed)
 
     def allocate_qubit(self, name: str):
         if name in self.qubit_map:
@@ -117,7 +132,7 @@ class MPSSimulator:
         theta_mat = theta.reshape(L * d1, d2 * R)
         
         # SVD
-        U, S, Vh = np.linalg.svd(theta_mat, full_matrices=False)
+        U, S, Vh = native_svd(theta_mat)
         
         # Truncate bond dimension
         chi = min(len(S), self.max_bond_dim)
@@ -189,7 +204,7 @@ class MPSSimulator:
         # SVD reshape
         L, d1, d2, R = res.shape
         res_mat = res.reshape(L * d1, d2 * R)
-        U_svd, S, Vh = np.linalg.svd(res_mat, full_matrices=False)
+        U_svd, S, Vh = native_svd(res_mat)
         
         # Truncate
         chi = min(len(S), self.max_bond_dim)
@@ -260,7 +275,7 @@ class MPSSimulator:
         # Restore state
         self.tensors = tensors_backup
         
-        r = random.random()
+        r = self.rng.random()
         if r < p0:
             outcome = 0
             # Project to |0> and normalize

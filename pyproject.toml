@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eigen-lang"
-version = "2.3.0"
-description = "Eigen 2.3 — Helios: Runtime-first hybrid classical-quantum programming language"
+version = "2.4.0"
+description = "Eigen 2.4 — Mone: Runtime-first hybrid classical-quantum programming language"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -16,11 +16,13 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.20",
+    "llvmlite>=0.40.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-cov",
 ]
 
 [project.scripts]
@@ -35,3 +37,40 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "src/backend/backends/*",
+    "src/commands/*",
+    "src/cli.py",
+    "src/main.py",
+    "src/packager.py",
+    "src/formatter.py",
+    "src/doc_generator.py",
+    "src/lsp/*",
+    "src/debugger/*",
+    "src/backend/distributed.py",
+    "src/backend/llvm_compiler.py",
+    "src/backend/qiskit_backend.py",
+    "src/backend/gpu/gpu_engine.py",
+    "src/backend/vm.py",
+    "src/backend/ebc_compiler.py",
+    "src/runtime.py",
+    "src/compiler.py",
+    "src/crash_report.py",
+    "src/diagnostics.py",
+    "src/simulator.py",
+    "src/sparse_simulator.py",
+    "src/ir/mlir_dialect.py",
+    "src/ir/ir_graph.py",
+    "src/ir/ir_converter.py",
+    "src/ir/optimizer.py",
+    "src/ir/tensor_compiler.py",
+    "src/profiler.py",
+    "src/tensor_network/mps.py",
+]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
