@@ -141,27 +141,60 @@ Eigen features three specialized quantum simulation models to handle different c
 4. **GPU Engine 2.0**: Auto-detects and accelerates state operations using GPU acceleration (via CUDA, ROCm, or Metal depending on hardware).
 
 ### Trace-Based Adaptive VM JIT v2
-The VM contains a trace JIT engine. During bytecode loop execution, the JIT:
-- Identifies hot basic blocks and compiles them to optimized native bytecode loops.
-- Automatically performs loop-invariant code motion (LICM) and constant folding inside traces.
-- Inserts shape and type guards to specialize execution, falling back to deoptimization paths when guards fail.
-This provides a 2x-5x execution speedup.
+
+The VM contains a trace JIT engine. During bytecode loop execution, the JIT monitors basic blocks for high frequency execution (hotspots). Once a hotspot threshold is crossed, the JIT:
+1. **Loop-Invariant Code Motion (LICM):** Analyzes the instructions inside hot traces and hoists any expressions producing invariant values outside the loop body to avoid redundant operations.
+2. **Constant Folding:** Collapses known constant sub-expressions on-the-fly inside compiled traces.
+3. **Trace Specialization:** Emits specialized execution sequences with inserted type and shape guards (e.g. tracking vector sizes or scalar classifications).
+4. **Deoptimization Paths:** If any type or shape guard fails at runtime, the JIT gracefully exits the native execution segment and jumps to fallback classical VM paths without state corruption.
+
+This architecture delivers a **2x-5x execution speedup** on general hybrid classical-quantum tasks.
 
 ---
 
 ## Formal Verification & ZX-Calculus Engine
 
-The equivalence checker (`eigen verify-equiv`) verifies circuit similarity:
+The formal equivalence checker (`eigen verify-equiv`) evaluates whether two quantum circuits represent the same mathematical operator up to a global phase:
 
-1. **Fast-Reject Layer**: Builds and compares unitary matrices for small circuits to quickly catch discrepancies.
-2. **ZX-Calculus Graph Reduction**: Converts circuits into ZX graphs representing Z-spiders, X-spiders, and H-boxes. It applies simplification theorems:
-   - Spider fusion.
-   - Local complementation.
-   - Pivoting.
-   - Bialgebra and Hopf rules.
-   - Phase gadget fusion.
+1. **Fast-Reject Layer:** For circuits containing a small number of qubits ($N \le 8$), the checker constructs full unitary matrices and verifies matrix equivalence directly.
+2. **ZX-Calculus Graph Reduction:** For larger circuits, the compiler translates gate sequences into ZX-graphs consisting of:
+   - **Z-spiders (green nodes):** Representing phase shifts and diagonal operators.
+   - **X-spiders (red nodes):** Representing bit flips and off-diagonal transformations.
+   - **H-boxes (hadamard gates):** Acting as basis converters.
+   
+   The engine then applies simplification theorems iteratively:
+   - **Spider Fusion:** Merges adjacent spiders of the same color.
+   - **Identity Removal:** Deletes phase shifts equal to zero.
+   - **Local Complementation:** Simplifies Clifford subgraphs by complementing neighbor connections.
+   - **Pivoting:** Eliminates connected pairs of spiders with non-Clifford phases.
+   - **Bialgebra and Hopf Rules:** Clears redundant connections and self-loops.
 
-If the simplified ZX graphs match, equivalence is formally proven. This is ideal for validating large Clifford+T circuits.
+   If the simplified graphs match identically, the circuits are proven formally equivalent. If the graph reduction is inconclusive, the system reports `Indeterminate` rather than returning a false positive.
+
+---
+
+## Troubleshooting & FAQ
+
+### 1. Windows MSVC Linker Error LNK1107 or LNK1158
+* **Cause:** Happens during `--aot` binary compilation when `link.exe` cannot find compiler paths or has mismatched flags (e.g. `/DEBUG:NONE`).
+* **Fix:** Ensure you run compilation from the "Developer PowerShell for VS" or that MSVC `cl.exe`/`link.exe` paths are in your system `PATH`. The compiler automatically replaces `/DEBUG:NONE` with `/RELEASE` to resolve MSVC constraints.
+
+### 2. PyO3 Runtime GIL Access Violations (0xC0000005)
+* **Cause:** Linking a precompiled static library containing CPython hooks into a standalone executable.
+* **Fix:** Build `eigen_native` with the `--no-default-features` flag:
+  ```bash
+  cd native/rust
+  cargo build --release --no-default-features
+  ```
+  This removes all `pyo3` dependencies and yields a pure-native static library.
+
+### 3. Sparse Simulator Hangs on Large Superpositions
+* **Cause:** Running highly entangled states (e.g., $H$ gate applied to 20+ qubits simultaneously) inside the sparse simulator. The sparse simulator maps states with non-zero amplitudes; superposition-heavy workloads grow exponentially and should be simulated using the dense backend.
+* **Fix:** Use the auto-routing selector. The system automatically switches backends based on density thresholds.
+
+### 4. ValueError: path is on mount 'D:', start on mount 'C:'
+* **Cause:** Running tests or building packages across different Windows drives when using relative path resolutions in the cache DB.
+* **Fix:** The Salsa query engine automatically catches mount exceptions and falls back to absolute path key mappings.
 
 ---
 
