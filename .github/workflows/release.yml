@@ -3,7 +3,7 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v2.3.*'
+      - 'v2.*'
 
 permissions:
   contents: write
@@ -64,13 +64,14 @@ jobs:
 
       - name: Build Windows Installer
         run: |
-          python scripts/build_installers.py > win_build.log 2>&1 || (type win_build.log && exit 1)
+          python scripts/build_installers.py > win_build.log 2>&1
+          if ($LASTEXITCODE -ne 0) { type win_build.log; exit 1 }
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Windows-Installer
-          path: dist/Eigen-2.3-Windows-x64.exe
+          path: dist/Eigen-*-Windows-x64.exe
 
   build-linux:
     name: Build Linux AppImage
@@ -105,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Linux-AppImage
-          path: dist/Eigen-2.3-Linux.AppImage
+          path: dist/Eigen-*-Linux.AppImage
 
   build-macos:
     name: Build macOS PKG
@@ -133,7 +134,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macOS-PKG
-          path: dist/Eigen-2.3-macOS.pkg
+          path: dist/Eigen-*-macOS.pkg
 
   create-release:
     name: Create GitHub Release
@@ -142,6 +143,10 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
@@ -165,27 +170,70 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/Eigen-2.3-Windows-x64.exe
-            dist/Eigen-2.3-Linux.AppImage
-            dist/Eigen-2.3-macOS.pkg
+            dist/Eigen-*-Windows-x64.exe
+            dist/Eigen-*-Linux.AppImage
+            dist/Eigen-*-macOS.pkg
           body: |
-            # Eigen 2.3 — Helios Release
-            
-            Welcome to Eigen 2.3 — Helios!
-            
-            This is a stabilized, performance-oriented, runtime-first hybrid classical-quantum programming language platform designed for serious development, research workloads, scalable experimentation, and transparent backend compatibility.
-            
-            ### Key Features
-            - **MLIR Dialect Layer:** AST -> MLIR Dialects (func, arith, quantum, cf) -> EQIR DAG translation.
-            - **GPU Engine 2.0:** Integrated support for CUDA, ROCm, and Metal with automatic platform detection (`eigen run --gpu auto`).
-            - **Quantum Tensor Compiler:** Advanced simulation of large low-entanglement circuits via tensor graph optimizer.
-            - **Concurrency Scheduler:** Parallel block structures (`parallel { task f() }`) executed using a DAG scheduler.
-            - **LLVM / QIR Target:** Native compilation support mapping SSA forms directly to LLVM IR (`eigen build --llvm`).
-            - **Incremental Compiler Caching:** Fast caching of compile targets (AST, SSA, EQIR, ZX, EBC) inside `.eigen_cache/` to speed up rebuilds.
-            
-            ### Installers
-            - **Windows:** `Eigen-2.3-Windows-x64.exe`
-            - **Linux:** `Eigen-2.3-Linux.AppImage`
-            - **macOS:** `Eigen-2.3-macOS.pkg`
+            # Eigen ${{ steps.version.outputs.VERSION }} Release
+
+            Welcome to the latest release of **Eigen** — a runtime-first hybrid classical-quantum programming language.
+
+            ## Installers
+            | Platform | File | Notes |
+            |---|---|---|
+            | **Windows x64** | `Eigen-*-Windows-x64.exe` | Standalone — no Python required |
+            | **Linux x86_64** | `Eigen-*-Linux.AppImage` | Run with `chmod +x` then execute |
+            | **macOS** | `Eigen-*-macOS.pkg` | Double-click to install to `/usr/local/bin` |
+
+            ## Quick Start
+            ```bash
+            # Run a quantum program
+            eigen run examples/bell.eig --trace
+
+            # Compile to standalone native binary
+            eigen build examples/bell.eig --aot --opt-level O2
+
+            # Generate QIR-compatible LLVM IR
+            eigen build examples/qft.eig --qir
+
+            # Check environment health
+            eigen doctor
+
+            # Run full test suite
+            eigen test
+            ```
+
+            ## What's New in 2.4 — Mone
+            - **Zero-Copy Rust Frontend** — 9.7× faster parsing (1k LOC), 4.2× on 100k LOC
+            - **Native SIMD Simulator Kernels** — Rayon + AVX2/AVX512 gate execution
+            - **Salsa Incremental Cache** — SHA-256 content hashing, skips unchanged compile steps
+            - **JIT v2** — LICM, constant folding, type guards, deoptimization paths
+            - **Standalone AOT Compiler** — `eigen build --aot` produces `.exe` with no Python runtime
+            - **QIR Output** — `eigen build --qir` emits opaque-pointer QIR LLVM IR
+            - **MSVC Compatibility** — `/RELEASE` flag, no LTCG conflicts on Windows
+
+            ## Performance vs 2.3
+            | Benchmark | VM | AOT | Speedup |
+            |---|---|---|---|
+            | fib(22) classical | 411 ms | 22 ms | **18×** |
+            | Bell pair 500 shots | 125 ms | 9 ms | **13×** |
+            | Grover 2-qubit 500 iter | 138 ms | 10 ms | **13×** |
+            | factorial(12) × 10000 | 917 ms | 20 ms | **44×** |
+
+            ## Bug Fixes
+            - Fixed MSVC linker LNK2005 (LTCG static library conflicts)
+            - Fixed Windows cross-drive `os.path.relpath` ValueError (D: ↔ C:)
+            - Fixed stale AST cache (NTFS mtime resolution → SHA-256 hashing)
+            - Fixed early dependency reset in `QueryDb.execute_query`
+            - Fixed MPS `RZ` gate `NameError` (missing `cmath` import)
+            - Fixed JIT cache cleared per-run (now global LRU by function_hash+block_id)
+
+            ## Full Changelog
+            See [CHANGELOG.md](https://github.com/Eigenresearch/Eigen/blob/main/CHANGELOG.md) for complete details.
+
+            ## Documentation
+            - [Language Specification](https://github.com/Eigenresearch/Eigen/blob/main/LANGUAGE.md)
+            - [Architecture](https://github.com/Eigenresearch/Eigen/blob/main/docs/architecture.md)
+            - [Examples Guide](https://github.com/Eigenresearch/Eigen/blob/main/docs/examples-guide.md)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
