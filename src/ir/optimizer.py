@@ -1,4 +1,5 @@
 from src.ir.ir_graph import EQIRGraph, EQIRNode
+import math
 
 class EQIROptimizer:
     def __init__(self):
@@ -8,6 +9,26 @@ class EQIROptimizer:
         """
         Runs optimization passes using a worklist-based rewrite loop with loop guards.
         """
+        try:
+            import eigen_native
+            dict_data = graph.to_dict()
+            opt_dict = eigen_native.optimize_eqir_native(dict_data)
+            
+            # Reconstruct optimized graph
+            opt_graph = EQIRGraph.from_dict(opt_dict)
+            
+            # Mutate in-place
+            graph.nodes = opt_graph.nodes
+            graph.next_node_id = opt_graph.next_node_id
+            graph.qubit_last_writer = opt_graph.qubit_last_writer
+            graph.cbit_last_writer = opt_graph.cbit_last_writer
+            
+            self.iterations_count = opt_dict.get("iterations_count", 0)
+            self.optimizations_count = opt_dict.get("optimizations_count", 0)
+            return graph
+        except (ImportError, AttributeError):
+            pass
+
         worklist = set(graph.nodes.keys())
         max_iterations = len(graph.nodes) * 5 + 1000
         iterations = 0
@@ -62,7 +83,9 @@ class EQIROptimizer:
                     
                     angle1 = node.args[0]
                     angle2 = next_node.args[0]
-                    new_angle = (angle1 + angle2) % (2 * 3.141592653589793)
+                    if not isinstance(angle1, (int, float)) or not isinstance(angle2, (int, float)):
+                        continue
+                    new_angle = (angle1 + angle2) % (2 * math.pi)
                     node.args[0] = new_angle
                     
                     affected = {p.id for p in next_node.parents} | {c.id for c in next_node.children} | {node.id}

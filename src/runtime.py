@@ -1,5 +1,6 @@
 import random
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+import ast
+from src.ir.ir_graph import EQIRGraph
 from src.simulator import QuantumSimulator
 
 class EigenRuntime:
@@ -15,8 +16,10 @@ class EigenRuntime:
             self.noise_model.rng = self.rng
 
     def log_trace(self, msg: str):
-        self.trace_log.append(msg)
         if self.trace_mode:
+            self.trace_log.append(msg)
+            if len(self.trace_log) > 10000:
+                del self.trace_log[:5000]
             print(f"[TRACE] {msg}")
 
     def format_amplitudes(self) -> str:
@@ -42,26 +45,102 @@ class EigenRuntime:
             return expr
         if expr in self.classical_store:
             return self.classical_store[expr]
-        import re
-        if not re.match(r'^[a-zA-Z0-9_\s\(\)\=\!\+\-\*\/\<\>\.\,j]+$', expr):
-            return expr
         
-        def repl(match):
-            word = match.group(0)
-            if word in ('True', 'False', 'None'):
-                return word
-            if word in self.classical_store:
-                val = self.classical_store[word]
-                if isinstance(val, bool):
-                    return str(val)
-                return repr(val)
-            if word.isidentifier():
-                return '0'
-            return word
-            
-        subbed = re.sub(r'[a-zA-Z_][a-zA-Z0-9_]*', repl, expr)
+        def safe_eval(node, variables):
+            if isinstance(node, ast.Expression):
+                return safe_eval(node.body, variables)
+            elif isinstance(node, ast.Constant):
+                return node.value
+            elif hasattr(ast, 'Num') and isinstance(node, ast.Num):  # Fallback for older python
+                return node.n
+            elif isinstance(node, ast.Name):
+                if node.id in ('True', 'False', 'None'):
+                    return {'True': True, 'False': False, 'None': None}[node.id]
+                return variables.get(node.id, 0)
+            elif isinstance(node, ast.UnaryOp):
+                operand = safe_eval(node.operand, variables)
+                if isinstance(node.op, ast.UAdd):
+                    return +operand
+                elif isinstance(node.op, ast.USub):
+                    return -operand
+                elif isinstance(node.op, ast.Not):
+                    return not operand
+                elif isinstance(node.op, ast.Invert):
+                    return ~operand
+                else:
+                    raise TypeError(f"Unsupported unary operator: {type(node.op)}")
+            elif isinstance(node, ast.BinOp):
+                left = safe_eval(node.left, variables)
+                right = safe_eval(node.right, variables)
+                if isinstance(node.op, ast.Add):
+                    return left + right
+                elif isinstance(node.op, ast.Sub):
+                    return left - right
+                elif isinstance(node.op, ast.Mult):
+                    return left * right
+                elif isinstance(node.op, ast.Div):
+                    return left / right
+                elif isinstance(node.op, ast.Mod):
+                    return left % right
+                elif isinstance(node.op, ast.Pow):
+                    return left ** right
+                elif isinstance(node.op, ast.LShift):
+                    return left << right
+                elif isinstance(node.op, ast.RShift):
+                    return left >> right
+                elif isinstance(node.op, ast.BitOr):
+                    return left | right
+                elif isinstance(node.op, ast.BitXor):
+                    return left ^ right
+                elif isinstance(node.op, ast.BitAnd):
+                    return left & right
+                elif isinstance(node.op, ast.FloorDiv):
+                    return left // right
+                else:
+                    raise TypeError(f"Unsupported binary operator: {type(node.op)}")
+            elif isinstance(node, ast.Compare):
+                left = safe_eval(node.left, variables)
+                for op, comparator in zip(node.ops, node.comparators):
+                    right = safe_eval(comparator, variables)
+                    if isinstance(op, ast.Eq):
+                        val = (left == right)
+                    elif isinstance(op, ast.NotEq):
+                        val = (left != right)
+                    elif isinstance(op, ast.Lt):
+                        val = (left < right)
+                    elif isinstance(op, ast.LtE):
+                        val = (left <= right)
+                    elif isinstance(op, ast.Gt):
+                        val = (left > right)
+                    elif isinstance(op, ast.GtE):
+                        val = (left >= right)
+                    else:
+                        raise TypeError(f"Unsupported comparison operator: {type(op)}")
+                    if not val:
+                        return False
+                    left = right
+                return True
+            elif isinstance(node, ast.BoolOp):
+                if isinstance(node.op, ast.And):
+                    for val_node in node.values:
+                        val = safe_eval(val_node, variables)
+                        if not val:
+                            return False
+                    return True
+                elif isinstance(node.op, ast.Or):
+                    for val_node in node.values:
+                        val = safe_eval(val_node, variables)
+                        if val:
+                            return True
+                    return False
+                else:
+                    raise TypeError(f"Unsupported boolean operator: {type(node.op)}")
+            else:
+                raise TypeError(f"Unsupported AST node: {type(node)}")
+
         try:
-            return eval(subbed, {"__builtins__": None}, {})
+            tree = ast.parse(expr, mode='eval')
+            return safe_eval(tree, self.classical_store)
         except Exception:
             return expr
 
@@ -92,14 +171,25 @@ class EigenRuntime:
             # 1. Check classical condition
             if node.condition:
                 cbit_name, op, expected_val = node.condition
-                actual_val = self.classical_store.get(cbit_name, 0)
+                actual_val = self.evaluate_classical(cbit_name)
+                exp_val = self.evaluate_classical(expected_val)
                 if op == '==':
-                    condition_met = (actual_val == expected_val)
+                    condition_met = (actual_val == exp_val)
+                elif op == '!=':
+                    condition_met = (actual_val != exp_val)
+                elif op == '<':
+                    condition_met = (actual_val < exp_val)
+                elif op == '<=':
+                    condition_met = (actual_val <= exp_val)
+                elif op == '>':
+                    condition_met = (actual_val > exp_val)
+                elif op == '>=':
+                    condition_met = (actual_val >= exp_val)
                 else:
                     condition_met = False
                     
                 if not condition_met:
-                    self.log_trace(f"Skipping node {node.id} because condition {cbit_name} == {expected_val} failed (actual value is {actual_val})")
+                    self.log_trace(f"Skipping node {node.id} because condition {cbit_name} {op} {expected_val} failed (actual value is {actual_val})")
                     continue
 
             # 2. Execute node based on type
@@ -137,6 +227,18 @@ class EigenRuntime:
                     self.simulator.CZ(targets[0], targets[1])
                 elif g_name == 'SWAP':
                     self.simulator.SWAP(targets[0], targets[1])
+                elif g_name == 'CCX':
+                    self.simulator.CCX(targets[0], targets[1], targets[2])
+                elif g_name == 'CSWAP':
+                    self.simulator.CSWAP(targets[0], targets[1], targets[2])
+                elif g_name == 'CP':
+                    self.simulator.CP(targets[0], targets[1], args[0])
+                elif g_name == 'CRX':
+                    self.simulator.CRX(targets[0], targets[1], args[0])
+                elif g_name == 'CRY':
+                    self.simulator.CRY(targets[0], targets[1], args[0])
+                elif g_name == 'CRZ':
+                    self.simulator.CRZ(targets[0], targets[1], args[0])
                 else:
                     raise ValueError(f"Unknown gate type: {g_name}")
                 
@@ -146,7 +248,8 @@ class EigenRuntime:
                 
                 args_str = f"({', '.join(map(str, args))})" if args else ""
                 self.log_trace(f"Applied gate: {g_name}{args_str} on {', '.join(targets)}")
-                self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
+                if self.trace_mode:
+                    self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
                 
             elif node.type == 'MEASURE':
                 q_name = node.targets[0]
@@ -155,7 +258,8 @@ class EigenRuntime:
                 outcome = self.noise_model.apply_readout_noise(outcome)
                 self.classical_store[c_name] = outcome
                 self.log_trace(f"Measured qubit '{q_name}' -> stored in cbit '{c_name}' (value: {outcome})")
-                self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
+                if self.trace_mode:
+                    self.log_trace(f"  Current Quantum State: {self.format_amplitudes()}")
                 
             elif node.type == 'TRACE':
                 print(f"[TRACE DIRECTIVE] Quantum State: {self.format_amplitudes()}")
@@ -171,6 +275,16 @@ class EigenRuntime:
                 
                 if op == '==':
                     assert_ok = (left_val == r_val)
+                elif op == '!=':
+                    assert_ok = (left_val != r_val)
+                elif op == '<':
+                    assert_ok = (left_val < r_val)
+                elif op == '<=':
+                    assert_ok = (left_val <= r_val)
+                elif op == '>':
+                    assert_ok = (left_val > r_val)
+                elif op == '>=':
+                    assert_ok = (left_val >= r_val)
                 else:
                     assert_ok = False
                     

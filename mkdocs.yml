@@ -1,0 +1,55 @@
+site_name: Eigen
+site_description: The Runtime-First Hybrid Classical-Quantum Programming Language
+site_author: Eigen Development Team
+repo_url: https://github.com/Eigenresearch/Eigen
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.arithmatex:
+      generic: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Welcome: index.md
+  - Language Specification: language-specification.md
+  - Architecture: architecture.md
+  - Compiler Design: compiler-design.md
+  - EQIR Specification: eqir-specification.md
+  - Equivalence Checker: equivalence-checker.md
+  - Optimizer Specification: optimizer-specification.md
+  - Runtime Specification: runtime-specification.md
+  - Standard Library: standard-library.md
+  - Examples Guide: examples-guide.md

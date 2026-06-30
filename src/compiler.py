@@ -7,11 +7,18 @@ from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.semantic.import_resolver import ImportResolver
 from src.semantic.type_checker import TypeChecker, TypeErrorException
-from src.ir.ir_converter import EQIRConverter
 from src.ir.ir_graph import EQIRGraph
 from src.backend.bytecode import Instruction
 
 def get_workspace_root() -> str:
+    root = os.getcwd()
+    for _ in range(10):
+        if os.path.isfile(os.path.join(root, "eigen.toml")) or os.path.isfile(os.path.join(root, "pyproject.toml")):
+            return root
+        parent = os.path.dirname(root)
+        if parent == root:
+            break
+        root = parent
     return os.getcwd()
 
 def get_project_hash(filepath: str, workspace_root: str) -> str:
@@ -26,24 +33,21 @@ def get_project_hash(filepath: str, workspace_root: str) -> str:
         try:
             with open(abs_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-        except Exception:
-            return
+        except Exception as e:
+            raise FileNotFoundError(f"Could not read source file '{abs_path}': {e}")
         
         visited_files[abs_path] = content
         
-        try:
-            lexer = Lexer(content)
-            tokens = lexer.tokenize()
-            parser = Parser(tokens)
-            ast = parser.parse()
-            for imp in ast.imports:
-                try:
-                    sub_file = resolver.resolve_module_file(imp.module_path)
-                    process_file(sub_file)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        lexer = Lexer(content)
+        tokens = lexer.tokenize()
+        parser = Parser(tokens)
+        ast = parser.parse()
+        for imp in ast.imports:
+            try:
+                sub_file = resolver.resolve_module_file(imp.module_path)
+                process_file(sub_file)
+            except Exception as e:
+                print(f"Warning: Failed to resolve import '{imp.module_path}': {e}", file=sys.stderr)
 
     process_file(filepath)
     
@@ -112,6 +116,11 @@ def query_type_check(filepath: str, workspace_root: str):
     ast = resolve_imports(filepath, workspace_root)
     type_checker = TypeChecker()
     type_checker.check(ast)
+    
+    from src.semantic.monomorphizer import Monomorphizer
+    monomorphizer = Monomorphizer()
+    ast = monomorphizer.monomorphize(ast)
+    
     return ast
 
 def type_check(filepath: str, workspace_root: str):
@@ -201,15 +210,52 @@ def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
     db.current_query = None
     db.save()
 
-def query_to_ebc(filepath: str, workspace_root: str):
+def _has_classical_control_flow(node) -> bool:
+    from src.frontend.ast import (
+        WhileNode, ForNode, FuncDeclNode, TryCatchNode
+    )
+    if isinstance(node, (WhileNode, ForNode, FuncDeclNode, TryCatchNode)):
+        return True
+    if hasattr(node, "body") and node.body:
+        if isinstance(node.body, list):
+            for child in node.body:
+                if _has_classical_control_flow(child):
+                    return True
+        elif _has_classical_control_flow(node.body):
+            return True
+    if hasattr(node, "else_body") and node.else_body:
+        if isinstance(node.else_body, list):
+            for child in node.else_body:
+                if _has_classical_control_flow(child):
+                    return True
+        elif _has_classical_control_flow(node.else_body):
+            return True
+    if hasattr(node, "nodes") and node.nodes:
+        for child in node.nodes:
+            if _has_classical_control_flow(child):
+                return True
+    return False
+
+def query_to_ebc(filepath: str, workspace_root: str, optimize: bool = False):
     graph, ast = to_eqir(filepath, workspace_root)
     from src.backend.ebc_compiler import EBCCompiler
-    compiler = EBCCompiler()
-    return compiler.compile_ast(ast)
+    compiler = EBCCompiler(peephole=optimize)
+    if optimize and not _has_classical_control_flow(ast):
+        from src.ir.optimizer import EQIROptimizer
+        optimizer = EQIROptimizer()
+        graph = optimizer.optimize(graph)
+        instructions = compiler.compile_eqir(graph)
+    else:
+        instructions = compiler.compile_ast(ast)
+    if optimize:
+        from src.ir.ssa.optimizer import optimize_ebc
+        instructions = optimize_ebc(instructions)
+    return instructions
 
-def to_ebc(filepath: str, workspace_root: str):
+def to_ebc(filepath: str, workspace_root: str, optimize: bool = False):
     db = get_db(workspace_root)
-    return db.execute_query("to_ebc", filepath, query_to_ebc, filepath, workspace_root)
+    query_name = "to_ebc_opt" if optimize else "to_ebc"
+    return db.execute_query(query_name, filepath, query_to_ebc, filepath, workspace_root, optimize)
 
 def compile_to_eqir(filepath: str, workspace_root: str) -> tuple:
     if not os.path.isfile(filepath):

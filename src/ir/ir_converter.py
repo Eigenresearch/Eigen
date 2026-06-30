@@ -1,7 +1,10 @@
 from src.frontend.ast import (
     ProgramNode, QFuncDeclNode, LetNode, VarDeclNode,
     BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
-    MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode
+    MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode,
+    FuncDeclNode, ForNode, WhileNode, StructDeclNode, AssignmentNode, CallNode,
+    BreakNode, ContinueNode, ThrowNode, TryCatchNode,
+    MatchNode, StringInterpolationNode
 )
 from src.ir.ir_graph import EQIRGraph, EQIRNode
 
@@ -34,9 +37,34 @@ class EQIRConverter:
                     return left_val * right_val
                 elif node.op == '/':
                     return left_val / right_val
+                elif node.op == '**':
+                    return left_val ** right_val
+                elif node.op == '%':
+                    return left_val % right_val
+                elif node.op == '==':
+                    return left_val == right_val
+                elif node.op == '!=':
+                    return left_val != right_val
+                elif node.op == '<':
+                    return left_val < right_val
+                elif node.op == '>':
+                    return left_val > right_val
+                elif node.op == '<=':
+                    return left_val <= right_val
+                elif node.op == '>=':
+                    return left_val >= right_val
+                elif node.op in ('and', 'or', 'not'):
+                    if node.op == 'and':
+                        return bool(left_val) and bool(right_val)
+                    elif node.op == 'or':
+                        return bool(left_val) or bool(right_val)
+                    elif node.op == 'not':
+                        return not bool(left_val)
                 else:
                     return f"({left_val} {node.op} {right_val})"
-            except Exception:
+            except Exception as e:
+                import sys
+                print(f"DiagnosticWarning: evaluate_expr failed for BinaryOpNode({node.op}): {e}", file=sys.stderr)
                 return f"__expr_error__"
         else:
             return f"__unsupported_{type(node).__name__}__"
@@ -133,30 +161,49 @@ class EQIRConverter:
             return
 
         elif isinstance(node, IfNode):
-            # The condition is of the form: left == right
-            # Left is usually a cbit variable, right is a literal value (like 0 or 1)
             left_val = self.evaluate_expr(node.condition_left)
-            # If left_val resolves to a string, it means it's a variable reference (cbit name)
             if not isinstance(left_val, str):
                 left_val = str(left_val)
             
-            # Resolve cbit name if in a function call mapping
             cbit_name = param_map.get(left_val, left_val)
             right_val = self.evaluate_expr(node.condition_right)
 
-            # Save existing condition to restore it later
             prev_cond = self.current_condition
             
-            # For simplicity, we assume flat conditional block.
-            # If there's an existing active condition, we combine it, but our language doesn't have nested ifs.
-            # So just set it.
-            self.current_condition = (cbit_name, node.op, right_val)
+            # Combine condition if nested
+            if prev_cond is not None:
+                prev_cbit, prev_op, prev_val = prev_cond
+                cond1 = f"({prev_cbit} {prev_op} {repr(prev_val)})" if ' ' in prev_cbit or prev_op != '==' else f"{prev_cbit} {prev_op} {repr(prev_val)}"
+                cond2 = f"{cbit_name} {node.op} {repr(right_val)}"
+                combined_expr = f"({cond1}) and ({cond2})"
+                self.current_condition = (combined_expr, '==', True)
+            else:
+                self.current_condition = (cbit_name, node.op, right_val)
 
-            # Compile body statements under this condition
             for stmt in node.body:
                 self.convert_node(stmt, param_map)
+                
+            if hasattr(node, "else_body") and node.else_body:
+                opp_map = {
+                    "==": "!=",
+                    "!=": "==",
+                    "<": ">=",
+                    ">": "<=",
+                    "<=": ">",
+                    ">=": "<",
+                }
+                opp_op = opp_map.get(node.op, "!=")
+                if prev_cond is not None:
+                    prev_cbit, prev_op, prev_val = prev_cond
+                    cond1 = f"({prev_cbit} {prev_op} {repr(prev_val)})" if ' ' in prev_cbit or prev_op != '==' else f"{prev_cbit} {prev_op} {repr(prev_val)}"
+                    cond2 = f"{cbit_name} {opp_op} {repr(right_val)}"
+                    combined_expr = f"({cond1}) and ({cond2})"
+                    self.current_condition = (combined_expr, '==', True)
+                else:
+                    self.current_condition = (cbit_name, opp_op, right_val)
+                for stmt in node.else_body:
+                    self.convert_node(stmt, param_map)
 
-            # Restore previous condition
             self.current_condition = prev_cond
             return
 
@@ -165,9 +212,7 @@ class EQIRConverter:
             return
 
         elif isinstance(node, PrintNode):
-            # Print node can print a variable value
             resolved_expr = self.evaluate_expr(node.expr)
-            # Resolve if it is mapped
             if isinstance(resolved_expr, str):
                 resolved_expr = param_map.get(resolved_expr, resolved_expr)
             self.graph.add_operation('PRINT', print_expr=resolved_expr, condition=self.current_condition)
@@ -186,9 +231,77 @@ class EQIRConverter:
             return
 
         elif isinstance(node, ReturnNode):
-            # Return inside qfunc does nothing during inlining, it just signals exit
+            return
+
+        elif isinstance(node, FuncDeclNode):
+            self.graph.add_operation('FUNC_DECL', name=node.name)
+            for stmt in node.body:
+                self.convert_node(stmt, param_map)
+            return
+
+        elif isinstance(node, ForNode):
+            self.graph.add_operation('FOR', loop_var=node.variable)
+            for stmt in node.body:
+                self.convert_node(stmt, param_map)
+            return
+
+        elif isinstance(node, WhileNode):
+            self.graph.add_operation('WHILE')
+            for stmt in node.body:
+                self.convert_node(stmt, param_map)
+            return
+
+        elif isinstance(node, TryCatchNode):
+            self.graph.add_operation('TRY_CATCH')
+            for stmt in node.try_body:
+                self.convert_node(stmt, param_map)
+            for stmt in node.catch_body:
+                self.convert_node(stmt, param_map)
+            return
+
+        elif isinstance(node, StructDeclNode):
+            self.graph.add_operation('STRUCT_DECL', name=node.name)
+            return
+
+        elif isinstance(node, AssignmentNode):
+            self.graph.add_operation('ASSIGN', target=self.evaluate_expr(node.target))
+            return
+
+        elif isinstance(node, CallNode):
+            self.graph.add_operation('CALL', callee=self.evaluate_expr(node.callee))
+            return
+
+        elif isinstance(node, BreakNode):
+            self.graph.add_operation('BREAK')
+            return
+
+        elif isinstance(node, ContinueNode):
+            self.graph.add_operation('CONTINUE')
+            return
+
+        elif isinstance(node, ThrowNode):
+            self.graph.add_operation('THROW')
+            return
+
+        elif isinstance(node, (ProgramNode, QFuncDeclNode)):
+            return
+
+        elif isinstance(node, MatchNode):
+            self.graph.add_operation('MATCH')
+            for pattern, body in node.cases:
+                for stmt in body:
+                    self.convert_node(stmt, param_map)
+            if hasattr(node, 'default_body') and node.default_body:
+                for stmt in node.default_body:
+                    self.convert_node(stmt, param_map)
+            return
+
+        elif isinstance(node, StringInterpolationNode):
+            self.graph.add_operation('STRING_INTERP')
             return
 
         else:
-            # Other nodes (like ProgramNode, QFuncDeclNode) are not evaluated directly
+            import sys
+            print(f"DiagnosticWarning: AST node type '{type(node).__name__}' is not natively supported by EQIR converter.", file=sys.stderr)
+            self.graph.add_operation('UNSUPPORTED', node_class=type(node).__name__)
             return

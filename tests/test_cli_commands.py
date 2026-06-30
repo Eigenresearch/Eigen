@@ -121,8 +121,8 @@ class TestCLICommands(unittest.TestCase):
         large2_path = os.path.join(self.temp_dir, "large2.eig")
         
         large_source = "eigen 1.0\n" + "\n".join(f"qubit q{i}" for i in range(17)) + "\n"
-        large_source1 = large_source + "T q0\n"
-        large_source2 = large_source + "T q1\n"
+        large_source1 = large_source + "T q0\nCNOT q0, q1\n"
+        large_source2 = large_source + "T q0\nCNOT q0, q1\n"
         
         with open(large1_path, "w", encoding="utf-8") as f:
             f.write(large_source1)

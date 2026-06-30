@@ -25,6 +25,7 @@ class MPSSimulator:
         self.cumulative_truncation_error = 0.0
         self.last_entropy = 0.0
         self.rng = random.Random(seed)
+        self.created_qubits = [] # Qubits in original creation order
 
     def allocate_qubit(self, name: str):
         if name in self.qubit_map:
@@ -32,6 +33,7 @@ class MPSSimulator:
         idx = len(self.tensors)
         self.qubit_map[name] = idx
         self.qubits.append(name)
+        self.created_qubits.append(name)
         
         # New qubit is $|0\rangle$, tensor shape (1, 2, 1)
         # A[0, 0, 0] = 1.0, A[0, 1, 0] = 0.0
@@ -257,6 +259,71 @@ class MPSSimulator:
         ]
         self.apply_2qubit_gate(q1, q2, swap_matrix)
 
+    def CCX(self, c1: str, c2: str, t: str):
+        self.H(t)
+        self.CNOT(c2, t)
+        self.apply_1qubit_gate(t, [[1.0, 0.0], [0.0, cmath.exp(-1j * math.pi / 4)]]) # T*
+        self.CNOT(c1, t)
+        self.apply_1qubit_gate(t, [[1.0, 0.0], [0.0, cmath.exp(1j * math.pi / 4)]]) # T
+        self.CNOT(c2, t)
+        self.apply_1qubit_gate(t, [[1.0, 0.0], [0.0, cmath.exp(-1j * math.pi / 4)]]) # T*
+        self.CNOT(c1, t)
+        self.apply_1qubit_gate(t, [[1.0, 0.0], [0.0, cmath.exp(1j * math.pi / 4)]]) # T
+        self.apply_1qubit_gate(c2, [[1.0, 0.0], [0.0, cmath.exp(1j * math.pi / 4)]]) # T
+        self.CNOT(c1, c2)
+        self.apply_1qubit_gate(c1, [[1.0, 0.0], [0.0, cmath.exp(1j * math.pi / 4)]]) # T
+        self.apply_1qubit_gate(c2, [[1.0, 0.0], [0.0, cmath.exp(-1j * math.pi / 4)]]) # T*
+        self.CNOT(c1, c2)
+        self.H(t)
+
+    def CSWAP(self, c: str, t1: str, t2: str):
+        self.CNOT(t2, t1)
+        self.CCX(c, t1, t2)
+        self.CNOT(t2, t1)
+
+    def CP(self, control: str, target: str, theta: float):
+        val = cmath.exp(1j * theta)
+        cp_matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, val]
+        ]
+        self.apply_2qubit_gate(control, target, cp_matrix)
+
+    def CRX(self, control: str, target: str, theta: float):
+        cos_val = math.cos(theta / 2)
+        sin_val = math.sin(theta / 2)
+        crx_matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, cos_val, -1j * sin_val],
+            [0.0, 0.0, -1j * sin_val, cos_val]
+        ]
+        self.apply_2qubit_gate(control, target, crx_matrix)
+
+    def CRY(self, control: str, target: str, theta: float):
+        cos_val = math.cos(theta / 2)
+        sin_val = math.sin(theta / 2)
+        cry_matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, cos_val, -sin_val],
+            [0.0, 0.0, sin_val, cos_val]
+        ]
+        self.apply_2qubit_gate(control, target, cry_matrix)
+
+    def CRZ(self, control: str, target: str, theta: float):
+        val_0 = cmath.exp(-1j * theta / 2)
+        val_1 = cmath.exp(1j * theta / 2)
+        crz_matrix = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, val_0, 0.0],
+            [0.0, 0.0, 0.0, val_1]
+        ]
+        self.apply_2qubit_gate(control, target, crz_matrix)
+
     def measure(self, q: str) -> int:
         idx = self.get_qubit_index(q)
         
@@ -331,23 +398,18 @@ class MPSSimulator:
         n = len(self.tensors)
         state_vec = np.zeros(1 << n, dtype=complex)
         
-        sorted_qubits = sorted(self.qubit_map.keys(), key=lambda name: self.qubit_map[name])
         # Flatten the multidimensional array matching chain order
         flat_curr = curr.flatten()
-        # For each element, map its binary representation from chain order to sorted order
+        # For each element, map its binary representation from chain order to original creation order
         for idx in range(1 << n):
             val = flat_curr[idx]
             if abs(val) > 1e-12:
-                # Convert idx to bit list matching chain order self.qubits
-                # e.g., self.qubits = ['q1', 'q0'], target order = ['q0', 'q1']
-                # chain_idx maps self.qubits[k] -> bit
-                # We find the target index for each bit
                 sorted_idx = 0
                 for k, q in enumerate(self.qubits):
                     bit = (idx >> (n - 1 - k)) & 1
-                    q_idx = self.qubit_map[q]
                     if bit:
-                        sorted_idx |= (1 << q_idx)
+                        created_idx = self.created_qubits.index(q)
+                        sorted_idx |= (1 << created_idx)
                 state_vec[sorted_idx] = val
         return list(state_vec)
 

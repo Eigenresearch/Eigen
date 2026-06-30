@@ -68,7 +68,8 @@ pub fn wrap_node_to_py(py: Python, ast: &AST, id: NodeId) -> PyResult<PyObject> 
             let cond_left = wrap_node_to_py(py, ast, node.condition_left)?;
             let cond_right = wrap_node_to_py(py, ast, node.condition_right)?;
             let body: Vec<PyObject> = node.body.iter().map(|&i| wrap_node_to_py(py, ast, i)).collect::<PyResult<_>>()?;
-            let obj = ast_module.getattr("IfNode")?.call1((cond_left, &node.op, cond_right, body))?;
+            let else_body: Vec<PyObject> = node.else_body.iter().map(|&i| wrap_node_to_py(py, ast, i)).collect::<PyResult<_>>()?;
+            let obj = ast_module.getattr("IfNode")?.call1((cond_left, &node.op, cond_right, body, else_body))?;
             Ok(obj.into())
         }
         ASTNode::Return(node) => {

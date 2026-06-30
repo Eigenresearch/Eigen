@@ -1,7 +1,7 @@
 """Tests for Hardware Connectivity Mapper (routing module)."""
 import unittest
 from src.routing.router import (
-    CouplingMap, RoutedCircuit, BasicSwapRouter, GreedyRouter, route_eqir_graph
+    CouplingMap, RoutedCircuit, BasicSwapRouter, GreedyRouter, SabreRouter, route_eqir_graph
 )
 from src.ir.ir_graph import EQIRGraph
 
@@ -342,6 +342,19 @@ class TestRouteEQIRGraph(unittest.TestCase):
         cm = CouplingMap.linear(3)
         result = route_eqir_graph(graph, cm, 'greedy')
         self.assertIsNotNone(result)
+
+    def test_route_with_sabre(self):
+        graph = EQIRGraph()
+        graph.add_operation('ALLOC', targets=['q0'])
+        graph.add_operation('ALLOC', targets=['q1'])
+        graph.add_operation('ALLOC', targets=['q2'])
+        graph.add_operation('GATE', gate_name='H', targets=['q0'])
+        graph.add_operation('GATE', gate_name='CNOT', targets=['q0', 'q2'])
+
+        cm = CouplingMap.linear(3)
+        result = route_eqir_graph(graph, cm, 'sabre')
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(len(result.operations), 2)
 
     def test_route_too_few_physical_qubits(self):
         graph = EQIRGraph()

@@ -10,7 +10,7 @@ from src.frontend.lexer import Lexer, TokenType
 from src.frontend.parser import Parser
 from src.semantic.type_checker import TypeChecker, TypeErrorException
 from src.backend.ebc_compiler import EBCCompiler
-from src.backend.vm import EigenVM
+from src.backend.vm import EigenVM, UndefinedVariableError
 from src.simulator import QuantumSimulator
 from src.ir.ir_converter import EQIRConverter
 from src.ir.ir_graph import EQIRGraph
@@ -150,7 +150,7 @@ class TestLexerParameterized(unittest.TestCase):
                     self.assertNotEqual(tok.type, "COMMENT")
 
     def test_invalid_characters(self):
-        invalids = ["@", "$", "`", "~", "\\"]
+        invalids = ["@", "$", "`", "\\"]
         for ch in invalids:
             with self.subTest(char=ch):
                 lexer = Lexer(ch)
@@ -1013,7 +1013,8 @@ class TestVMBytecodeParameterized(unittest.TestCase):
             Instruction(Opcode.HALT),
         ])
         self.assertEqual(vm.lookup_var("good"), 42)
-        self.assertNotEqual(vm.lookup_var("bad"), 999)
+        with self.assertRaises(UndefinedVariableError):
+            vm.lookup_var("bad")
 
 
 # ---------------------------------------------------------------------------

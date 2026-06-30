@@ -259,7 +259,7 @@ class SSAOptimizer:
                         pass
 
 
-def optimize_ebc(instructions: list[Instruction]) -> list[Instruction]:
+def optimize_ebc(instructions: list[Instruction], de_ssa: bool = True) -> list[Instruction]:
     """Convert EBC to SSA form, run optimizer passes, and rebuild EBC."""
     builder = SSABuilder()
     # 1. Build SSA CFG blocks
@@ -301,5 +301,26 @@ def optimize_ebc(instructions: list[Instruction]) -> list[Instruction]:
                 block_id = old_start_to_id.get(old_ip)
                 if block_id is not None and block_id in block_new_starts:
                     inst.arg = (block_new_starts[block_id], name, num_args)
+
+    if de_ssa:
+        # 5. Strip SSA suffixes from variable names
+        import re
+        def strip_var(var):
+            if not isinstance(var, str):
+                return var
+            m = re.search(r'_(\d+)$', var)
+            if m:
+                return var[:-len(m.group(0))]
+            return var
+
+        for inst in optimized_instructions:
+            if inst.opcode == Opcode.LOAD_VAR:
+                inst.arg = strip_var(inst.arg)
+            elif inst.opcode == Opcode.STORE_VAR:
+                inst.arg = strip_var(inst.arg)
+            elif inst.opcode == Opcode.Q_MEASURE:
+                if isinstance(inst.arg, tuple) and len(inst.arg) == 2:
+                    q, cbit = inst.arg
+                    inst.arg = (q, strip_var(cbit))
 
     return optimized_instructions

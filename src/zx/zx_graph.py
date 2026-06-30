@@ -17,6 +17,7 @@ class ZXGraph:
         self.next_vertex_id = 0
         self.inputs = []    # List of input Boundary vertex IDs
         self.outputs = []   # List of output Boundary vertex IDs
+        self.hadamard_edges = set()  # Set of frozenset({v1_id, v2_id}) for Hadamard edges
 
     def add_vertex(self, vertex_type: str, phase: float = 0.0) -> ZXVertex:
         v_id = self.next_vertex_id
@@ -25,15 +26,26 @@ class ZXGraph:
         self.vertices[v_id] = v
         return v
 
-    def add_edge(self, v1_id: int, v2_id: int):
+    def add_edge(self, v1_id: int, v2_id: int, hadamard: bool = False):
         if v1_id in self.vertices and v2_id in self.vertices:
-            self.vertices[v1_id].neighbors.add(v2_id)
-            self.vertices[v2_id].neighbors.add(v1_id)
+            edge_key = frozenset({v1_id, v2_id})
+            if hadamard:
+                self.hadamard_edges.add(edge_key)
+                self.vertices[v1_id].neighbors.discard(v2_id)
+                self.vertices[v2_id].neighbors.discard(v1_id)
+            else:
+                self.hadamard_edges.discard(edge_key)
+                self.vertices[v1_id].neighbors.add(v2_id)
+                self.vertices[v2_id].neighbors.add(v1_id)
 
     def remove_edge(self, v1_id: int, v2_id: int):
         if v1_id in self.vertices and v2_id in self.vertices:
             self.vertices[v1_id].neighbors.discard(v2_id)
             self.vertices[v2_id].neighbors.discard(v1_id)
+            self.hadamard_edges.discard(frozenset({v1_id, v2_id}))
+
+    def is_hadamard_edge(self, v1_id: int, v2_id: int) -> bool:
+        return frozenset({v1_id, v2_id}) in self.hadamard_edges
 
     def remove_vertex(self, v_id: int):
         if v_id in self.vertices:

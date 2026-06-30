@@ -1,7 +1,8 @@
 import abc
 
 class ASTNode(metaclass=abc.ABCMeta):
-    pass
+    def to_source(self) -> str:
+        return repr(self)
 
 class ProgramNode(ASTNode):
     def __init__(self, version: float, module_name: str | None, imports: list['ImportNode'], body: list[ASTNode]):
@@ -55,6 +56,9 @@ class BinaryOpNode(ASTNode):
     def __repr__(self):
         return f"BinaryOpNode({self.left} {self.op} {self.right})"
 
+    def to_source(self) -> str:
+        return f"{self.left.to_source()} {self.op} {self.right.to_source()}"
+
 class LiteralNode(ASTNode):
     def __init__(self, value: float | int | str, type_name: str):
         self.value = value
@@ -63,12 +67,20 @@ class LiteralNode(ASTNode):
     def __repr__(self):
         return f"LiteralNode({self.value}: {self.type_name})"
 
+    def to_source(self) -> str:
+        if self.type_name == "string":
+            return f'"{self.value}"'
+        return str(self.value)
+
 class VarRefNode(ASTNode):
     def __init__(self, name: str):
         self.name = name
 
     def __repr__(self):
         return f"VarRefNode({self.name})"
+
+    def to_source(self) -> str:
+        return self.name
 
 class QFuncCallNode(ASTNode):
     def __init__(self, name: str, args: list[str]):
@@ -96,14 +108,15 @@ class MeasureNode(ASTNode):
         return f"MeasureNode({self.qubit_name} -> {self.cbit_name})"
 
 class IfNode(ASTNode):
-    def __init__(self, condition_left: ASTNode, op: str, condition_right: ASTNode, body: list[ASTNode]):
+    def __init__(self, condition_left: ASTNode, op: str, condition_right: ASTNode, body: list[ASTNode], else_body: list[ASTNode] | None = None):
         self.condition_left = condition_left
         self.op = op  # "=="
         self.condition_right = condition_right
         self.body = body
+        self.else_body = else_body if else_body is not None else []
 
     def __repr__(self):
-        return f"IfNode({self.condition_left} {self.op} {self.condition_right}, body={self.body})"
+        return f"IfNode({self.condition_left} {self.op} {self.condition_right}, body={self.body}, else_body={self.else_body})"
 
 class ReturnNode(ASTNode):
     def __init__(self, expr: ASTNode | None = None):
@@ -193,6 +206,9 @@ class DotAccessNode(ASTNode):
     def __repr__(self):
         return f"DotAccessNode({self.obj}.{self.member})"
 
+    def to_source(self) -> str:
+        return f"{self.obj.to_source()}.{self.member}"
+
 class ArrayLiteralNode(ASTNode):
     def __init__(self, elements: list[ASTNode]):
         self.elements = elements
@@ -257,6 +273,11 @@ class CallNode(ASTNode):
     def __repr__(self):
         return f"CallNode({self.callee}, args={self.args})"
 
+    def to_source(self) -> str:
+        callee_str = self.callee.to_source() if isinstance(self.callee, ASTNode) else str(self.callee)
+        args_str = ", ".join(a.to_source() if isinstance(a, ASTNode) else str(a) for a in self.args)
+        return f"{callee_str}({args_str})"
+
 class IndexAccessNode(ASTNode):
     def __init__(self, obj: ASTNode, index: ASTNode):
         self.obj = obj
@@ -264,6 +285,9 @@ class IndexAccessNode(ASTNode):
 
     def __repr__(self):
         return f"IndexAccessNode({self.obj}[{self.index}])"
+
+    def to_source(self) -> str:
+        return f"{self.obj.to_source()}[{self.index.to_source()}]"
 
 class MapAllocNode(ASTNode):
     def __init__(self, keys: list[ASTNode], values: list[ASTNode]):
@@ -328,6 +352,22 @@ class TaskStatementNode(ASTNode):
 
     def __repr__(self):
         return f"TaskStatementNode(call={self.call})"
+
+class MatchNode(ASTNode):
+    def __init__(self, expr: ASTNode, cases: list[tuple[ASTNode, list[ASTNode]]], default_body: list[ASTNode] | None = None):
+        self.expr = expr
+        self.cases = cases  # list of (pattern_expr, body)
+        self.default_body = default_body or []
+
+    def __repr__(self):
+        return f"MatchNode(expr={self.expr}, cases={len(self.cases)}, default={bool(self.default_body)})"
+
+class StringInterpolationNode(ASTNode):
+    def __init__(self, parts: list):
+        self.parts = parts  # list of str or ASTNode
+
+    def __repr__(self):
+        return f"StringInterpolationNode(parts={self.parts})"
 
 try:
     import eigen_native

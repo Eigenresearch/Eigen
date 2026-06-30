@@ -56,5 +56,26 @@ class TestOptimizer(unittest.TestCase):
         self.assertEqual(gates_opt[0].gate_name, "RX")
         self.assertAlmostEqual(gates_opt[0].args[0], 3.0)
 
+    def test_cnot_cancellation(self):
+        source = """
+        eigen 1.0
+        qubit q0
+        qubit q1
+        CNOT q0, q1
+        CNOT q0, q1
+        """
+        lexer = Lexer(source)
+        parser = Parser(lexer.tokenize())
+        ast = parser.parse()
+        
+        converter = EQIRConverter()
+        graph = converter.convert(ast)
+        
+        optimizer = EQIROptimizer()
+        opt_graph = optimizer.optimize(graph)
+        
+        gates_opt = [n for n in opt_graph.nodes.values() if n.type == 'GATE']
+        self.assertEqual(len(gates_opt), 0)
+
 if __name__ == "__main__":
     unittest.main()

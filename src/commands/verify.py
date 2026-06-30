@@ -12,7 +12,29 @@ def verify_equiv_command(args, workspace_root):
     graph1, _ = compile_to_eqir(args.file1, workspace_root)
     graph2, _ = compile_to_eqir(args.file2, workspace_root)
     
-    if args.optimize:
+    # Early indeterminate check for large circuits (> 16 qubits)
+    qubits1 = set()
+    for node in graph1.nodes.values():
+        if node.type == 'ALLOC':
+            qubits1.add(node.targets[0])
+    qubits2 = set()
+    for node in graph2.nodes.values():
+        if node.type == 'ALLOC':
+            qubits2.add(node.targets[0])
+    all_qubits = qubits1 | qubits2
+    if len(all_qubits) > 16:
+        print("\nResult: INDETERMINATE (Circuit too large or complex to verify) [WARNING]")
+        print(f"Details: Circuit has {len(all_qubits)} > 16 qubits. ZX equivalence checker cannot verify it without hanging.")
+        print("=" * 50)
+        sys.exit(3)
+        
+    opt_level = 0
+    if getattr(args, "O", None) is not None:
+        opt_level = args.O
+    elif getattr(args, "optimize", False):
+        opt_level = 2
+        
+    if opt_level >= 1:
         optimizer = EQIROptimizer()
         graph1 = optimizer.optimize(graph1)
         graph2 = optimizer.optimize(graph2)
@@ -123,7 +145,8 @@ def verify_command(args, workspace_root):
     # Phase 4: Qubit Safety Analysis
     print("[4/5] Qubit safety analysis...")
     from src.frontend.ast import (
-        VarDeclNode, GateNode, MeasureNode, QFuncCallNode, QFuncDeclNode
+        VarDeclNode, GateNode, MeasureNode, QFuncCallNode, QFuncDeclNode,
+        IfNode, WhileNode, ForNode, TryCatchNode
     )
     allocated_qubits = set()
     measured_qubits = set()
@@ -153,6 +176,17 @@ def verify_command(args, workspace_root):
                 measured_qubits.add(node.qubit_name)
             elif isinstance(node, QFuncDeclNode):
                 analyze_body(node.body)
+            elif isinstance(node, IfNode):
+                analyze_body(node.body)
+                if hasattr(node, 'else_body') and node.else_body:
+                    analyze_body(node.else_body)
+            elif isinstance(node, WhileNode):
+                analyze_body(node.body)
+            elif isinstance(node, ForNode):
+                analyze_body(node.body)
+            elif isinstance(node, TryCatchNode):
+                analyze_body(node.try_body)
+                analyze_body(node.catch_body)
     
     analyze_body(ast.body)
     

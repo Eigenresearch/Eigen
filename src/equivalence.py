@@ -1,4 +1,4 @@
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.simulator import QuantumSimulator
 from src.zx.exceptions import IndeterminateEquivalenceError
 
@@ -26,15 +26,13 @@ class EquivalenceChecker:
         # Sort graph nodes topologically
         nodes = graph.topological_sort()
         
+        # Create one simulator and reuse it across columns
+        sim = QuantumSimulator()
+        for qubit in qubit_order:
+            sim.allocate_qubit(qubit)
+        
         for col in range(dim):
-            # Create a simulator for this column (input basis state |col>)
-            sim = QuantumSimulator()
-            
-            # Allocate all qubits in the specified order to guarantee same internal mapping
-            for qubit in qubit_order:
-                sim.allocate_qubit(qubit)
-                
-            # Set simulator state vector to basis state |col>
+            # Reset simulator state vector to basis state |col>
             sim.state_vector = [0.0j] * dim
             sim.state_vector[col] = 1.0 + 0.0j
             
@@ -73,6 +71,18 @@ class EquivalenceChecker:
                     sim.CZ(targets[0], targets[1])
                 elif g_name == 'SWAP':
                     sim.SWAP(targets[0], targets[1])
+                elif g_name == 'CCX':
+                    sim.CCX(targets[0], targets[1], targets[2])
+                elif g_name == 'CSWAP':
+                    sim.CSWAP(targets[0], targets[1], targets[2])
+                elif g_name == 'CP':
+                    sim.CP(targets[0], targets[1], args[0])
+                elif g_name == 'CRX':
+                    sim.CRX(targets[0], targets[1], args[0])
+                elif g_name == 'CRY':
+                    sim.CRY(targets[0], targets[1], args[0])
+                elif g_name == 'CRZ':
+                    sim.CRZ(targets[0], targets[1], args[0])
                 else:
                     raise ValueError(f"Unknown gate in equivalence check: {g_name}")
             
@@ -125,14 +135,14 @@ class EquivalenceChecker:
         global_phase = v1 / v2
         
         # The phase ratio must have absolute value close to 1.0 (since U1, U2 are unitary, scaling is 1)
-        if abs(abs(global_phase) - 1.0) > 1e-5:
+        if abs(abs(global_phase) - 1.0) > 1e-9:
             return False
             
         # Check that U1_ij = global_phase * U2_ij for all i, j
         for r in range(dim):
             for c in range(dim):
                 diff = abs(U1[r][c] - global_phase * U2[r][c])
-                if diff > 1e-5:
+                if diff > 1e-9:
                     return False
                     
         return True

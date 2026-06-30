@@ -234,6 +234,12 @@ impl<'a> RustTypeChecker<'a> {
                         self.errors.push(format!("Logical operator '{}' expects boolean arguments", b.op));
                     }
                     "bool".to_string()
+                } else if ["%", "&", "|", "^", "~", "<<", ">>"].contains(&b.op.as_str()) {
+                    let integer_types = ["int", "cbit"];
+                    if !integer_types.contains(&left_type.as_str()) || !integer_types.contains(&right_type.as_str()) {
+                        self.errors.push(format!("Operator '{}' is only supported on integer types, got '{}' and '{}'", b.op, left_type, right_type));
+                    }
+                    "int".to_string()
                 } else {
                     let numeric_types = ["int", "float", "cbit"];
                     if !numeric_types.contains(&left_type.as_str()) || !numeric_types.contains(&right_type.as_str()) {
@@ -554,6 +560,11 @@ impl<'a> RustTypeChecker<'a> {
                     self.check_node(stmt);
                 }
                 self.exit_scope();
+                self.enter_scope();
+                for &stmt in &i.else_body {
+                    self.check_node(stmt);
+                }
+                self.exit_scope();
                 "void".to_string()
             }
             ASTNode::Trace(_) => "void".to_string(),
@@ -771,11 +782,13 @@ fn copy_node(src: &AST, dest: &mut AST, id: NodeId, map: &mut HashMap<NodeId, No
             let left = copy_node(src, dest, if_node.condition_left, map);
             let right = copy_node(src, dest, if_node.condition_right, map);
             let body: Vec<NodeId> = if_node.body.iter().map(|&i| copy_node(src, dest, i, map)).collect();
+            let else_body: Vec<NodeId> = if_node.else_body.iter().map(|&i| copy_node(src, dest, i, map)).collect();
             ASTNode::If(IfNode {
                 condition_left: left,
                 op: if_node.op.clone(),
                 condition_right: right,
                 body,
+                else_body,
             })
         }
         ASTNode::Return(r) => {

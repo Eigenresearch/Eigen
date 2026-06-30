@@ -1,5 +1,8 @@
+class UnsupportedBytecodeVersionError(Exception):
+    pass
+
+
 class Opcode:
-    # Arithmetic and Comparisons
     ADD = "ADD"
     SUB = "SUB"
     MUL = "MUL"
@@ -62,6 +65,25 @@ class Opcode:
     # Additional helpers
     PRINT = "PRINT"  # Convenient opcode for printing top of stack
 
+    # Modulo and Bitwise opcodes
+    MOD = "MOD"
+    POW = "POW"
+    BIT_AND = "BIT_AND"
+    BIT_OR = "BIT_OR"
+    BIT_XOR = "BIT_XOR"
+    BIT_NOT = "BIT_NOT"
+    SHL = "SHL"
+    SHR = "SHR"
+
+    # Superinstructions
+    LOAD_CONST_STORE = "LOAD_CONST_STORE"
+    LOAD_VAR_LOAD_CONST_ADD = "LOAD_VAR_LOAD_CONST_ADD"
+    LOAD_VAR_LOAD_CONST_SUB = "LOAD_VAR_LOAD_CONST_SUB"
+    LOAD_VAR_LOAD_CONST_LT = "LOAD_VAR_LOAD_CONST_LT"
+    LOAD_VAR_LOAD_CONST_GT = "LOAD_VAR_LOAD_CONST_GT"
+    LOAD_VAR_LOAD_CONST_LTE = "LOAD_VAR_LOAD_CONST_LTE"
+    LOAD_VAR_LOAD_CONST_GTE = "LOAD_VAR_LOAD_CONST_GTE"
+
 
 # Define a stable list order for all string opcodes
 OPCODE_LIST = [
@@ -75,11 +97,28 @@ OPCODE_LIST = [
     Opcode.THROW, Opcode.PUSH_TRY, Opcode.POP_TRY,
     Opcode.Q_ALLOC, Opcode.Q_GATE, Opcode.Q_MEASURE, Opcode.Q_TRACE, Opcode.Q_NOISE,
     Opcode.JMP, Opcode.JMP_IF_FALSE, Opcode.JMP_IF_TRUE, Opcode.HALT,
-    Opcode.SPAWN, Opcode.JOIN, Opcode.PRINT
+    Opcode.SPAWN, Opcode.JOIN, Opcode.PRINT,
+    Opcode.MOD, Opcode.POW, Opcode.BIT_AND, Opcode.BIT_OR, Opcode.BIT_XOR, Opcode.BIT_NOT, Opcode.SHL, Opcode.SHR,
+    Opcode.LOAD_CONST_STORE,
+    Opcode.LOAD_VAR_LOAD_CONST_ADD, Opcode.LOAD_VAR_LOAD_CONST_SUB,
+    Opcode.LOAD_VAR_LOAD_CONST_LT, Opcode.LOAD_VAR_LOAD_CONST_GT,
+    Opcode.LOAD_VAR_LOAD_CONST_LTE, Opcode.LOAD_VAR_LOAD_CONST_GTE
 ]
 
 OPCODE_TO_INT = {op: i for i, op in enumerate(OPCODE_LIST)}
 INT_TO_OPCODE = list(OPCODE_LIST)
+
+BYTECODE_VERSION = 1
+
+def validate_bytecode_version(data: dict) -> bool:
+    if isinstance(data, dict):
+        version = data.get("bytecode_version", 0)
+        if version > BYTECODE_VERSION:
+            raise UnsupportedBytecodeVersionError(
+                f"Bytecode version {version} is not supported (max supported: {BYTECODE_VERSION})"
+            )
+        return True
+    return True
 
 
 class Instruction:

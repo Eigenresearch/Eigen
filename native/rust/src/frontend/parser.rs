@@ -125,12 +125,18 @@ impl<'a> Parser<'a> {
         Ok(parts.join("."))
     }
 
-    fn parse_type(&mut self) -> Result<String, String> {
-        let tok = if let Some(t) = self.match_type(&[
+    fn parse_type(&mut self, allow_gates: bool) -> Result<String, String> {
+        let mut types = vec![
             TokenType::Int, TokenType::Float, TokenType::StringType, TokenType::Bool,
             TokenType::Qubit, TokenType::Cbit, TokenType::Array, TokenType::Map,
             TokenType::Identifier
-        ]) {
+        ];
+        if allow_gates {
+            types.extend_from_slice(&[
+                TokenType::GateH, TokenType::GateX, TokenType::GateY, TokenType::GateZ, TokenType::GateS, TokenType::GateT
+            ]);
+        }
+        let tok = if let Some(t) = self.match_type(&types) {
             t
         } else {
             return Err(self.error("Expected type name"));
@@ -142,9 +148,9 @@ impl<'a> Parser<'a> {
         };
 
         if self.match_type(&[TokenType::Lt]).is_some() {
-            let mut generic_types = vec![self.parse_type()?];
+            let mut generic_types = vec![self.parse_type(true)?];
             while self.match_type(&[TokenType::Comma]).is_some() {
-                generic_types.push(self.parse_type()?);
+                generic_types.push(self.parse_type(true)?);
             }
             self.consume(TokenType::Gt, "Expected '>' after generic type parameters")?;
             type_str = format!("{}<{}>", type_str, generic_types.join(", "));
@@ -258,7 +264,7 @@ impl<'a> Parser<'a> {
 
         // Variable declarations: e.g. qubit q0, cbit c0, map<string, int> m, MyStruct s
         let saved_pos = self.pos;
-        if let Ok(type_name) = self.parse_type() {
+        if let Ok(type_name) = self.parse_type(false) {
             if self.current().token_type == TokenType::Identifier {
                 if let Ok(name_tok) = self.consume(TokenType::Identifier, "Expected identifier") {
                     return Ok(Some(self.ast.add(ASTNode::VarDecl(VarDeclNode {
@@ -359,6 +365,48 @@ impl<'a> Parser<'a> {
             }))));
         }
 
+        let gates_with_3_qubit = [
+            TokenType::GateCcx, TokenType::GateCswap
+        ];
+        if gates_with_3_qubit.contains(&tok.token_type) {
+            let gate_tok = self.match_type(&gates_with_3_qubit).unwrap();
+            let q1_tok = self.consume(TokenType::Identifier, "Expected first qubit identifier")?;
+            self.consume(TokenType::Comma, "Expected ','")?;
+            let q2_tok = self.consume(TokenType::Identifier, "Expected second qubit identifier")?;
+            self.consume(TokenType::Comma, "Expected ','")?;
+            let q3_tok = self.consume(TokenType::Identifier, "Expected third qubit identifier")?;
+            
+            let mut g_name = gate_tok.value.to_uppercase();
+            if g_name == "TOFFOLI" || g_name == "CCX" {
+                g_name = "CCX".to_string();
+            } else if g_name == "FREDKIN" || g_name == "CSWAP" {
+                g_name = "CSWAP".to_string();
+            }
+            
+            return Ok(Some(self.ast.add(ASTNode::Gate(GateNode {
+                gate_name: g_name,
+                targets: vec![q1_tok.value.to_string(), q2_tok.value.to_string(), q3_tok.value.to_string()],
+                args: Vec::new(),
+            }))));
+        }
+
+        let controlled_rotations = [
+            TokenType::GateCp, TokenType::GateCrx, TokenType::GateCry, TokenType::GateCrz
+        ];
+        if controlled_rotations.contains(&tok.token_type) {
+            let gate_tok = self.match_type(&controlled_rotations).unwrap();
+            let q1_tok = self.consume(TokenType::Identifier, "Expected control qubit identifier")?;
+            self.consume(TokenType::Comma, "Expected ','")?;
+            let q2_tok = self.consume(TokenType::Identifier, "Expected target qubit identifier")?;
+            self.consume(TokenType::Comma, "Expected ',' before rotation angle")?;
+            let angle_expr = self.parse_expr()?;
+            return Ok(Some(self.ast.add(ASTNode::Gate(GateNode {
+                gate_name: gate_tok.value.to_uppercase(),
+                targets: vec![q1_tok.value.to_string(), q2_tok.value.to_string()],
+                args: vec![angle_expr],
+            }))));
+        }
+
         // Try parsing as an assignment or general expression statement
         let expression_starters = [
             TokenType::Identifier, TokenType::IntLit, TokenType::FloatLit, TokenType::StringLit,
@@ -440,9 +488,21 @@ impl<'a> Parser<'a> {
 
         let mut generic_params = Vec::new();
         if self.match_type(&[TokenType::Lt]).is_some() {
-            generic_params.push(self.consume(TokenType::Identifier, "Expected generic parameter")?.value.to_string());
+            let p_tok = self.current().clone();
+            if p_tok.token_type == TokenType::Identifier || p_tok.token_type == TokenType::GateT {
+                self.pos += 1;
+                generic_params.push(p_tok.value.to_string());
+            } else {
+                return Err(format!("Expected generic parameter name, found {:?}", p_tok.token_type));
+            }
             while self.match_type(&[TokenType::Comma]).is_some() {
-                generic_params.push(self.consume(TokenType::Identifier, "Expected generic parameter")?.value.to_string());
+                let p_tok = self.current().clone();
+                if p_tok.token_type == TokenType::Identifier || p_tok.token_type == TokenType::GateT {
+                    self.pos += 1;
+                    generic_params.push(p_tok.value.to_string());
+                } else {
+                    return Err(format!("Expected generic parameter name, found {:?}", p_tok.token_type));
+                }
             }
             self.consume(TokenType::Gt, "Expected '>'")?;
         }
@@ -452,19 +512,19 @@ impl<'a> Parser<'a> {
         if self.current().token_type != TokenType::Rparen {
             let p_name_tok = self.consume(TokenType::Identifier, "Expected parameter name")?;
             self.consume(TokenType::Colon, "Expected ':'")?;
-            let p_type = self.parse_type()?;
+            let p_type = self.parse_type(true)?;
             params.push((p_name_tok.value.to_string(), p_type));
 
             while self.match_type(&[TokenType::Comma]).is_some() {
                 let p_name_tok = self.consume(TokenType::Identifier, "Expected parameter name")?;
                 self.consume(TokenType::Colon, "Expected ':'")?;
-                let p_type = self.parse_type()?;
+                let p_type = self.parse_type(true)?;
                 params.push((p_name_tok.value.to_string(), p_type));
             }
         }
         self.consume(TokenType::Rparen, "Expected ')'")?;
         self.consume(TokenType::Arrow, "Expected '->'")?;
-        let return_type = self.parse_type()?;
+        let return_type = self.parse_type(true)?;
 
         self.consume(TokenType::Lbrace, "Expected '{'")?;
         let mut body = Vec::new();
@@ -490,9 +550,21 @@ impl<'a> Parser<'a> {
 
         let mut generic_params = Vec::new();
         if self.match_type(&[TokenType::Lt]).is_some() {
-            generic_params.push(self.consume(TokenType::Identifier, "Expected generic parameter")?.value.to_string());
+            let p_tok = self.current().clone();
+            if p_tok.token_type == TokenType::Identifier || p_tok.token_type == TokenType::GateT {
+                self.pos += 1;
+                generic_params.push(p_tok.value.to_string());
+            } else {
+                return Err(format!("Expected generic parameter name, found {:?}", p_tok.token_type));
+            }
             while self.match_type(&[TokenType::Comma]).is_some() {
-                generic_params.push(self.consume(TokenType::Identifier, "Expected generic parameter")?.value.to_string());
+                let p_tok = self.current().clone();
+                if p_tok.token_type == TokenType::Identifier || p_tok.token_type == TokenType::GateT {
+                    self.pos += 1;
+                    generic_params.push(p_tok.value.to_string());
+                } else {
+                    return Err(format!("Expected generic parameter name, found {:?}", p_tok.token_type));
+                }
             }
             self.consume(TokenType::Gt, "Expected '>'")?;
         }
@@ -502,7 +574,7 @@ impl<'a> Parser<'a> {
         while self.current().token_type != TokenType::Rbrace && self.current().token_type != TokenType::Eof {
             let f_name_tok = self.consume(TokenType::Identifier, "Expected field name")?;
             self.consume(TokenType::Colon, "Expected ':'")?;
-            let f_type = self.parse_type()?;
+            let f_type = self.parse_type(true)?;
             fields.push((f_name_tok.value.to_string(), f_type));
             self.match_type(&[TokenType::Comma]);
         }
@@ -544,7 +616,7 @@ impl<'a> Parser<'a> {
         self.consume(TokenType::Let, "Expected 'let'")?;
         let name_tok = self.consume(TokenType::Identifier, "Expected identifier for variable")?;
         self.consume(TokenType::Colon, "Expected ':' after variable name")?;
-        let type_name = self.parse_type()?;
+        let type_name = self.parse_type(true)?;
         self.consume(TokenType::Equals, "Expected '=' in let statement")?;
         let value = self.parse_expr()?;
         Ok(self.ast.add(ASTNode::Let(LetNode {
@@ -552,6 +624,94 @@ impl<'a> Parser<'a> {
             type_name,
             value,
         })))
+    }
+
+    fn parse_if_tail(&mut self) -> Result<Vec<NodeId>, String> {
+        let mut else_body = Vec::new();
+        if self.match_type(&[TokenType::Else]).is_some() {
+            if self.match_type(&[TokenType::If]).is_some() {
+                let left = self.parse_expr()?;
+                let cmp_ops = [
+                    TokenType::Eq, TokenType::Ne, TokenType::Lt, TokenType::Gt, TokenType::Le, TokenType::Ge
+                ];
+                let op;
+                let right;
+                if let Some(op_tok) = self.match_type(&cmp_ops) {
+                    op = op_tok.value.to_string();
+                    right = self.parse_expr()?;
+                } else {
+                    op = "==".to_string();
+                    right = self.ast.add(ASTNode::Literal(LiteralNode {
+                        value: LiteralValue::Bool(true),
+                        type_name: "bool".to_string(),
+                    }));
+                }
+
+                self.consume(TokenType::Lbrace, "Expected '{'")?;
+                let mut body = Vec::new();
+                while self.current().token_type != TokenType::Rbrace && self.current().token_type != TokenType::Eof {
+                    if let Some(stmt) = self.parse_statement()? {
+                        body.push(stmt);
+                    }
+                }
+                self.consume(TokenType::Rbrace, "Expected '}'")?;
+                
+                let nested_else = self.parse_if_tail()?;
+                let elif_node = self.ast.add(ASTNode::If(IfNode {
+                    condition_left: left,
+                    op,
+                    condition_right: right,
+                    body,
+                    else_body: nested_else,
+                }));
+                else_body.push(elif_node);
+            } else {
+                self.consume(TokenType::Lbrace, "Expected '{' after 'else'")?;
+                while self.current().token_type != TokenType::Rbrace && self.current().token_type != TokenType::Eof {
+                    if let Some(stmt) = self.parse_statement()? {
+                        else_body.push(stmt);
+                    }
+                }
+                self.consume(TokenType::Rbrace, "Expected '}'")?;
+            }
+        } else if self.match_type(&[TokenType::Elif]).is_some() {
+            let left = self.parse_expr()?;
+            let cmp_ops = [
+                TokenType::Eq, TokenType::Ne, TokenType::Lt, TokenType::Gt, TokenType::Le, TokenType::Ge
+            ];
+            let op;
+            let right;
+            if let Some(op_tok) = self.match_type(&cmp_ops) {
+                op = op_tok.value.to_string();
+                right = self.parse_expr()?;
+            } else {
+                op = "==".to_string();
+                right = self.ast.add(ASTNode::Literal(LiteralNode {
+                    value: LiteralValue::Bool(true),
+                    type_name: "bool".to_string(),
+                }));
+            }
+
+            self.consume(TokenType::Lbrace, "Expected '{'")?;
+            let mut body = Vec::new();
+            while self.current().token_type != TokenType::Rbrace && self.current().token_type != TokenType::Eof {
+                if let Some(stmt) = self.parse_statement()? {
+                    body.push(stmt);
+                }
+            }
+            self.consume(TokenType::Rbrace, "Expected '}'")?;
+            
+            let nested_else = self.parse_if_tail()?;
+            let elif_node = self.ast.add(ASTNode::If(IfNode {
+                condition_left: left,
+                op,
+                condition_right: right,
+                body,
+                else_body: nested_else,
+            }));
+            else_body.push(elif_node);
+        }
+        Ok(else_body)
     }
 
     fn parse_if(&mut self) -> Result<NodeId, String> {
@@ -582,11 +742,14 @@ impl<'a> Parser<'a> {
         }
         self.consume(TokenType::Rbrace, "Expected '}'")?;
 
+        let else_body = self.parse_if_tail()?;
+
         Ok(self.ast.add(ASTNode::If(IfNode {
             condition_left: left,
             op,
             condition_right: right,
             body,
+            else_body,
         })))
     }
 
@@ -756,10 +919,62 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_comparison(&mut self) -> Result<NodeId, String> {
-        let mut node = self.parse_additive()?;
+        let mut node = self.parse_bitwise_or()?;
         while let Some(op_tok) = self.match_type(&[
             TokenType::Lt, TokenType::Gt, TokenType::Le, TokenType::Ge
         ]) {
+            let right = self.parse_bitwise_or()?;
+            node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
+                op: op_tok.value.to_string(),
+                left: node,
+                right,
+            }));
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_or(&mut self) -> Result<NodeId, String> {
+        let mut node = self.parse_bitwise_xor()?;
+        while let Some(op_tok) = self.match_type(&[TokenType::BitOr]) {
+            let right = self.parse_bitwise_xor()?;
+            node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
+                op: op_tok.value.to_string(),
+                left: node,
+                right,
+            }));
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<NodeId, String> {
+        let mut node = self.parse_bitwise_and()?;
+        while let Some(op_tok) = self.match_type(&[TokenType::BitXor]) {
+            let right = self.parse_bitwise_and()?;
+            node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
+                op: op_tok.value.to_string(),
+                left: node,
+                right,
+            }));
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<NodeId, String> {
+        let mut node = self.parse_bitwise_shift()?;
+        while let Some(op_tok) = self.match_type(&[TokenType::BitAnd]) {
+            let right = self.parse_bitwise_shift()?;
+            node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
+                op: op_tok.value.to_string(),
+                left: node,
+                right,
+            }));
+        }
+        Ok(node)
+    }
+
+    fn parse_bitwise_shift(&mut self) -> Result<NodeId, String> {
+        let mut node = self.parse_additive()?;
+        while let Some(op_tok) = self.match_type(&[TokenType::Lshift, TokenType::Rshift]) {
             let right = self.parse_additive()?;
             node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
                 op: op_tok.value.to_string(),
@@ -785,7 +1000,7 @@ impl<'a> Parser<'a> {
 
     fn parse_multiplicative(&mut self) -> Result<NodeId, String> {
         let mut node = self.parse_unary()?;
-        while let Some(op_tok) = self.match_type(&[TokenType::Mul, TokenType::Div]) {
+        while let Some(op_tok) = self.match_type(&[TokenType::Mul, TokenType::Div, TokenType::Mod]) {
             let right = self.parse_unary()?;
             node = self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
                 op: op_tok.value.to_string(),
@@ -807,6 +1022,18 @@ impl<'a> Parser<'a> {
                 op: "not".to_string(),
                 left: right,
                 right: true_lit,
+            })));
+        }
+        if self.match_type(&[TokenType::BitNot]).is_some() {
+            let right = self.parse_unary()?;
+            let zero_lit = self.ast.add(ASTNode::Literal(LiteralNode {
+                value: LiteralValue::Int(0),
+                type_name: "int".to_string(),
+            }));
+            return Ok(self.ast.add(ASTNode::BinaryOp(BinaryOpNode {
+                op: "~".to_string(),
+                left: right,
+                right: zero_lit,
             })));
         }
         if self.match_type(&[TokenType::Minus]).is_some() {

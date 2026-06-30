@@ -174,14 +174,14 @@ jobs:
             dist/Eigen-*-Linux.AppImage
             dist/Eigen-*-macOS.pkg
           body: |
-            # Eigen ${{ steps.version.outputs.VERSION }} Release
+            # Eigen ${{ steps.version.outputs.VERSION }} — «Mitz» Release
 
-            Welcome to the latest release of **Eigen** — a runtime-first hybrid classical-quantum programming language.
+            Welcome to **Eigen 2.5 «Mitz»** — a runtime-first hybrid classical-quantum programming language with **1.8x faster** classical loops than CPython, a **1000-qubit stabilizer simulator**, and 8 new language features.
 
             ## Installers
             | Platform | File | Notes |
             |---|---|---|
-            | **Windows x64** | `Eigen-*-Windows-x64.exe` | Standalone — no Python required |
+            | **Windows x64** | `Eigen-*-Windows-x64-Setup.exe` | Setup Wizard — no Python required |
             | **Linux x86_64** | `Eigen-*-Linux.AppImage` | Run with `chmod +x` then execute |
             | **macOS** | `Eigen-*-macOS.pkg` | Double-click to install to `/usr/local/bin` |
 
@@ -189,6 +189,9 @@ jobs:
             ```bash
             # Run a quantum program
             eigen run examples/bell.eig --trace
+
+            # Run with stabilizer simulator (1000+ qubits!)
+            eigen run bell.eig --backend stabilizer
 
             # Compile to standalone native binary
             eigen build examples/bell.eig --aot --opt-level O2
@@ -199,41 +202,98 @@ jobs:
             # Check environment health
             eigen doctor
 
-            # Run full test suite
+            # Run full test suite (445 tests)
             eigen test
+
+            # Generate HTML benchmark dashboard
+            eigen bench --html
             ```
 
-            ## What's New in 2.4 — Mone
-            - **Zero-Copy Rust Frontend** — 9.7× faster parsing (1k LOC), 4.2× on 100k LOC
-            - **Native SIMD Simulator Kernels** — Rayon + AVX2/AVX512 gate execution
-            - **Salsa Incremental Cache** — SHA-256 content hashing, skips unchanged compile steps
-            - **JIT v2** — LICM, constant folding, type guards, deoptimization paths
-            - **Standalone AOT Compiler** — `eigen build --aot` produces `.exe` with no Python runtime
-            - **QIR Output** — `eigen build --qir` emits opaque-pointer QIR LLVM IR
-            - **MSVC Compatibility** — `/RELEASE` flag, no LTCG conflicts on Windows
+            ## What's New in 2.5 — Mitz
 
-            ## Performance vs 2.3
-            | Benchmark | VM | AOT | Speedup |
+            ### Performance Breakthroughs
+            | Metric | Before (2.4) | After (2.5) | Gain |
             |---|---|---|---|
-            | fib(22) classical | 411 ms | 22 ms | **18×** |
-            | Bell pair 500 shots | 125 ms | 9 ms | **13×** |
-            | Grover 2-qubit 500 iter | 138 ms | 10 ms | **13×** |
-            | factorial(12) × 10000 | 917 ms | 20 ms | **44×** |
+            | 100K loop | 0.71s | 0.006s | **120x faster** |
+            | 1M loop | ~7s | 0.059s | **120x faster** |
+            | vs CPython | 44x slower | **1.8x faster** | **80x improvement** |
+            | 1000-qubit Clifford | impossible | 4.1s | New capability |
 
-            ## Bug Fixes
-            - Fixed MSVC linker LNK2005 (LTCG static library conflicts)
-            - Fixed Windows cross-drive `os.path.relpath` ValueError (D: ↔ C:)
-            - Fixed stale AST cache (NTFS mtime resolution → SHA-256 hashing)
-            - Fixed early dependency reset in `QueryDb.execute_query`
-            - Fixed MPS `RZ` gate `NameError` (missing `cmath` import)
-            - Fixed JIT cache cleared per-run (now global LRU by function_hash+block_id)
+            ### New Language Features (8)
+            - **Exponentiation `**`** — `2 ** 3` = 8
+            - **Hex/Binary/Octal** — `0xFF`, `0b1010`, `0o77`
+            - **Scientific notation** — `1.23e-5`
+            - **String interpolation** — `"Result: ${val}"`
+            - **match/case** — Pattern matching with default
+            - **Void functions** — `func foo() { ... }` (no `-> type` required)
+            - **Escape sequences** — `\n \t \r \0 \\ \"`
+            - **Block comments** — `//` in addition to `#`
+
+            ### Critical Bug Fixes (12)
+            - JIT `exec()` RCE vulnerability → sandboxed builtins
+            - `eval()` code injection → AST-based safe evaluator
+            - Controlled rotation crash (CP/CRX/CRY/CRZ) → fixed
+            - `op_ret` stack underflow → guard added
+            - try/catch at top level → VM-level try stack
+            - Canonical hash order → topological sort + targets
+            - Compound assignment double-eval → temp variable
+            - IR converter drops nodes → all AST types handled
+            - Optimizer blocked by VarDecl → excluded
+            - Amplitude damping → proper Kraus operators
+            - Print precision → `0.000001` not `1e-06`
+            - ZX Hadamard edges → proper H-edge support
+
+            ### New Capabilities
+            - **Stabilizer Simulator** — O(n²) Clifford circuits, 1000+ qubits
+            - **SABRE Quantum Routing** — Hardware-aware SWAP insertion
+            - **Parser Error Recovery** — Multiple errors per run
+            - **HTML Benchmark Dashboard** — `eigen bench --html`
+            - **Full Kraus Noise Channels** — Phase + amplitude damping
+            - **Shared Gate Registry** — Centralized gate metadata
 
             ## Full Changelog
             See [CHANGELOG.md](https://github.com/Eigenresearch/Eigen/blob/main/CHANGELOG.md) for complete details.
 
             ## Documentation
             - [Language Specification](https://github.com/Eigenresearch/Eigen/blob/main/LANGUAGE.md)
-            - [Architecture](https://github.com/Eigenresearch/Eigen/blob/main/docs/architecture.md)
-            - [Examples Guide](https://github.com/Eigenresearch/Eigen/blob/main/docs/examples-guide.md)
+            - [README](https://github.com/Eigenresearch/Eigen/blob/main/README.md)
+            - [Examples](https://github.com/Eigenresearch/Eigen/tree/main/examples)
+
+            ## Test Results
+            - **445 tests passed**, 0 failures, 0 regressions
+            - **439 subtests passed**
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-docs:
+    name: Deploy Versioned Docs
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install mkdocs-material mike
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy Docs
+        run: |
+          git fetch origin gh-pages --depth=1 || true
+          mike deploy --push --update-aliases ${GITHUB_REF_NAME} latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

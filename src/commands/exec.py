@@ -27,7 +27,8 @@ def exec_command(args, workspace_root):
         instructions = [Instruction.from_dict(d) for d in data]
         
     seed_val = getattr(args, 'seed', None)
-    vm = EigenVM(trace_mode=args.trace, seed=seed_val)
+    verbose_val = getattr(args, 'verbose', False)
+    vm = EigenVM(trace_mode=args.trace, seed=seed_val, verbose=verbose_val)
     try:
         vm.execute(instructions)
     except AssertionError as ae:

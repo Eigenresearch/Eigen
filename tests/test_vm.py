@@ -6,7 +6,7 @@ from src.backend.ebc_compiler import (
     MapAllocNode, MapGetNode, MapSetNode,
     ArrayAllocNode, ArrayGetNode, ArraySetNode
 )
-from src.backend.vm import EigenVM, VMRef
+from src.backend.vm import EigenVM, VMRef, UndefinedVariableError
 from src.frontend.ast import (
     ProgramNode, LetNode, VarDeclNode, LiteralNode, VarRefNode,
     BinaryOpNode, GateNode, MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, QFuncCallNode
@@ -67,8 +67,8 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         program = ProgramNode(1.0, None, [], [let_x, if_node_false])
         instructions = self.compiler.compile_ast(program)
         self.vm.execute(instructions)
-        # lookup_var returns name if not found
-        self.assertEqual(self.vm.lookup_var("z"), "z")
+        with self.assertRaises(UndefinedVariableError):
+            self.vm.lookup_var("z")
 
     def test_loops_while(self):
         # Program:
@@ -273,21 +273,27 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         instructions = self.compiler.compile_ast(program)
         
         # Verify execution and check cache contents
-        vm1 = EigenVM()
-        vm1.execute(instructions)
-        self.assertEqual(vm1.lookup_var("i"), 15)
-        
-        # Check that we have something in the JIT compiler's global cache
-        self.assertGreater(len(JITCompiler.GLOBAL_CACHE.cache), 0)
-        
-        # Check that we have global execution counts
-        self.assertGreater(len(JITCompiler.GLOBAL_EXEC_COUNTS), 0)
-        
-        # 3. Create a second VM instance and run again - it should reuse the cached block (no clearing on run)
-        old_cache_len = len(JITCompiler.GLOBAL_CACHE.cache)
-        vm2 = EigenVM()
-        vm2.execute(instructions)
-        self.assertEqual(vm2.lookup_var("i"), 15)
+        import src.backend.vm as vm_module
+        old_native = vm_module.native
+        vm_module.native = None
+        try:
+            vm1 = EigenVM()
+            vm1.execute(instructions)
+            self.assertEqual(vm1.lookup_var("i"), 15)
+            
+            # Check that we have something in the JIT compiler's global cache
+            self.assertGreater(len(JITCompiler.GLOBAL_CACHE.cache), 0)
+            
+            # Check that we have global execution counts
+            self.assertGreater(len(JITCompiler.GLOBAL_EXEC_COUNTS), 0)
+            
+            # 3. Create a second VM instance and run again - it should reuse the cached block (no clearing on run)
+            old_cache_len = len(JITCompiler.GLOBAL_CACHE.cache)
+            vm2 = EigenVM()
+            vm2.execute(instructions)
+            self.assertEqual(vm2.lookup_var("i"), 15)
+        finally:
+            vm_module.native = old_native
         
         # Cache length should remain the same (or we lookup the cached block)
         self.assertEqual(len(JITCompiler.GLOBAL_CACHE.cache), old_cache_len)

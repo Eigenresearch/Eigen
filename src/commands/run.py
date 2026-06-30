@@ -12,6 +12,13 @@ from src.backend.ebc_compiler import EBCCompiler
 
 @register_command("run")
 def run_command(args, workspace_root):
+    opt_level = 0
+    if getattr(args, "O", None) is not None:
+        opt_level = args.O
+    elif getattr(args, "optimize", False):
+        opt_level = 2
+    optimize = (opt_level >= 1)
+
     if getattr(args, 'aot', False):
         from src.aot.compiler import AOTCompiler
         seed_val = getattr(args, 'seed', 0)
@@ -37,15 +44,16 @@ def run_command(args, workspace_root):
         noise_model = NoiseModel(args.noise, args.noise_prob)
         gpu_platform = getattr(args, 'gpu', 'none')
         seed_val = getattr(args, 'seed', None)
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val)
+        verbose_val = getattr(args, 'verbose', False)
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level)
         vm.execute(instructions)
         return
 
-    strict_mode = args.strict or getattr(args, "strict", False)
+    strict_mode = getattr(args, "strict", False)
     
     graph, ast = compile_to_eqir(args.file, workspace_root)
     
-    if args.optimize:
+    if optimize:
         optimizer = EQIROptimizer()
         graph = optimizer.optimize(graph)
         print(f"EQIR Optimizer: Performed {optimizer.optimizations_count} optimization rewrites.")
@@ -104,24 +112,23 @@ def run_command(args, workspace_root):
         sim_backend_type = 'sparse'
     elif args.backend == 'mps':
         sim_backend_type = 'mps'
+    elif args.backend == 'density_matrix':
+        sim_backend_type = 'density_matrix'
+    elif args.backend == 'stabilizer':
+        sim_backend_type = 'stabilizer'
     else:
         sim_backend_type = 'dense'
 
     if args.vm:
-        compiler = EBCCompiler()
-        instructions = compiler.compile_eqir(graph)
-        if args.optimize:
-            from src.ir.ssa.optimizer import optimize_ebc
-            instructions = optimize_ebc(instructions)
-        save_to_cache(args.file, workspace_root, "ebc", instructions)
+        from src.compiler import to_ebc
+        instructions = to_ebc(args.file, workspace_root, optimize=optimize)
         from src.noise.noise_model import NoiseModel
         noise_model = NoiseModel(args.noise, args.noise_prob)
         gpu_platform = getattr(args, 'gpu', 'none')
         seed_val = getattr(args, 'seed', None)
+        verbose_val = getattr(args, 'verbose', False)
         
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val)
-        if sim_backend_type == 'sparse':
-            vm.simulator.is_sparse = True
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level)
         try:
             vm.execute(instructions)
         except AssertionError as ae:
@@ -138,8 +145,6 @@ def run_command(args, workspace_root):
         seed_val = getattr(args, 'seed', None)
         
         runtime = EigenRuntime(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val)
-        if sim_backend_type == 'sparse':
-            runtime.simulator.is_sparse = True
         try:
             runtime.execute(graph)
         except AssertionError as ae:

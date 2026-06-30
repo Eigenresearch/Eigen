@@ -177,6 +177,8 @@ class ASTToMLIRConverter:
             elif node.op == '-': op_name = "arith.subi"
             elif node.op == '*': op_name = "arith.muli"
             elif node.op == '/': op_name = "arith.divi"
+            elif node.op == '**': op_name = "math.pow"
+            elif node.op == '%': op_name = "arith.remi"
             op = MLIROp(op_name, operands=[l_val, r_val], results=[res], condition=self.current_condition)
             self.current_function.add_op(op, self.current_block_idx)
             return res
@@ -252,7 +254,20 @@ class ASTToMLIRConverter:
             # Compile body statements under this condition
             for stmt in node.body:
                 self.convert_node(stmt)
-
+                
+            if hasattr(node, "else_body") and node.else_body:
+                opp_map = {
+                    "==": "!=",
+                    "!=": "==",
+                    "<": ">=",
+                    ">": "<=",
+                    "<=": ">",
+                    ">=": "<",
+                }
+                self.current_condition = (cbit_name, opp_map.get(node.op, "!="), expected_val)
+                for stmt in node.else_body:
+                    self.convert_node(stmt)
+ 
             self.current_condition = prev_cond
             return None
 
@@ -287,6 +302,7 @@ class MLIRToEQIRConverter:
     def __init__(self):
         self.graph = EQIRGraph()
         self.qfuncs = {}  # name -> func definition for inlining
+        self.constants = {} # name -> value
 
     def convert(self, module: MLIRModule) -> EQIRGraph:
         # 1. Register all functions first (for inlining calls)
@@ -315,7 +331,12 @@ class MLIRToEQIRConverter:
                     cond_cbit, cond_op, cond_val = cond
                     cond = (resolve_name(cond_cbit), cond_op, cond_val)
 
-                if op.op_name == "quantum.alloc":
+                if op.op_name == "arith.constant":
+                    const_val = op.attributes.get("value")
+                    res_name = op.results[0].name
+                    self.constants[resolve_name(res_name)] = const_val
+
+                elif op.op_name == "quantum.alloc":
                     qname = resolve_name(op.results[0].name)
                     self.graph.add_operation('ALLOC', targets=[qname], condition=cond)
 
@@ -327,7 +348,10 @@ class MLIRToEQIRConverter:
                     gate_targets = []
                     args = []
                     for t in targets:
-                        if t.startswith("c") or t.startswith("v") or t.isdigit():
+                        resolved_t = resolve_name(t)
+                        if resolved_t in self.constants:
+                            args.append(self.constants[resolved_t])
+                        elif t.startswith("c") or t.startswith("v") or t.isdigit():
                             # If it's a numeric constant or temporary variable, parse it as arg
                             try:
                                 args.append(float(t))

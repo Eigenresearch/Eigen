@@ -33,6 +33,8 @@ class TokenType(enum.Enum):
     BITFLIP = "bitflip"
     LET = "let"
     IF = "if"
+    ELSE = "else"
+    ELIF = "elif"
     FOR = "for"
     IN = "in"
     WHILE = "while"
@@ -42,6 +44,9 @@ class TokenType(enum.Enum):
     RETURN = "return"
     PARALLEL = "parallel"
     TASK = "task"
+    MATCH = "match"
+    CASE = "case"
+    DEFAULT = "default"
     
     # Built-ins / Utilities
     TRACE = "trace"
@@ -66,6 +71,12 @@ class TokenType(enum.Enum):
     GATE_RX = "RX"
     GATE_RY = "RY"
     GATE_RZ = "RZ"
+    GATE_CCX = "CCX"
+    GATE_CSWAP = "CSWAP"
+    GATE_CP = "CP"
+    GATE_CRX = "CRX"
+    GATE_CRY = "CRY"
+    GATE_CRZ = "CRZ"
     
     # Literals
     STRING_LIT = "STRING_LIT"
@@ -101,16 +112,25 @@ class TokenType(enum.Enum):
     MINUS = "-"
     MUL = "*"
     DIV = "/"
+    MOD = "%"
+    
+    AMP = "&"
+    PIPE = "|"
+    CARET = "^"
+    TILDE = "~"
+    LSHIFT = "<<"
+    RSHIFT = ">>"
     
     ADD_ASSIGN = "+="
     SUB_ASSIGN = "-="
     MUL_ASSIGN = "*="
     DIV_ASSIGN = "/="
+    POW = "**"
     
     AND = "and"
     OR = "or"
     NOT = "not"
-    
+    SEMICOLON = ";"
     EOF = "EOF"
 
 
@@ -151,86 +171,109 @@ class Lexer:
             else:
                 self.column += 1
 
+    _KEYWORDS_MAP = {
+        "eigen": TokenType.EIGEN,
+        "qubit": TokenType.QUBIT,
+        "cbit": TokenType.CBIT,
+        "int": TokenType.INT,
+        "float": TokenType.FLOAT,
+        "string": TokenType.STRING,
+        "bool": TokenType.BOOL,
+        "array": TokenType.ARRAY,
+        "map": TokenType.MAP,
+        "module": TokenType.MODULE,
+        "import": TokenType.IMPORT,
+        "qfunc": TokenType.QFUNC,
+        "func": TokenType.FUNC,
+        "struct": TokenType.STRUCT,
+        "enum": TokenType.ENUM,
+        "try": TokenType.TRY,
+        "catch": TokenType.CATCH,
+        "throw": TokenType.THROW,
+        "noise": TokenType.NOISE,
+        "depolarizing": TokenType.DEPOLARIZING,
+        "bitflip": TokenType.BITFLIP,
+        "let": TokenType.LET,
+        "if": TokenType.IF,
+        "else": TokenType.ELSE,
+        "elif": TokenType.ELIF,
+        "for": TokenType.FOR,
+        "in": TokenType.IN,
+        "while": TokenType.WHILE,
+        "break": TokenType.BREAK,
+        "continue": TokenType.CONTINUE,
+        "measure": TokenType.MEASURE,
+        "return": TokenType.RETURN,
+        "parallel": TokenType.PARALLEL,
+        "task": TokenType.TASK,
+        "match": TokenType.MATCH,
+        "case": TokenType.CASE,
+        "default": TokenType.DEFAULT,
+        "trace": TokenType.TRACE,
+        "print": TokenType.PRINT,
+        "assert": TokenType.ASSERT,
+        "PI": TokenType.PI,
+        "TAU": TokenType.TAU,
+        "E": TokenType.E,
+        "H": TokenType.GATE_H,
+        "X": TokenType.GATE_X,
+        "Y": TokenType.GATE_Y,
+        "Z": TokenType.GATE_Z,
+        "S": TokenType.GATE_S,
+        "T": TokenType.GATE_T,
+        "CNOT": TokenType.GATE_CNOT,
+        "CZ": TokenType.GATE_CZ,
+        "SWAP": TokenType.GATE_SWAP,
+        "RX": TokenType.GATE_RX,
+        "RY": TokenType.GATE_RY,
+        "RZ": TokenType.GATE_RZ,
+        "CCX": TokenType.GATE_CCX,
+        "Toffoli": TokenType.GATE_CCX,
+        "toffoli": TokenType.GATE_CCX,
+        "CSWAP": TokenType.GATE_CSWAP,
+        "Fredkin": TokenType.GATE_CSWAP,
+        "fredkin": TokenType.GATE_CSWAP,
+        "CP": TokenType.GATE_CP,
+        "CRX": TokenType.GATE_CRX,
+        "CRY": TokenType.GATE_CRY,
+        "CRZ": TokenType.GATE_CRZ,
+        "true": TokenType.TRUE,
+        "false": TokenType.FALSE,
+        "null": TokenType.NULL,
+        "and": TokenType.AND,
+        "or": TokenType.OR,
+        "not": TokenType.NOT,
+    }
+
+    _CHAR_TOKENS = {
+        '(': TokenType.LPAREN,
+        ')': TokenType.RPAREN,
+        '{': TokenType.LBRACE,
+        '}': TokenType.RBRACE,
+        '[': TokenType.LBRACK,
+        ']': TokenType.RBRACK,
+        ',': TokenType.COMMA,
+        ':': TokenType.COLON,
+        '.': TokenType.DOT,
+        '=': TokenType.EQUALS,
+        '+': TokenType.PLUS,
+        '-': TokenType.MINUS,
+        '*': TokenType.MUL,
+        '/': TokenType.DIV,
+        '<': TokenType.LT,
+        '>': TokenType.GT,
+        '%': TokenType.MOD,
+        '&': TokenType.AMP,
+        '|': TokenType.PIPE,
+        '^': TokenType.CARET,
+        '~': TokenType.TILDE,
+    }
+
     def tokenize(self) -> list[Token]:
         tokens = []
         
-        KEYWORDS_MAP = {
-            "eigen": TokenType.EIGEN,
-            "qubit": TokenType.QUBIT,
-            "cbit": TokenType.CBIT,
-            "int": TokenType.INT,
-            "float": TokenType.FLOAT,
-            "string": TokenType.STRING,
-            "bool": TokenType.BOOL,
-            "array": TokenType.ARRAY,
-            "map": TokenType.MAP,
-            "module": TokenType.MODULE,
-            "import": TokenType.IMPORT,
-            "qfunc": TokenType.QFUNC,
-            "func": TokenType.FUNC,
-            "struct": TokenType.STRUCT,
-            "enum": TokenType.ENUM,
-            "try": TokenType.TRY,
-            "catch": TokenType.CATCH,
-            "throw": TokenType.THROW,
-            "noise": TokenType.NOISE,
-            "depolarizing": TokenType.DEPOLARIZING,
-            "bitflip": TokenType.BITFLIP,
-            "let": TokenType.LET,
-            "if": TokenType.IF,
-            "for": TokenType.FOR,
-            "in": TokenType.IN,
-            "while": TokenType.WHILE,
-            "break": TokenType.BREAK,
-            "continue": TokenType.CONTINUE,
-            "measure": TokenType.MEASURE,
-            "return": TokenType.RETURN,
-            "parallel": TokenType.PARALLEL,
-            "task": TokenType.TASK,
-            "trace": TokenType.TRACE,
-            "print": TokenType.PRINT,
-            "assert": TokenType.ASSERT,
-            "PI": TokenType.PI,
-            "TAU": TokenType.TAU,
-            "E": TokenType.E,
-            "H": TokenType.GATE_H,
-            "X": TokenType.GATE_X,
-            "Y": TokenType.GATE_Y,
-            "Z": TokenType.GATE_Z,
-            "S": TokenType.GATE_S,
-            "T": TokenType.GATE_T,
-            "CNOT": TokenType.GATE_CNOT,
-            "CZ": TokenType.GATE_CZ,
-            "SWAP": TokenType.GATE_SWAP,
-            "RX": TokenType.GATE_RX,
-            "RY": TokenType.GATE_RY,
-            "RZ": TokenType.GATE_RZ,
-            "true": TokenType.TRUE,
-            "false": TokenType.FALSE,
-            "null": TokenType.NULL,
-            "and": TokenType.AND,
-            "or": TokenType.OR,
-            "not": TokenType.NOT,
-        }
-
-        char_tokens = {
-            '(': TokenType.LPAREN,
-            ')': TokenType.RPAREN,
-            '{': TokenType.LBRACE,
-            '}': TokenType.RBRACE,
-            '[': TokenType.LBRACK,
-            ']': TokenType.RBRACK,
-            ',': TokenType.COMMA,
-            ':': TokenType.COLON,
-            '.': TokenType.DOT,
-            '=': TokenType.EQUALS,
-            '+': TokenType.PLUS,
-            '-': TokenType.MINUS,
-            '*': TokenType.MUL,
-            '/': TokenType.DIV,
-            '<': TokenType.LT,
-            '>': TokenType.GT,
-        }
+        KEYWORDS_MAP = self._KEYWORDS_MAP
+        char_tokens = self._CHAR_TOKENS
 
         while self.pos < self.length:
             char = self.source[self.pos]
@@ -266,8 +309,33 @@ class Lexer:
                     if self.source[self.pos] == '\\':
                         self.pos += 1
                         if self.pos < self.length:
-                            string_val.append(self.source[self.pos])
+                            esc_char = self.source[self.pos]
+                            escape_map = {
+                                'n': '\n', 't': '\t', 'r': '\r',
+                                '0': '\0', '\\': '\\', '"': '"',
+                                "'": "'", 'a': '\a', 'b': '\b',
+                                'f': '\f', 'v': '\v',
+                            }
+                            string_val.append(escape_map.get(esc_char, esc_char))
                             self.pos += 1
+                    elif self.source[self.pos] == '$' and self.pos + 1 < self.length and self.source[self.pos + 1] == '{':
+                        # String interpolation: ${expr}
+                        self.pos += 2  # skip ${
+                        expr_start = self.pos
+                        brace_depth = 1
+                        while self.pos < self.length and brace_depth > 0:
+                            if self.source[self.pos] == '{':
+                                brace_depth += 1
+                            elif self.source[self.pos] == '}':
+                                brace_depth -= 1
+                                if brace_depth == 0:
+                                    break
+                            self.pos += 1
+                        if self.pos >= self.length:
+                            self.error("Unterminated string interpolation: expected '}'")
+                        expr_str = self.source[expr_start:self.pos]
+                        string_val.append(f"\x00{expr_str}\x00")  # Marker for interpolation
+                        self.pos += 1  # skip }
                     else:
                         string_val.append(self.source[self.pos])
                         self.pos += 1
@@ -300,19 +368,33 @@ class Lexer:
                 tokens.append(Token(TokenType.NE, "!=", self.line, start_col))
                 continue
 
-            if char == '<' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
-                start_col = self.column
-                self.pos += 2
-                self.column += 2
-                tokens.append(Token(TokenType.LE, "<=", self.line, start_col))
-                continue
-
-            if char == '>' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
-                start_col = self.column
-                self.pos += 2
-                self.column += 2
-                tokens.append(Token(TokenType.GE, ">=", self.line, start_col))
-                continue
+            if char == '<' and self.pos + 1 < self.length:
+                if self.source[self.pos + 1] == '=':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.LE, "<=", self.line, start_col))
+                    continue
+                elif self.source[self.pos + 1] == '<':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.LSHIFT, "<<", self.line, start_col))
+                    continue
+ 
+            if char == '>' and self.pos + 1 < self.length:
+                if self.source[self.pos + 1] == '=':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.GE, ">=", self.line, start_col))
+                    continue
+                elif self.source[self.pos + 1] == '>':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.RSHIFT, ">>", self.line, start_col))
+                    continue
 
             if char == '+' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
@@ -328,12 +410,19 @@ class Lexer:
                 tokens.append(Token(TokenType.SUB_ASSIGN, "-=", self.line, start_col))
                 continue
 
-            if char == '*' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
-                start_col = self.column
-                self.pos += 2
-                self.column += 2
-                tokens.append(Token(TokenType.MUL_ASSIGN, "*=", self.line, start_col))
-                continue
+            if char == '*' and self.pos + 1 < self.length:
+                if self.source[self.pos + 1] == '*':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.POW, "**", self.line, start_col))
+                    continue
+                elif self.source[self.pos + 1] == '=':
+                    start_col = self.column
+                    self.pos += 2
+                    self.column += 2
+                    tokens.append(Token(TokenType.MUL_ASSIGN, "*=", self.line, start_col))
+                    continue
 
             if char == '/' and self.pos + 1 < self.length and self.source[self.pos + 1] == '=':
                 start_col = self.column
@@ -349,16 +438,72 @@ class Lexer:
                 self.column += 1
                 continue
 
-            # Numbers (integers or floats)
+            # Numbers (integers or floats) — including hex/binary/octal
             if char.isdigit():
                 start_pos = self.pos
                 start_col = self.column
+
+                # Hex (0x), Binary (0b), Octal (0o)
+                if char == '0' and self.pos + 1 < self.length:
+                    next_char = self.source[self.pos + 1]
+                    if next_char in ('x', 'X'):
+                        self.pos += 2
+                        hex_start = self.pos
+                        while self.pos < self.length and self.source[self.pos] in '0123456789abcdefABCDEF':
+                            self.pos += 1
+                        if self.pos == hex_start:
+                            self.error("Expected hex digits after '0x'")
+                        num_str = str(int(self.source[start_pos:self.pos], 16))
+                        self.column += (self.pos - start_pos)
+                        tokens.append(Token(TokenType.INT_LIT, num_str, self.line, start_col))
+                        continue
+                    elif next_char in ('b', 'B'):
+                        self.pos += 2
+                        bin_start = self.pos
+                        while self.pos < self.length and self.source[self.pos] in '01':
+                            self.pos += 1
+                        if self.pos == bin_start:
+                            self.error("Expected binary digits after '0b'")
+                        num_str = str(int(self.source[start_pos:self.pos], 2))
+                        self.column += (self.pos - start_pos)
+                        tokens.append(Token(TokenType.INT_LIT, num_str, self.line, start_col))
+                        continue
+                    elif next_char in ('o', 'O'):
+                        self.pos += 2
+                        oct_start = self.pos
+                        while self.pos < self.length and self.source[self.pos] in '01234567':
+                            self.pos += 1
+                        if self.pos == oct_start:
+                            self.error("Expected octal digits after '0o'")
+                        num_str = str(int(self.source[start_pos:self.pos], 8))
+                        self.column += (self.pos - start_pos)
+                        tokens.append(Token(TokenType.INT_LIT, num_str, self.line, start_col))
+                        continue
+
+                # Scientific notation: 1.23e-5
                 while self.pos < self.length and self.source[self.pos].isdigit():
                     self.pos += 1
-                
+
                 # Check for decimal point
                 if self.pos < self.length and self.source[self.pos] == '.' and (self.pos + 1 < self.length and self.source[self.pos + 1].isdigit()):
                     self.pos += 2
+                    while self.pos < self.length and self.source[self.pos].isdigit():
+                        self.pos += 1
+                    # Check for exponent
+                    if self.pos < self.length and self.source[self.pos] in ('e', 'E'):
+                        self.pos += 1
+                        if self.pos < self.length and self.source[self.pos] in ('+', '-'):
+                            self.pos += 1
+                        while self.pos < self.length and self.source[self.pos].isdigit():
+                            self.pos += 1
+                    num_str = self.source[start_pos:self.pos]
+                    self.column += (self.pos - start_pos)
+                    tokens.append(Token(TokenType.FLOAT_LIT, num_str, self.line, start_col))
+                elif self.pos < self.length and self.source[self.pos] in ('e', 'E') and self.pos + 1 < self.length and (self.source[self.pos+1].isdigit() or (self.source[self.pos+1] in ('+','-') and self.pos+2 < self.length and self.source[self.pos+2].isdigit())):
+                    # Integer with exponent: 1e5, 2e-3
+                    self.pos += 1
+                    if self.pos < self.length and self.source[self.pos] in ('+', '-'):
+                        self.pos += 1
                     while self.pos < self.length and self.source[self.pos].isdigit():
                         self.pos += 1
                     num_str = self.source[start_pos:self.pos]

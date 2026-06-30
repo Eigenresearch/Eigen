@@ -54,7 +54,7 @@ def profile_command(args, workspace_root):
     
     t0 = time.perf_counter()
     compiler = EBCCompiler()
-    instrs = compiler.compile_eqir(graph)
+    instrs = compiler.compile_ast(ast)
     t_ebc_compile = (time.perf_counter() - t0) * 1000.0
     
     vm = EigenVM()

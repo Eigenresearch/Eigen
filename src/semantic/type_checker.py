@@ -5,13 +5,22 @@ from src.frontend.ast import (
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode, StructDeclNode,
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
-    IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode
+    IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
+    MatchNode, StringInterpolationNode
 )
 
 class TypeErrorException(Exception):
     pass
 
 class TypeChecker:
+    STDLIB_FUNCTIONS = {
+        'sin', 'cos', 'tan', 'sqrt', 'log', 'exp', 'abs',
+        'mean', 'variance', 'rand_float', 'rand_int',
+        'append_int', 'remove_at', 'read_file', 'write_file',
+        'print_format', 'now', 'sleep', 'concat', 'format_int',
+        'len', 'range', 'print', 'push', 'pop',
+    }
+
     def __init__(self):
         self.global_qfuncs = {}     # name -> QFuncDeclNode
         self.global_funcs = {}      # name -> FuncDeclNode
@@ -139,21 +148,27 @@ class TypeChecker:
     def _check_node_uncached(self, node: ASTNode) -> str | None:
         if isinstance(node, QFuncDeclNode):
             self.enter_scope()
+            saved_func = self.current_function
+            self.current_function = node
+            if not hasattr(node, 'return_type'):
+                node.return_type = "void"
             for p_name, p_type in node.params:
                 self.declare_var(p_name, p_type, node)
             for stmt in node.body:
                 self.check_node(stmt)
+            self.current_function = saved_func
             self.exit_scope()
             return None
 
         elif isinstance(node, FuncDeclNode):
             self.enter_scope()
+            saved_func = self.current_function
             self.current_function = node
             for p_name, p_type in node.params:
                 self.declare_var(p_name, p_type, node)
             for stmt in node.body:
                 self.check_node(stmt)
-            self.current_function = None
+            self.current_function = saved_func
             self.exit_scope()
             return None
 
@@ -202,19 +217,32 @@ class TypeChecker:
                 if left_type != "bool" or (right_type and right_type != "bool"):
                     self.error(f"Logical operator '{node.op}' expects boolean arguments", node)
                 return "bool"
+            elif node.op in ("%", "&", "|", "^", "~", "<<", ">>"):
+                integer_types = {"int", "cbit"}
+                if left_type not in integer_types or (right_type and right_type not in integer_types):
+                    self.error(f"Operator '{node.op}' is only supported on integer types, got '{left_type}' and '{right_type}'", node)
+                return "int"
             else:
                 numeric_types = {"int", "float", "cbit"}
                 if left_type not in numeric_types or right_type not in numeric_types:
                     self.error(f"Binary operation '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                if node.op == "**" and right_type == "int":
+                    return "int" if left_type == "int" else "float"
                 if left_type == "float" or right_type == "float":
                     return "float"
                 return "int"
 
         elif isinstance(node, ForNode):
             iter_type = self.check_node(node.iterable)
-            if not iter_type.startswith("array<"):
-                self.error(f"For loop expected array type, got '{iter_type}'", node)
-            elem_type = iter_type[6:-1]
+            if iter_type.startswith("array<"):
+                elem_type = iter_type[6:-1]
+            elif iter_type == "int":
+                elem_type = "int"
+            elif iter_type == "any":
+                elem_type = "any"
+            else:
+                self.error(f"For loop expected array or range type, got '{iter_type}'", node)
+                elem_type = "unknown"
             self.enter_scope()
             self.declare_var(node.variable, elem_type, node)
             self.loop_depth += 1
@@ -243,7 +271,7 @@ class TypeChecker:
 
         elif isinstance(node, ReturnNode):
             if self.current_function:
-                expected = self.current_function.return_type
+                expected = getattr(self.current_function, "return_type", "void")
                 # ReturnNode has optional expr field (added in Phase 2)
                 actual = "void"
                 if hasattr(node, "expr") and node.expr is not None:
@@ -368,6 +396,29 @@ class TypeChecker:
                 if ret_type in bindings:
                     return bindings[ret_type]
                 return ret_type
+            elif callee_name and callee_name in self.STDLIB_FUNCTIONS:
+                for arg in node.args:
+                    self.check_node(arg)
+                if callee_name in ('sin', 'cos', 'tan', 'sqrt', 'log', 'exp', 'abs'):
+                    return "float"
+                elif callee_name in ('len', 'rand_int', 'format_int', 'append_int', 'remove_at'):
+                    return "int"
+                elif callee_name in ('rand_float', 'mean', 'variance'):
+                    return "float"
+                elif callee_name in ('concat', 'read_file', 'print_format'):
+                    return "string"
+                elif callee_name in ('range',):
+                    return "array<int>"
+                return "any"
+            elif isinstance(node.callee, DotAccessNode):
+                obj_type = self.check_node(node.callee.obj)
+                for arg in node.args:
+                    self.check_node(arg)
+                return "any"
+            elif callee_name is None:
+                for arg in node.args:
+                    self.check_node(arg)
+                return "any"
             else:
                 self.error(f"Call to undefined classic function '{callee_name}'", node)
 
@@ -425,13 +476,19 @@ class TypeChecker:
         elif isinstance(node, IfNode):
             left_type = self.check_node(node.condition_left)
             right_type = self.check_node(node.condition_right)
-            comparable = {"int", "float", "cbit", "bool"}
+            comparable = {"int", "float", "cbit", "bool", "string"}
             if left_type not in comparable or right_type not in comparable:
-                self.error(f"Condition comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                if not self.types_compatible(left_type, right_type):
+                    self.error(f"Condition comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
             self.enter_scope()
             for stmt in node.body:
                 self.check_node(stmt)
             self.exit_scope()
+            if hasattr(node, "else_body") and node.else_body:
+                self.enter_scope()
+                for stmt in node.else_body:
+                    self.check_node(stmt)
+                self.exit_scope()
             return None
 
         elif isinstance(node, TraceNode):
@@ -444,9 +501,10 @@ class TypeChecker:
         elif isinstance(node, AssertNode):
             left_type = self.check_node(node.condition_left)
             right_type = self.check_node(node.condition_right)
-            comparable = {"int", "float", "cbit", "bool"}
+            comparable = {"int", "float", "cbit", "bool", "string"}
             if left_type not in comparable or right_type not in comparable:
-                self.error(f"Assert comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                if not self.types_compatible(left_type, right_type):
+                    self.error(f"Assert comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
             return None
 
         elif isinstance(node, ProgramNode):
@@ -461,6 +519,27 @@ class TypeChecker:
         elif isinstance(node, TaskStatementNode):
             self.check_node(node.call)
             return None
+
+        elif isinstance(node, MatchNode):
+            match_type = self.check_node(node.expr)
+            for pattern, body in node.cases:
+                pattern_type = self.check_node(pattern)
+                self.enter_scope()
+                for stmt in body:
+                    self.check_node(stmt)
+                self.exit_scope()
+            if node.default_body:
+                self.enter_scope()
+                for stmt in node.default_body:
+                    self.check_node(stmt)
+                self.exit_scope()
+            return None
+
+        elif isinstance(node, StringInterpolationNode):
+            for part in node.parts:
+                if not isinstance(part, str):
+                    self.check_node(part)
+            return "string"
 
         else:
             self.error(f"Unknown AST Node type: {type(node).__name__}", node)

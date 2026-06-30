@@ -1,3 +1,5 @@
+import re
+
 class EQIRNode:
     def __init__(self, node_id: int, node_type: str, **kwargs):
         self.id = node_id
@@ -78,7 +80,13 @@ class EQIRGraph:
         if node.cbit_name:
             cbit_deps.append(node.cbit_name)
         if node.condition:
-            cbit_deps.append(node.condition[0])
+            cbit_expr = node.condition[0]
+            if isinstance(cbit_expr, str):
+                for word in re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', cbit_expr):
+                    if word not in ('True', 'False', 'None'):
+                        cbit_deps.append(word)
+            else:
+                cbit_deps.append(cbit_expr)
             
         if node.type == 'PRINT':
             if isinstance(node.print_expr, str):
@@ -110,49 +118,45 @@ class EQIRGraph:
         return [node for node in self.nodes.values() if not node.children]
 
     def topological_sort(self) -> list[EQIRNode]:
-        """Returns nodes in topologically sorted order."""
+        """Returns nodes in topologically sorted order (iterative DFS)."""
         visited = set()
         stack = []
 
-        def dfs(node):
-            visited.add(node.id)
-            for child in sorted(node.children, key=lambda n: n.id):
-                if child.id not in visited:
-                    dfs(child)
-            stack.append(node)
-
-        # Sort sources by ID to be deterministic
         for source in sorted(self.get_sources(), key=lambda n: n.id):
-            if source.id not in visited:
-                dfs(source)
+            if source.id in visited:
+                continue
+            # Iterative DFS: each stack entry is (node, child_iterator)
+            call_stack = [(source, iter(sorted(source.children, key=lambda n: n.id)))]
+            visited.add(source.id)
+            while call_stack:
+                node, child_iter = call_stack[-1]
+                advanced = False
+                for child in child_iter:
+                    if child.id not in visited:
+                        visited.add(child.id)
+                        call_stack.append((child, iter(sorted(child.children, key=lambda n: n.id))))
+                        advanced = True
+                        break
+                if not advanced:
+                    stack.append(node)
+                    call_stack.pop()
 
         return list(reversed(stack))
 
     def compute_depth(self) -> int:
-        """
-        Computes the quantum depth of the circuit (length of longest path of quantum gates).
-        """
-        # We only count GATE and MEASURE nodes in quantum depth. ALLOC nodes have depth 0.
+        """Computes the quantum depth of the circuit (iterative)."""
         memo = {}
 
-        def get_node_depth(node: EQIRNode) -> int:
-            if node.id in memo:
-                return memo[node.id]
-            
-            # Depth of current node
+        # Process nodes in topological order (parents before children)
+        for node in self.topological_sort():
             self_weight = 1 if node.type in ('GATE', 'MEASURE') else 0
-            
             max_parent_depth = 0
             for parent in node.parents:
-                max_parent_depth = max(max_parent_depth, get_node_depth(parent))
-                
+                if parent.id in memo:
+                    max_parent_depth = max(max_parent_depth, memo[parent.id])
             memo[node.id] = max_parent_depth + self_weight
-            return memo[node.id]
 
-        max_depth = 0
-        for sink in self.get_sinks():
-            max_depth = max(max_depth, get_node_depth(sink))
-        return max_depth
+        return max(memo.values()) if memo else 0
 
     def print_graph(self):
         """Prints a human-readable list of nodes in topological order with their connections."""

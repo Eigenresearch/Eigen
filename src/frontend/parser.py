@@ -6,17 +6,55 @@ from src.frontend.ast import (
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode, StructDeclNode,
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
-    IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode
+    IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
+    MatchNode, StringInterpolationNode
 )
+
+def node_to_str(node) -> str:
+    from src.frontend.ast import VarRefNode, IndexAccessNode, LiteralNode
+    if isinstance(node, VarRefNode):
+        return node.name
+    elif isinstance(node, IndexAccessNode):
+        obj_str = node_to_str(node.obj)
+        if isinstance(node.index, LiteralNode):
+            index_str = str(node.index.value)
+        elif isinstance(node.index, VarRefNode):
+            index_str = node.index.name
+        else:
+            index_str = "0"
+        return f"{obj_str}[{index_str}]"
+    elif isinstance(node, LiteralNode):
+        return str(node.value)
+    else:
+        return ""
+
 
 class Parser:
     def __init__(self, tokens: list[Token]):
         self.tokens = tokens
         self.pos = 0
+        self.errors = []
+        self.recovery_tokens = {TokenType.SEMICOLON, TokenType.RBRACE, TokenType.IF,
+                                  TokenType.LET, TokenType.FUNC, TokenType.QFUNC,
+                                  TokenType.FOR, TokenType.WHILE, TokenType.RETURN,
+                                  TokenType.BREAK, TokenType.CONTINUE, TokenType.EOF}
+        self.declared_qfuncs = set()
+        for i in range(len(tokens) - 1):
+            if tokens[i].type == TokenType.QFUNC and tokens[i+1].type == TokenType.IDENTIFIER:
+                self.declared_qfuncs.add(tokens[i+1].value)
 
     def error(self, msg: str):
         tok = self.current()
-        raise SyntaxError(f"Parser Error at line {tok.line}, col {tok.column}: {msg} (found {tok})")
+        err = SyntaxError(f"Parser Error at line {tok.line}, col {tok.column}: {msg} (found {tok})")
+        self.errors.append(err)
+        raise err
+
+    def _recover(self):
+        """Skip tokens until a recovery point is reached."""
+        while self.current().type not in self.recovery_tokens:
+            self.pos += 1
+        if self.current().type == TokenType.SEMICOLON:
+            self.pos += 1
 
     def current(self) -> Token:
         if self.pos >= len(self.tokens):
@@ -45,7 +83,10 @@ class Parser:
         from src.frontend.ast import NATIVE_AVAILABLE
         if NATIVE_AVAILABLE and hasattr(self.tokens, "source") and self.tokens.source is not None:
             import eigen_native
-            return eigen_native.parse_native(self.tokens.source)
+            try:
+                return eigen_native.parse_native(self.tokens.source)
+            except Exception:
+                pass
 
         # File must start with version header: "eigen 1.0" or similar
         self.consume(TokenType.EIGEN, "Expected 'eigen' header directive at start of file")
@@ -80,21 +121,26 @@ class Parser:
             parts.append(self.consume(TokenType.IDENTIFIER, "Expected identifier after '.'").value)
         return ".".join(parts)
 
-    def parse_type(self) -> str:
-        tok = self.match(
+    def parse_type(self, allow_gates: bool = True) -> str:
+        types_to_match = [
             TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL,
             TokenType.QUBIT, TokenType.CBIT, TokenType.ARRAY, TokenType.MAP,
             TokenType.IDENTIFIER
-        )
+        ]
+        if allow_gates:
+            types_to_match.extend([
+                TokenType.GATE_H, TokenType.GATE_X, TokenType.GATE_Y, TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T
+            ])
+        tok = self.match(*types_to_match)
         if not tok:
             self.error("Expected type name")
         
         type_str = tok.value
         # Check if it has generic parameters, e.g. <T> or <K, V>
         if self.match(TokenType.LT):
-            generic_types = [self.parse_type()]
+            generic_types = [self.parse_type(allow_gates=True)]
             while self.match(TokenType.COMMA):
-                generic_types.append(self.parse_type())
+                generic_types.append(self.parse_type(allow_gates=True))
             self.consume(TokenType.GT, "Expected '>' after generic type parameters")
             type_str += "<" + ", ".join(generic_types) + ">"
         
@@ -198,11 +244,15 @@ class Parser:
         if tok.type == TokenType.PARALLEL:
             return self.parse_parallel_block()
 
+        # match statement
+        if tok.type == TokenType.MATCH:
+            return self.parse_match()
+
         # Variable declarations: e.g. qubit q0, cbit c0, map<string, int> m, MyStruct s
         # We can backtrack to see if it is a type followed by an identifier.
         saved_pos = self.pos
         try:
-            type_name = self.parse_type()
+            type_name = self.parse_type(allow_gates=False)
             if self.current().type == TokenType.IDENTIFIER:
                 name_tok = self.consume(TokenType.IDENTIFIER, "Expected identifier")
                 return VarDeclNode(name_tok.value, type_name)
@@ -221,8 +271,8 @@ class Parser:
                     args.append(self.parse_expr())
             self.consume(TokenType.RPAREN, "Expected ')'")
             
-            if all(isinstance(arg, VarRefNode) for arg in args):
-                return QFuncCallNode(name_tok.value, [arg.name for arg in args])
+            if name_tok.value in self.declared_qfuncs:
+                return QFuncCallNode(name_tok.value, [node_to_str(arg) for arg in args])
             else:
                 return CallNode(VarRefNode(name_tok.value), args)
 
@@ -255,6 +305,37 @@ class Parser:
             self.consume(TokenType.COMMA, f"Expected ',' before rotation angle for gate {gate_tok.value}")
             angle_expr = self.parse_expr()
             return GateNode(gate_tok.value, [q_tok.value], [angle_expr])
+
+        gates_with_3_qubit = (
+            TokenType.GATE_CCX, TokenType.GATE_CSWAP
+        )
+        if tok.type in gates_with_3_qubit:
+            gate_tok = self.match(*gates_with_3_qubit)
+            q1_tok = self.consume(TokenType.IDENTIFIER, f"Expected first qubit identifier for gate {gate_tok.value}")
+            self.consume(TokenType.COMMA, f"Expected ',' between qubits for gate {gate_tok.value}")
+            q2_tok = self.consume(TokenType.IDENTIFIER, f"Expected second qubit identifier for gate {gate_tok.value}")
+            self.consume(TokenType.COMMA, f"Expected ',' between qubits for gate {gate_tok.value}")
+            q3_tok = self.consume(TokenType.IDENTIFIER, f"Expected third qubit identifier for gate {gate_tok.value}")
+            
+            g_name = gate_tok.value.upper()
+            if g_name in ("TOFFOLI", "CCX"):
+                g_name = "CCX"
+            elif g_name in ("FREDKIN", "CSWAP"):
+                g_name = "CSWAP"
+                
+            return GateNode(g_name, [q1_tok.value, q2_tok.value, q3_tok.value], [])
+
+        controlled_rotations = (
+            TokenType.GATE_CP, TokenType.GATE_CRX, TokenType.GATE_CRY, TokenType.GATE_CRZ
+        )
+        if tok.type in controlled_rotations:
+            gate_tok = self.match(*controlled_rotations)
+            q1_tok = self.consume(TokenType.IDENTIFIER, f"Expected control qubit identifier for gate {gate_tok.value}")
+            self.consume(TokenType.COMMA, f"Expected ',' between qubits for gate {gate_tok.value}")
+            q2_tok = self.consume(TokenType.IDENTIFIER, f"Expected target qubit identifier for gate {gate_tok.value}")
+            self.consume(TokenType.COMMA, f"Expected ',' before rotation angle for gate {gate_tok.value}")
+            angle_expr = self.parse_expr()
+            return GateNode(gate_tok.value.upper(), [q1_tok.value, q2_tok.value], [angle_expr])
 
         # Try parsing as an assignment or general expression statement
         expression_starters = (
@@ -313,15 +394,22 @@ class Parser:
         self.consume(TokenType.RBRACE, "Expected '}'")
         return QFuncDeclNode(name_tok.value, params, body)
 
+    def parse_generic_param_name(self) -> str:
+        tok = self.current()
+        if tok.type in (TokenType.IDENTIFIER, TokenType.GATE_H, TokenType.GATE_X, TokenType.GATE_Y, TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T):
+            self.pos += 1
+            return tok.value
+        self.error("Expected generic parameter name")
+
     def parse_func_decl(self) -> FuncDeclNode:
         self.consume(TokenType.FUNC, "Expected 'func'")
         name_tok = self.consume(TokenType.IDENTIFIER, "Expected function name")
         
         generic_params = []
         if self.match(TokenType.LT):
-            generic_params.append(self.consume(TokenType.IDENTIFIER, "Expected generic parameter").value)
+            generic_params.append(self.parse_generic_param_name())
             while self.match(TokenType.COMMA):
-                generic_params.append(self.consume(TokenType.IDENTIFIER, "Expected generic parameter").value)
+                generic_params.append(self.parse_generic_param_name())
             self.consume(TokenType.GT, "Expected '>'")
             
         self.consume(TokenType.LPAREN, "Expected '('")
@@ -339,8 +427,9 @@ class Parser:
                 params.append((p_name_tok.value, p_type))
                 
         self.consume(TokenType.RPAREN, "Expected ')'")
-        self.consume(TokenType.ARROW, "Expected '->'")
-        return_type = self.parse_type()
+        return_type = "void"
+        if self.match(TokenType.ARROW):
+            return_type = self.parse_type()
         
         self.consume(TokenType.LBRACE, "Expected '{'")
         body = []
@@ -358,9 +447,9 @@ class Parser:
         
         generic_params = []
         if self.match(TokenType.LT):
-            generic_params.append(self.consume(TokenType.IDENTIFIER, "Expected generic parameter").value)
+            generic_params.append(self.parse_generic_param_name())
             while self.match(TokenType.COMMA):
-                generic_params.append(self.consume(TokenType.IDENTIFIER, "Expected generic parameter").value)
+                generic_params.append(self.parse_generic_param_name())
             self.consume(TokenType.GT, "Expected '>'")
             
         self.consume(TokenType.LBRACE, "Expected '{'")
@@ -400,6 +489,56 @@ class Parser:
         value_expr = self.parse_expr()
         return LetNode(name_tok.value, type_name, value_expr)
 
+    def parse_if_tail(self) -> list:
+        else_body = []
+        if self.match(TokenType.ELSE):
+            if self.match(TokenType.IF):
+                left = self.parse_expr()
+                op_tok = self.match(TokenType.EQ, TokenType.NE, TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE)
+                if op_tok:
+                    right = self.parse_expr()
+                else:
+                    op_tok = Token(TokenType.EQ, "==", self.current().line, self.current().column)
+                    right = LiteralNode(True, "bool")
+                self.consume(TokenType.LBRACE, "Expected '{'")
+                body = []
+                while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                    stmt = self.parse_statement()
+                    if stmt:
+                        body.append(stmt)
+                self.consume(TokenType.RBRACE, "Expected '}'")
+                
+                nested_else = self.parse_if_tail()
+                elif_node = IfNode(left, op_tok.value, right, body, nested_else)
+                else_body.append(elif_node)
+            else:
+                self.consume(TokenType.LBRACE, "Expected '{' after 'else'")
+                while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                    stmt = self.parse_statement()
+                    if stmt:
+                        else_body.append(stmt)
+                self.consume(TokenType.RBRACE, "Expected '}'")
+        elif self.match(TokenType.ELIF):
+            left = self.parse_expr()
+            op_tok = self.match(TokenType.EQ, TokenType.NE, TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE)
+            if op_tok:
+                right = self.parse_expr()
+            else:
+                op_tok = Token(TokenType.EQ, "==", self.current().line, self.current().column)
+                right = LiteralNode(True, "bool")
+            self.consume(TokenType.LBRACE, "Expected '{'")
+            body = []
+            while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                stmt = self.parse_statement()
+                if stmt:
+                    body.append(stmt)
+            self.consume(TokenType.RBRACE, "Expected '}'")
+            
+            nested_else = self.parse_if_tail()
+            elif_node = IfNode(left, op_tok.value, right, body, nested_else)
+            else_body.append(elif_node)
+        return else_body
+
     def parse_if(self) -> IfNode:
         self.consume(TokenType.IF, "Expected 'if'")
         left = self.parse_expr()
@@ -417,7 +556,8 @@ class Parser:
             if stmt:
                 body.append(stmt)
         self.consume(TokenType.RBRACE, "Expected '}' to end if branch")
-        return IfNode(left, op_tok.value, right, body)
+        else_body = self.parse_if_tail()
+        return IfNode(left, op_tok.value, right, body, else_body)
 
     def parse_for(self) -> ForNode:
         self.consume(TokenType.FOR, "Expected 'for'")
@@ -511,6 +651,39 @@ class Parser:
         self.consume(TokenType.RBRACE, "Expected '}' to close parallel block")
         return ParallelBlockNode(tasks)
 
+    def parse_match(self) -> MatchNode:
+        self.consume(TokenType.MATCH, "Expected 'match'")
+        match_expr = self.parse_expr()
+        self.consume(TokenType.LBRACE, "Expected '{' after match expression")
+
+        cases = []
+        default_body = None
+
+        while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+            if self.match(TokenType.CASE):
+                pattern = self.parse_expr()
+                self.consume(TokenType.LBRACE, "Expected '{' after case pattern")
+                body = []
+                while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                    stmt = self.parse_statement()
+                    if stmt:
+                        body.append(stmt)
+                self.consume(TokenType.RBRACE, "Expected '}' to close case body")
+                cases.append((pattern, body))
+            elif self.match(TokenType.DEFAULT):
+                self.consume(TokenType.LBRACE, "Expected '{' after default")
+                default_body = []
+                while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                    stmt = self.parse_statement()
+                    if stmt:
+                        default_body.append(stmt)
+                self.consume(TokenType.RBRACE, "Expected '}' to close default body")
+            else:
+                self.error("Expected 'case' or 'default' in match block")
+
+        self.consume(TokenType.RBRACE, "Expected '}' to close match")
+        return MatchNode(match_expr, cases, default_body)
+
     # Operator Precedence Parsing
     def parse_expr(self) -> ASTNode:
         return self.parse_logical_or()
@@ -549,9 +722,53 @@ class Parser:
         return node
 
     def parse_comparison(self) -> ASTNode:
-        node = self.parse_additive()
+        node = self.parse_bitwise_or()
         while True:
             op_tok = self.match(TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE)
+            if op_tok:
+                right = self.parse_bitwise_or()
+                node = BinaryOpNode(op_tok.value, node, right)
+            else:
+                break
+        return node
+
+    def parse_bitwise_or(self) -> ASTNode:
+        node = self.parse_bitwise_xor()
+        while True:
+            op_tok = self.match(TokenType.PIPE)
+            if op_tok:
+                right = self.parse_bitwise_xor()
+                node = BinaryOpNode(op_tok.value, node, right)
+            else:
+                break
+        return node
+
+    def parse_bitwise_xor(self) -> ASTNode:
+        node = self.parse_bitwise_and()
+        while True:
+            op_tok = self.match(TokenType.CARET)
+            if op_tok:
+                right = self.parse_bitwise_and()
+                node = BinaryOpNode(op_tok.value, node, right)
+            else:
+                break
+        return node
+
+    def parse_bitwise_and(self) -> ASTNode:
+        node = self.parse_bitwise_shift()
+        while True:
+            op_tok = self.match(TokenType.AMP)
+            if op_tok:
+                right = self.parse_bitwise_shift()
+                node = BinaryOpNode(op_tok.value, node, right)
+            else:
+                break
+        return node
+
+    def parse_bitwise_shift(self) -> ASTNode:
+        node = self.parse_additive()
+        while True:
+            op_tok = self.match(TokenType.LSHIFT, TokenType.RSHIFT)
             if op_tok:
                 right = self.parse_additive()
                 node = BinaryOpNode(op_tok.value, node, right)
@@ -571,22 +788,32 @@ class Parser:
         return node
 
     def parse_multiplicative(self) -> ASTNode:
-        node = self.parse_unary()
+        node = self.parse_power()
         while True:
-            op_tok = self.match(TokenType.MUL, TokenType.DIV)
+            op_tok = self.match(TokenType.MUL, TokenType.DIV, TokenType.MOD)
             if op_tok:
-                right = self.parse_unary()
+                right = self.parse_power()
                 node = BinaryOpNode(op_tok.value, node, right)
             else:
                 break
         return node
 
+    def parse_power(self) -> ASTNode:
+        base = self.parse_unary()
+        if self.match(TokenType.POW):
+            exponent = self.parse_power()
+            return BinaryOpNode("**", base, exponent)
+        return base
+
     def parse_unary(self) -> ASTNode:
         if self.match(TokenType.NOT):
             right = self.parse_unary()
             return BinaryOpNode("not", right, LiteralNode(True, "bool"))
+        if self.match(TokenType.TILDE):
+            right = self.parse_unary()
+            return BinaryOpNode("~", right, LiteralNode(0, "int"))
         if self.match(TokenType.MINUS):
-            right = self.parse_primary()
+            right = self.parse_unary()
             return BinaryOpNode("-", LiteralNode(0, "int"), right)
         if self.match(TokenType.PLUS):
             return self.parse_unary()
@@ -686,7 +913,35 @@ class Parser:
 
         lit_tok = self.match(TokenType.STRING_LIT)
         if lit_tok:
-            return LiteralNode(lit_tok.value, "string")
+            val = lit_tok.value
+            # Check for string interpolation markers
+            if '\x00' in val:
+                parts = []
+                idx = 0
+                while idx < len(val):
+                    marker_pos = val.find('\x00', idx)
+                    if marker_pos == -1:
+                        parts.append(val[idx:])
+                        break
+                    if marker_pos > idx:
+                        parts.append(val[idx:marker_pos])
+                    end_pos = val.find('\x00', marker_pos + 1)
+                    if end_pos == -1:
+                        parts.append(val[marker_pos:])
+                        break
+                    expr_str = val[marker_pos + 1:end_pos]
+                    # Parse the expression
+                    try:
+                        expr_tokens = Lexer(expr_str).tokenize()
+                        if expr_tokens and expr_tokens[-1].type.name == 'EOF':
+                            expr_tokens.pop()
+                        expr_node = Parser(expr_tokens).parse_expr()
+                        parts.append(expr_node)
+                    except Exception:
+                        parts.append(expr_str)
+                    idx = end_pos + 1
+                return StringInterpolationNode(parts)
+            return LiteralNode(val, "string")
 
         if self.match(TokenType.TRUE):
             return LiteralNode(True, "bool")

@@ -7,20 +7,22 @@ pub enum TokenType {
     // Types
     Qubit, Cbit, Int, Float, StringType, Bool, Array, Map,
     // Keywords
-    Module, Import, Qfunc, Func, Struct, Enum, Try, Catch, Throw, Noise, Depolarizing, Bitflip, Let, If, For, In, While, Break, Continue, Measure, Return, Parallel, Task,
+    Module, Import, Qfunc, Func, Struct, Enum, Try, Catch, Throw, Noise, Depolarizing, Bitflip, Let, If, Else, Elif, For, In, While, Break, Continue, Measure, Return, Parallel, Task,
     // Built-ins / Utilities
     Trace, Print, Assert,
     // Constants
     Pi, Tau, E,
     // Gates
     GateH, GateX, GateY, GateZ, GateS, GateT, GateCnot, GateCz, GateSwap, GateRx, GateRy, GateRz,
+    GateCcx, GateCswap, GateCp, GateCrx, GateCry, GateCrz,
     // Literals
     StringLit, True, False, Null,
     // General
     Identifier, IntLit, FloatLit,
     // Operators & Delimiters
     Lparen, Rparen, Lbrace, Rbrace, Lbrack, Rbrack, Comma, Colon, Dot, Arrow, Equals, Eq, Ne, Lt, Gt, Le, Ge,
-    Plus, Minus, Mul, Div,
+    Plus, Minus, Mul, Div, Mod,
+    BitAnd, BitOr, BitXor, BitNot, Lshift, Rshift,
     AddAssign, SubAssign, MulAssign, DivAssign,
     And, Or, Not,
     Eof,
@@ -177,6 +179,22 @@ impl<'a> Lexer<'a> {
                 continue;
             }
 
+            if current_char == '<' && self.peek(1) == Some('<') {
+                let start_col = self.column;
+                self.advance();
+                self.advance();
+                tokens.push(Token { token_type: TokenType::Lshift, value: "<<", line: self.line, column: start_col });
+                continue;
+            }
+
+            if current_char == '>' && self.peek(1) == Some('>') {
+                let start_col = self.column;
+                self.advance();
+                self.advance();
+                tokens.push(Token { token_type: TokenType::Rshift, value: ">>", line: self.line, column: start_col });
+                continue;
+            }
+
             if current_char == '<' && self.peek(1) == Some('=') {
                 let start_col = self.column;
                 self.advance();
@@ -243,6 +261,11 @@ impl<'a> Lexer<'a> {
                 '/' => Some(TokenType::Div),
                 '<' => Some(TokenType::Lt),
                 '>' => Some(TokenType::Gt),
+                '%' => Some(TokenType::Mod),
+                '&' => Some(TokenType::BitAnd),
+                '|' => Some(TokenType::BitOr),
+                '^' => Some(TokenType::BitXor),
+                '~' => Some(TokenType::BitNot),
                 _ => None,
             };
 
@@ -333,6 +356,8 @@ impl<'a> Lexer<'a> {
                     "bitflip" => TokenType::Bitflip,
                     "let" => TokenType::Let,
                     "if" => TokenType::If,
+                    "else" => TokenType::Else,
+                    "elif" => TokenType::Elif,
                     "for" => TokenType::For,
                     "in" => TokenType::In,
                     "while" => TokenType::While,
@@ -360,6 +385,12 @@ impl<'a> Lexer<'a> {
                     "RX" => TokenType::GateRx,
                     "RY" => TokenType::GateRy,
                     "RZ" => TokenType::GateRz,
+                    "CCX" | "Toffoli" | "toffoli" => TokenType::GateCcx,
+                    "CSWAP" | "Fredkin" | "fredkin" => TokenType::GateCswap,
+                    "CP" => TokenType::GateCp,
+                    "CRX" => TokenType::GateCrx,
+                    "CRY" => TokenType::GateCry,
+                    "CRZ" => TokenType::GateCrz,
                     "true" => TokenType::True,
                     "false" => TokenType::False,
                     "null" => TokenType::Null,

@@ -93,6 +93,7 @@ pub struct IfNode {
     pub op: String,
     pub condition_right: NodeId,
     pub body: Vec<NodeId>,
+    pub else_body: Vec<NodeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

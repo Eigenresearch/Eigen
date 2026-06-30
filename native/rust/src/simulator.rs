@@ -86,10 +86,14 @@ impl RustStatevector {
         }
     }
 
-    pub fn allocate_qubit(&mut self) {
+    pub fn allocate_qubit(&mut self) -> Result<(), String> {
         let n = self.state.len();
+        if n >= (1 << 25) {
+            return Err("Dense simulation is limited to 25 qubits to prevent memory exhaustion.".to_string());
+        }
         self.state.resize(n * 2, (0.0, 0.0));
         self.num_qubits += 1;
+        Ok(())
     }
 
     pub fn get_state(&self) -> Vec<(f64, f64)> {
@@ -398,6 +402,236 @@ impl RustStatevector {
         Ok(())
     }
 
+    pub fn apply_ccx(&mut self, control1: usize, control2: usize, target: usize) -> Result<(), String> {
+        let n = self.state.len();
+        let c1_mask = 1 << control1;
+        let c2_mask = 1 << control2;
+        let t_mask = 1 << target;
+        if c1_mask >= n || c2_mask >= n || t_mask >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control1={}, control2={}, target={}, state size={}",
+                control1, control2, target, n
+            ));
+        }
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c1_mask) != 0 && (i & c2_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        std::ptr::swap(ptr.add(i), ptr.add(i_target_1));
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c1_mask) != 0 && (i & c2_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    self.state.swap(i, i_target_1);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_cswap(&mut self, control: usize, q1: usize, q2: usize) -> Result<(), String> {
+        let n = self.state.len();
+        let c_mask = 1 << control;
+        let mask1 = 1 << q1;
+        let mask2 = 1 << q2;
+        if c_mask >= n || mask1 >= n || mask2 >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control={}, q1={}, q2={}, state size={}",
+                control, q1, q2, n
+            ));
+        }
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c_mask) != 0 && (i & mask1) != 0 && (i & mask2) == 0 {
+                    let j = (i & !mask1) | mask2;
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        std::ptr::swap(ptr.add(i), ptr.add(j));
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c_mask) != 0 && (i & mask1) != 0 && (i & mask2) == 0 {
+                    let j = (i & !mask1) | mask2;
+                    self.state.swap(i, j);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_cp(&mut self, control: usize, target: usize, theta: f64) -> Result<(), String> {
+        let n = self.state.len();
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        if c_mask >= n || t_mask >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control={}, target={}, state size={}",
+                control, target, n
+            ));
+        }
+        let cos_val = theta.cos();
+        let sin_val = theta.sin();
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c_mask) != 0 && (i & t_mask) != 0 {
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        let (re, im) = *ptr.add(i);
+                        *ptr.add(i) = (re * cos_val - im * sin_val, re * sin_val + im * cos_val);
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c_mask) != 0 && (i & t_mask) != 0 {
+                    let (re, im) = self.state[i];
+                    self.state[i] = (re * cos_val - im * sin_val, re * sin_val + im * cos_val);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_crx(&mut self, control: usize, target: usize, theta: f64) -> Result<(), String> {
+        let n = self.state.len();
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        if c_mask >= n || t_mask >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control={}, target={}, state size={}",
+                control, target, n
+            ));
+        }
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        let (a0_re, a0_im) = *ptr.add(i);
+                        let (a1_re, a1_im) = *ptr.add(i_target_1);
+                        *ptr.add(i) = (cos_val * a0_re + sin_val * a1_im, cos_val * a0_im - sin_val * a1_re);
+                        *ptr.add(i_target_1) = (sin_val * a0_im + cos_val * a1_re, -sin_val * a0_re + cos_val * a1_im);
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    let (a0_re, a0_im) = self.state[i];
+                    let (a1_re, a1_im) = self.state[i_target_1];
+                    self.state[i] = (cos_val * a0_re + sin_val * a1_im, cos_val * a0_im - sin_val * a1_re);
+                    self.state[i_target_1] = (sin_val * a0_im + cos_val * a1_re, -sin_val * a0_re + cos_val * a1_im);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_cry(&mut self, control: usize, target: usize, theta: f64) -> Result<(), String> {
+        let n = self.state.len();
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        if c_mask >= n || t_mask >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control={}, target={}, state size={}",
+                control, target, n
+            ));
+        }
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        let (a0_re, a0_im) = *ptr.add(i);
+                        let (a1_re, a1_im) = *ptr.add(i_target_1);
+                        *ptr.add(i) = (cos_val * a0_re - sin_val * a1_re, cos_val * a0_im - sin_val * a1_im);
+                        *ptr.add(i_target_1) = (sin_val * a0_re + cos_val * a1_re, sin_val * a0_im + cos_val * a1_im);
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c_mask) != 0 && (i & t_mask) == 0 {
+                    let i_target_1 = i | t_mask;
+                    let (a0_re, a0_im) = self.state[i];
+                    let (a1_re, a1_im) = self.state[i_target_1];
+                    self.state[i] = (cos_val * a0_re - sin_val * a1_re, cos_val * a0_im - sin_val * a1_im);
+                    self.state[i_target_1] = (sin_val * a0_re + cos_val * a1_re, sin_val * a0_im + cos_val * a1_im);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_crz(&mut self, control: usize, target: usize, theta: f64) -> Result<(), String> {
+        let n = self.state.len();
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        if c_mask >= n || t_mask >= n {
+            return Err(format!(
+                "Qubit index out of bounds: control={}, target={}, state size={}",
+                control, target, n
+            ));
+        }
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        use rayon::prelude::*;
+        if n >= 16384 {
+            let state_ptr = self.state.as_mut_ptr() as usize;
+            (0..n).into_par_iter().for_each(|i| {
+                if (i & c_mask) != 0 {
+                    let has_target = (i & t_mask) != 0;
+                    unsafe {
+                        let ptr = state_ptr as *mut (f64, f64);
+                        let (re, im) = *ptr.add(i);
+                        if !has_target {
+                            *ptr.add(i) = (re * cos_val + im * sin_val, im * cos_val - re * sin_val);
+                        } else {
+                            *ptr.add(i) = (re * cos_val - im * sin_val, im * cos_val + re * sin_val);
+                        }
+                    }
+                }
+            });
+        } else {
+            for i in 0..n {
+                if (i & c_mask) != 0 {
+                    let has_target = (i & t_mask) != 0;
+                    let (re, im) = self.state[i];
+                    if !has_target {
+                        self.state[i] = (re * cos_val + im * sin_val, im * cos_val - re * sin_val);
+                    } else {
+                        self.state[i] = (re * cos_val - im * sin_val, im * cos_val + re * sin_val);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn measure(&mut self, k: usize, r: f64) -> Result<usize, String> {
         let n = self.state.len();
         let k_mask = 1 << k;
@@ -454,8 +688,8 @@ impl RustStatevector {
     }
 
     #[pyo3(name = "allocate_qubit")]
-    pub fn allocate_qubit_py(&mut self) {
-        self.allocate_qubit();
+    pub fn allocate_qubit_py(&mut self) -> PyResult<()> {
+        self.allocate_qubit().map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
     }
 
     #[pyo3(name = "get_state")]
@@ -539,6 +773,36 @@ impl RustStatevector {
     #[pyo3(name = "apply_swap")]
     pub fn apply_swap_py(&mut self, q1: usize, q2: usize) -> PyResult<()> {
         self.apply_swap(q1, q2).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_ccx")]
+    pub fn apply_ccx_py(&mut self, control1: usize, control2: usize, target: usize) -> PyResult<()> {
+        self.apply_ccx(control1, control2, target).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_cswap")]
+    pub fn apply_cswap_py(&mut self, control: usize, q1: usize, q2: usize) -> PyResult<()> {
+        self.apply_cswap(control, q1, q2).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_cp")]
+    pub fn apply_cp_py(&mut self, control: usize, target: usize, theta: f64) -> PyResult<()> {
+        self.apply_cp(control, target, theta).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_crx")]
+    pub fn apply_crx_py(&mut self, control: usize, target: usize, theta: f64) -> PyResult<()> {
+        self.apply_crx(control, target, theta).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_cry")]
+    pub fn apply_cry_py(&mut self, control: usize, target: usize, theta: f64) -> PyResult<()> {
+        self.apply_cry(control, target, theta).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[pyo3(name = "apply_crz")]
+    pub fn apply_crz_py(&mut self, control: usize, target: usize, theta: f64) -> PyResult<()> {
+        self.apply_crz(control, target, theta).map_err(|e| PyValueError::new_err(e))
     }
 
     #[pyo3(name = "measure")]
@@ -713,6 +977,153 @@ impl RustSparseSimulator {
         self.state = new_state;
     }
 
+    pub fn apply_ccx(&mut self, control1: usize, control2: usize, target: usize) {
+        let c1_mask = 1 << control1;
+        let c2_mask = 1 << control2;
+        let t_mask = 1 << target;
+        let mut new_state = HashMap::new();
+        for (key, amp) in &self.state {
+            if (key & c1_mask) != 0 && (key & c2_mask) != 0 {
+                new_state.insert(key ^ t_mask, *amp);
+            } else {
+                new_state.insert(*key, *amp);
+            }
+        }
+        self.state = new_state;
+    }
+
+    pub fn apply_cswap(&mut self, control: usize, q1: usize, q2: usize) {
+        let c_mask = 1 << control;
+        let mask1 = 1 << q1;
+        let mask2 = 1 << q2;
+        let mut new_state = HashMap::new();
+        for (key, amp) in &self.state {
+            if (key & c_mask) != 0 {
+                let b1 = (key & mask1) != 0;
+                let b2 = (key & mask2) != 0;
+                if b1 != b2 {
+                    new_state.insert(key ^ (mask1 | mask2), *amp);
+                } else {
+                    new_state.insert(*key, *amp);
+                }
+            } else {
+                new_state.insert(*key, *amp);
+            }
+        }
+        self.state = new_state;
+    }
+
+    pub fn apply_cp(&mut self, control: usize, target: usize, theta: f64) {
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        let cos_val = theta.cos();
+        let sin_val = theta.sin();
+        for (key, amp) in &mut self.state {
+            if (*key & c_mask) != 0 && (*key & t_mask) != 0 {
+                let (re, im) = *amp;
+                *amp = (re * cos_val - im * sin_val, re * sin_val + im * cos_val);
+            }
+        }
+    }
+
+    pub fn apply_crx(&mut self, control: usize, target: usize, theta: f64) {
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        let mut groups: HashMap<u64, [(f64, f64); 2]> = HashMap::new();
+        let mut unchanged_state = HashMap::new();
+        for (&key, &amp) in &self.state {
+            if (key & c_mask) != 0 {
+                let base = key & !t_mask;
+                let bit = (key & t_mask) != 0;
+                let entry = groups.entry(base).or_insert([(0.0, 0.0), (0.0, 0.0)]);
+                if bit {
+                    entry[1] = amp;
+                } else {
+                    entry[0] = amp;
+                }
+            } else {
+                unchanged_state.insert(key, amp);
+            }
+        }
+        for (base, [a0, a1]) in groups {
+            let v0 = (
+                cos_val * a0.0 + sin_val * a1.1,
+                cos_val * a0.1 - sin_val * a1.0,
+            );
+            let v1 = (
+                sin_val * a0.1 + cos_val * a1.0,
+                -sin_val * a0.0 + cos_val * a1.1,
+            );
+            if v0.0.powi(2) + v0.1.powi(2) > 1e-24 {
+                unchanged_state.insert(base, v0);
+            }
+            if v1.0.powi(2) + v1.1.powi(2) > 1e-24 {
+                unchanged_state.insert(base | t_mask, v1);
+            }
+        }
+        self.state = unchanged_state;
+    }
+
+    pub fn apply_cry(&mut self, control: usize, target: usize, theta: f64) {
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        let mut groups: HashMap<u64, [(f64, f64); 2]> = HashMap::new();
+        let mut unchanged_state = HashMap::new();
+        for (&key, &amp) in &self.state {
+            if (key & c_mask) != 0 {
+                let base = key & !t_mask;
+                let bit = (key & t_mask) != 0;
+                let entry = groups.entry(base).or_insert([(0.0, 0.0), (0.0, 0.0)]);
+                if bit {
+                    entry[1] = amp;
+                } else {
+                    entry[0] = amp;
+                }
+            } else {
+                unchanged_state.insert(key, amp);
+            }
+        }
+        for (base, [a0, a1]) in groups {
+            let v0 = (
+                cos_val * a0.0 - sin_val * a1.0,
+                cos_val * a0.1 - sin_val * a1.1,
+            );
+            let v1 = (
+                sin_val * a0.0 + cos_val * a1.0,
+                sin_val * a0.1 + cos_val * a1.1,
+            );
+            if v0.0.powi(2) + v0.1.powi(2) > 1e-24 {
+                unchanged_state.insert(base, v0);
+            }
+            if v1.0.powi(2) + v1.1.powi(2) > 1e-24 {
+                unchanged_state.insert(base | t_mask, v1);
+            }
+        }
+        self.state = unchanged_state;
+    }
+
+    pub fn apply_crz(&mut self, control: usize, target: usize, theta: f64) {
+        let c_mask = 1 << control;
+        let t_mask = 1 << target;
+        let cos_val = (theta / 2.0).cos();
+        let sin_val = (theta / 2.0).sin();
+        for (key, amp) in &mut self.state {
+            if (*key & c_mask) != 0 {
+                let has_target = (*key & t_mask) != 0;
+                let (re, im) = *amp;
+                if !has_target {
+                    *amp = (re * cos_val + im * sin_val, im * cos_val - re * sin_val);
+                } else {
+                    *amp = (re * cos_val - im * sin_val, im * cos_val + re * sin_val);
+                }
+            }
+        }
+    }
+
     pub fn measure(&mut self, k: usize, r: f64) -> usize {
         let mask = 1 << k;
         let mut p0 = 0.0;
@@ -836,6 +1247,36 @@ impl RustSparseSimulator {
     #[pyo3(name = "apply_swap")]
     pub fn apply_swap_py(&mut self, q1: usize, q2: usize) {
         self.apply_swap(q1, q2);
+    }
+
+    #[pyo3(name = "apply_ccx")]
+    pub fn apply_ccx_py(&mut self, control1: usize, control2: usize, target: usize) {
+        self.apply_ccx(control1, control2, target);
+    }
+
+    #[pyo3(name = "apply_cswap")]
+    pub fn apply_cswap_py(&mut self, control: usize, q1: usize, q2: usize) {
+        self.apply_cswap(control, q1, q2);
+    }
+
+    #[pyo3(name = "apply_cp")]
+    pub fn apply_cp_py(&mut self, control: usize, target: usize, theta: f64) {
+        self.apply_cp(control, target, theta);
+    }
+
+    #[pyo3(name = "apply_crx")]
+    pub fn apply_crx_py(&mut self, control: usize, target: usize, theta: f64) {
+        self.apply_crx(control, target, theta);
+    }
+
+    #[pyo3(name = "apply_cry")]
+    pub fn apply_cry_py(&mut self, control: usize, target: usize, theta: f64) {
+        self.apply_cry(control, target, theta);
+    }
+
+    #[pyo3(name = "apply_crz")]
+    pub fn apply_crz_py(&mut self, control: usize, target: usize, theta: f64) {
+        self.apply_crz(control, target, theta);
     }
 
     #[pyo3(name = "measure")]
@@ -1002,8 +1443,8 @@ mod tests {
     #[test]
     fn test_rust_sv_zero_copy() {
         let mut sv = RustStatevector::new();
-        sv.allocate_qubit();
-        sv.allocate_qubit();
+        sv.allocate_qubit().unwrap();
+        sv.allocate_qubit().unwrap();
         let ptr_before = sv.state.as_ptr();
         sv.apply_h(0).unwrap();
         sv.apply_x(1).unwrap();

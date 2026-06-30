@@ -292,6 +292,158 @@ class SparseQuantumSimulator:
             new_state[new_key] = amp
         self._state = new_state
 
+    def CCX(self, control1: str, control2: str, target: str):
+        if self._rust_sparse is not None:
+            c1 = self.get_qubit_index(control1)
+            c2 = self.get_qubit_index(control2)
+            t = self.get_qubit_index(target)
+            self._rust_sparse.apply_ccx(c1, c2, t)
+            return
+        c1 = self.get_qubit_index(control1)
+        c2 = self.get_qubit_index(control2)
+        t = self.get_qubit_index(target)
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c1] == '1' and key[c2] == '1':
+                flipped_char = '1' if key[t] == '0' else '0'
+                new_key = key[:t] + flipped_char + key[t+1:]
+                new_state[new_key] = amp
+            else:
+                new_state[key] = amp
+        self._state = new_state
+
+    def CSWAP(self, control: str, q1: str, q2: str):
+        if self._rust_sparse is not None:
+            c = self.get_qubit_index(control)
+            idx1 = self.get_qubit_index(q1)
+            idx2 = self.get_qubit_index(q2)
+            self._rust_sparse.apply_cswap(c, idx1, idx2)
+            return
+        c = self.get_qubit_index(control)
+        idx1 = self.get_qubit_index(q1)
+        idx2 = self.get_qubit_index(q2)
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c] == '1':
+                chars = list(key)
+                chars[idx1], chars[idx2] = chars[idx2], chars[idx1]
+                new_state["".join(chars)] = amp
+            else:
+                new_state[key] = amp
+        self._state = new_state
+
+    def CP(self, control: str, target: str, theta: float):
+        if self._rust_sparse is not None:
+            c = self.get_qubit_index(control)
+            t = self.get_qubit_index(target)
+            self._rust_sparse.apply_cp(c, t, float(theta))
+            return
+        c = self.get_qubit_index(control)
+        t = self.get_qubit_index(target)
+        val = cmath.exp(1j * theta)
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c] == '1' and key[t] == '1':
+                new_state[key] = amp * val
+            else:
+                new_state[key] = amp
+        self._state = new_state
+
+    def CRX(self, control: str, target: str, theta: float):
+        if self._rust_sparse is not None:
+            c = self.get_qubit_index(control)
+            t = self.get_qubit_index(target)
+            self._rust_sparse.apply_crx(c, t, float(theta))
+            return
+        c = self.get_qubit_index(control)
+        t = self.get_qubit_index(target)
+        cos_val = math.cos(theta / 2)
+        sin_val = math.sin(theta / 2)
+        groups = {}
+        for key, amp in self._state.items():
+            if key[c] == '1':
+                prefix = key[:t]
+                suffix = key[t+1:]
+                base = (prefix, suffix)
+                if base not in groups:
+                    groups[base] = [0.0j, 0.0j]
+                if key[t] == '0':
+                    groups[base][0] = amp
+                else:
+                    groups[base][1] = amp
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c] != '1':
+                new_state[key] = amp
+        for (prefix, suffix), [a0, a1] in groups.items():
+            v0 = cos_val * a0 - 1j * sin_val * a1
+            v1 = -1j * sin_val * a0 + cos_val * a1
+            key0 = prefix + '0' + suffix
+            key1 = prefix + '1' + suffix
+            if abs(v0) > 1e-12:
+                new_state[key0] = v0
+            if abs(v1) > 1e-12:
+                new_state[key1] = v1
+        self._state = new_state
+
+    def CRY(self, control: str, target: str, theta: float):
+        if self._rust_sparse is not None:
+            c = self.get_qubit_index(control)
+            t = self.get_qubit_index(target)
+            self._rust_sparse.apply_cry(c, t, float(theta))
+            return
+        c = self.get_qubit_index(control)
+        t = self.get_qubit_index(target)
+        cos_val = math.cos(theta / 2)
+        sin_val = math.sin(theta / 2)
+        groups = {}
+        for key, amp in self._state.items():
+            if key[c] == '1':
+                prefix = key[:t]
+                suffix = key[t+1:]
+                base = (prefix, suffix)
+                if base not in groups:
+                    groups[base] = [0.0j, 0.0j]
+                if key[t] == '0':
+                    groups[base][0] = amp
+                else:
+                    groups[base][1] = amp
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c] != '1':
+                new_state[key] = amp
+        for (prefix, suffix), [a0, a1] in groups.items():
+            v0 = cos_val * a0 - sin_val * a1
+            v1 = sin_val * a0 + cos_val * a1
+            key0 = prefix + '0' + suffix
+            key1 = prefix + '1' + suffix
+            if abs(v0) > 1e-12:
+                new_state[key0] = v0
+            if abs(v1) > 1e-12:
+                new_state[key1] = v1
+        self._state = new_state
+
+    def CRZ(self, control: str, target: str, theta: float):
+        if self._rust_sparse is not None:
+            c = self.get_qubit_index(control)
+            t = self.get_qubit_index(target)
+            self._rust_sparse.apply_crz(c, t, float(theta))
+            return
+        c = self.get_qubit_index(control)
+        t = self.get_qubit_index(target)
+        val_0 = cmath.exp(-1j * theta / 2)
+        val_1 = cmath.exp(1j * theta / 2)
+        new_state = {}
+        for key, amp in self._state.items():
+            if key[c] == '1':
+                if key[t] == '0':
+                    new_state[key] = amp * val_0
+                else:
+                    new_state[key] = amp * val_1
+            else:
+                new_state[key] = amp
+        self._state = new_state
+
     def measure(self, q: str) -> int:
         if self._rust_sparse is not None:
             k = self.get_qubit_index(q)

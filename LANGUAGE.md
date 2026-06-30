@@ -1,6 +1,6 @@
-# Eigen 2.4 — Mone Language Specification & Developer Reference
+﻿# Eigen 2.4 вЂ” Mone Language Specification & Developer Reference
 
-This document provides the authoritative language specification and developer reference for **Eigen 2.4 — Mone**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, and native acceleration.
+This document provides the authoritative language specification and developer reference for **Eigen 2.4 вЂ” Mone**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, and native acceleration.
 
 ---
 
@@ -25,12 +25,13 @@ Eigen source files are encoded in standard UTF-8.
 - **Line Endings**: Standard Unix (`\n`) and Windows (`\r\n`) line endings are supported.
 
 ### 2.2 Comments
-Comments in Eigen are single-line and begin with a `#` symbol. They can appear anywhere on a line. Everything from the `#` to the end of that line is ignored by the lexer.
+Comments in Eigen are single-line and begin with a `#` symbol or `//`. They can appear anywhere on a line. Everything from the `#` or `//` to the end of that line is ignored by the lexer.
 ```eigen
 # This is a full-line comment
 let x: int = 10  # This is an inline comment
+// This is also a comment
 ```
-Doc-comments begin with three hash marks `###` or double slash and three slashes `///` and are processed by the documentation generator.
+Doc-comments begin with three hash marks `###` or three slashes `///` and are processed by the documentation generator.
 
 ### 2.3 Identifiers
 Identifiers are names given to variables, functions, quantum subroutines, fields, modules, and structures.
@@ -42,18 +43,24 @@ The following tokens are reserved keywords and cannot be used as identifiers:
 ```text
 eigen       module      import      qfunc       func
 struct      enum        let         if          else
-for         in          while       break       continue
-try         catch       throw       noise       return
-trace       print       assert      parallel    task
-qubit       cbit        int         float       string
-bool        array       map         null        true
-false       and         or          not
+elif        for         in          while       break
+continue    try         catch       throw       noise
+return      trace       print       assert      parallel
+task        match       case        default     qubit
+cbit        int         float       string      bool
+array       map         null        true        false
+and         or          not
 ```
 
 ### 2.5 Literal Types
 - **Integer Literals**: Sequence of digits (e.g., `42`, `0`, `1000`).
+- **Hex Literals**: `0x` prefix followed by hex digits (e.g., `0xFF` → 255, `0xDEAD` → 57005).
+- **Binary Literals**: `0b` prefix followed by binary digits (e.g., `0b1010` → 10).
+- **Octal Literals**: `0o` prefix followed by octal digits (e.g., `0o77` → 63).
 - **Float Literals**: Sequence of digits containing a single decimal point (e.g., `3.14159`, `0.0`, `1.0`).
-- **String Literals**: Double-quoted character sequences (e.g., `"Hello, Eigen!"`). Escape sequences like `\n` and `\t` are evaluated.
+- **Scientific Notation**: `1.23e-5`, `6.022e23` — parsed as float literals.
+- **String Literals**: Double-quoted character sequences (e.g., `"Hello, Eigen!"`). Escape sequences like `\n`, `\t`, `\r`, `\0`, `\\`, `\"` are evaluated.
+- **String Interpolation**: `${expr}` inside string literals is parsed and evaluated at runtime (e.g., `"Result: ${x}"` concatenates the string "Result: " with the value of `x`).
 - **Boolean Literals**: `true` and `false`.
 - **Null Literal**: `null` (used as an uninitialized reference for structures).
 
@@ -317,6 +324,27 @@ H q0
 noise depolarizing(0.02) q0  # 2% depolarizing channel noise
 ```
 
+### 5.6 Qubit Indexing & Memory Layout Conventions
+Eigen uses a **Little-Endian (LSB-first)** convention for mapping physical/simulated qubits to state vector indices and binary output representations.
+
+1. **Bit Mapping**: The first qubit allocated in the program (typically `q0`) corresponds to the least significant bit (LSB) at index position 0. The second qubit allocated (`q1`) corresponds to index position 1, and the $N$-th qubit (`qN`) maps to index position $N-1$.
+2. **State Vector Indexing**: An index `idx` in the state vector is structured as a binary integer:
+   $$\text{idx} = \sum_{k=0}^{N-1} b_k 2^k$$
+   where $b_k \in \{0, 1\}$ represents the state of the $k$-th allocated qubit.
+3. **Amplitude String Presentation**: When rendering state probabilities or amplitude dictionaries (e.g., via `get_amplitudes_dict()`), the bitstrings are written from left to right as `q[N-1]q[N-2]...q[1]q[0]`. Thus, for a two-qubit state where `q0` is in state $|1\rangle$ and `q1` is in state $|0\rangle$, the output bitstring is `"01"`.
+
+#### Conversion Utilities
+If your workflows or downstream tools expect a **Big-Endian (MSB-first)** layout (where the first allocated qubit `q0` maps to the leftmost bit: `q[0]q[1]...q[N-1]`), you can import and use the built-in converters:
+```python
+from src.utils.converters import to_msb_first_dict, reorder_state_vector
+
+# Convert amplitude dictionary keys
+msb_dict = to_msb_first_dict(simulator.get_amplitudes_dict())
+
+# Reorder raw state vector lists
+msb_state_vector = reorder_state_vector(raw_state, num_qubits, source_convention="lsb", target_convention="msb")
+```
+
 ---
 
 ## 6. Classical Functions & Control Flow
@@ -479,23 +507,23 @@ Timing functions:
 
 ```
 [ Eigen Source ]
-      │
-      ▼
-   [ AST ]  <─────── [ Incremental AST Cache ]
-      │
-      ▼
-  [ MLIR ]  ──(Dialects: func, arith, quantum, cf)
-      │
-      ▼
-  [ EQIR ]  ──(Quantum DAG IR representation) <──── [ EQIR Cache ]
-  ├─── Optimizer Passes (Gate Fusion, ZX, etc.)
-  └─── Equivalence Verification (ZX-Calculus & Unitary)
-      │
-      ├────────────────────────────┐
-      ▼                            ▼
+      в”‚
+      в–ј
+   [ AST ]  <в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ [ Incremental AST Cache ]
+      в”‚
+      в–ј
+  [ MLIR ]  в”Ђв”Ђ(Dialects: func, arith, quantum, cf)
+      в”‚
+      в–ј
+  [ EQIR ]  в”Ђв”Ђ(Quantum DAG IR representation) <в”Ђв”Ђв”Ђв”Ђ [ EQIR Cache ]
+  в”њв”Ђв”Ђв”Ђ Optimizer Passes (Gate Fusion, ZX, etc.)
+  в””в”Ђв”Ђв”Ђ Equivalence Verification (ZX-Calculus & Unitary)
+      в”‚
+      в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+      в–ј                            в–ј
 [ EBC Bytecode ]           [ LLVM IR / QIR ]
-      │                            │
-      ▼                            ▼
+      в”‚                            в”‚
+      в–ј                            в–ј
 [ Eigen VM / JIT ]        [ Native Target Code ]
 ```
 
@@ -527,3 +555,4 @@ Traces are monitored by an adaptive VM loop compiler:
 
 ### 10.6 Standalone LLVM & QIR Generation
 Using `eigen build <file.eig> --aot --qir`, basic SSA blocks are converted into LLVM assembly conforming to standard QIR specification schemas. The resulting code compiles directly to standalone machine executables (`.exe` on Windows, native binaries on Linux/macOS) free of CPython dependencies.
+

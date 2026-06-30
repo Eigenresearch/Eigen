@@ -252,7 +252,7 @@ class AOTCompiler:
                     else:
                         raise TypeError("AOT does not support structs; use --vm")
 
-        compiler = EBCCompiler()
+        compiler = EBCCompiler(peephole=False)
         instrs = compiler.compile_ast(ast)
         if optimize:
             instrs = optimize_ebc(instrs)

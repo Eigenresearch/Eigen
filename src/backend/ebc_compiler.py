@@ -8,9 +8,11 @@ from src.frontend.ast import (
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
     IndexAccessNode, StructAllocNode, StructGetNode, StructSetNode,
     MapAllocNode, MapGetNode, MapSetNode, ArrayAllocNode, ArrayGetNode, ArraySetNode,
-    ParallelBlockNode, TaskStatementNode
+    ParallelBlockNode, TaskStatementNode, MatchNode, StringInterpolationNode
 )
 from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.frontend.lexer import Lexer
+from src.frontend.parser import Parser
 
 class Label:
     def __init__(self, name: str = "label"):
@@ -22,17 +24,32 @@ class Label:
 
 
 class EBCCompiler:
-    def __init__(self):
+    def __init__(self, peephole: bool = True):
         self.raw_code = []  # list of Instruction and Label objects
         self.qfuncs = {}    # func_name -> Label
         self.global_structs = {}
         self.current_line = None
         self.loop_stack = []  # stack of (start_label, end_label)
         self.temp_var_counter = 0
+        self.peephole = peephole
 
     def get_temp_var(self) -> str:
         self.temp_var_counter += 1
         return f"_compiler_temp_{self.temp_var_counter}"
+
+    _cond_op_map = {
+        "==": Opcode.EQ,
+        "!=": Opcode.NEQ,
+        "<": Opcode.LT,
+        ">": Opcode.GT,
+        "<=": Opcode.LTE,
+        ">=": Opcode.GTE,
+    }
+
+    def _compile_condition(self, left, op, right):
+        self.visit_ast(left)
+        self.visit_ast(right)
+        self.emit(self._cond_op_map.get(op, Opcode.EQ))
 
     def emit(self, opcode: str, arg=None):
         self.raw_code.append(Instruction(opcode, arg, line=self.current_line))
@@ -97,6 +114,9 @@ class EBCCompiler:
         if isinstance(node, VarDeclNode):
             if node.type_name == "qubit":
                 self.emit(Opcode.Q_ALLOC, node.name)
+            elif node.type_name == "cbit":
+                self.emit(Opcode.LOAD_CONST, 0)
+                self.emit(Opcode.STORE_VAR, node.name)
             elif node.type_name.startswith("map<"):
                 self.emit(Opcode.ALLOC_MAP, 0)
                 self.emit(Opcode.STORE_VAR, node.name)
@@ -118,28 +138,40 @@ class EBCCompiler:
             self.emit(Opcode.LOAD_VAR, node.name)
 
         elif isinstance(node, BinaryOpNode):
-            self.visit_ast(node.left)
-            self.visit_ast(node.right)
-            op_map = {
-                "+": Opcode.ADD,
-                "-": Opcode.SUB,
-                "*": Opcode.MUL,
-                "/": Opcode.DIV,
-                "==": Opcode.EQ,
-                "!=": Opcode.NEQ,
-                "<": Opcode.LT,
-                ">": Opcode.GT,
-                "<=": Opcode.LTE,
-                ">=": Opcode.GTE,
-                "and": Opcode.AND,
-                "or": Opcode.OR,
-            }
-            if node.op in op_map:
-                self.emit(op_map[node.op])
-            elif node.op == "not":
+            if node.op == "not":
+                self.visit_ast(node.left)
                 self.emit(Opcode.NOT)
+            elif node.op == "~":
+                self.visit_ast(node.left)
+                self.emit(Opcode.BIT_NOT)
             else:
-                raise ValueError(f"Unsupported binary operator: {node.op}")
+                self.visit_ast(node.left)
+                self.visit_ast(node.right)
+                op_map = {
+                    "+": Opcode.ADD,
+                    "-": Opcode.SUB,
+                    "*": Opcode.MUL,
+                    "/": Opcode.DIV,
+                    "**": Opcode.POW,
+                    "==": Opcode.EQ,
+                    "!=": Opcode.NEQ,
+                    "<": Opcode.LT,
+                    ">": Opcode.GT,
+                    "<=": Opcode.LTE,
+                    ">=": Opcode.GTE,
+                    "and": Opcode.AND,
+                    "or": Opcode.OR,
+                    "%": Opcode.MOD,
+                    "&": Opcode.BIT_AND,
+                    "|": Opcode.BIT_OR,
+                    "^": Opcode.BIT_XOR,
+                    "<<": Opcode.SHL,
+                    ">>": Opcode.SHR,
+                }
+                if node.op in op_map:
+                    self.emit(op_map[node.op])
+                else:
+                    raise ValueError(f"Unsupported binary operator: {node.op}")
 
         elif isinstance(node, GateNode):
             for arg in node.args:
@@ -168,25 +200,23 @@ class EBCCompiler:
             self.emit(Opcode.CALL, (func_label, callee_name, len(node.args)))
 
         elif isinstance(node, IfNode):
-            self.visit_ast(node.condition_left)
-            self.visit_ast(node.condition_right)
-            op_map = {
-                "==": Opcode.EQ,
-                "!=": Opcode.NEQ,
-                "<": Opcode.LT,
-                ">": Opcode.GT,
-                "<=": Opcode.LTE,
-                ">=": Opcode.GTE,
-            }
-            self.emit(op_map.get(node.op, Opcode.EQ))
+            self._compile_condition(node.condition_left, node.op, node.condition_right)
             
             else_label = Label("if_else")
+            end_label = Label("if_end")
             self.emit(Opcode.JMP_IF_FALSE, else_label)
             
             for stmt in node.body:
                 self.visit_ast(stmt)
                 
+            if hasattr(node, "else_body") and node.else_body:
+                self.emit(Opcode.JMP, end_label)
+                
             self.emit_label(else_label)
+            if hasattr(node, "else_body") and node.else_body:
+                for stmt in node.else_body:
+                    self.visit_ast(stmt)
+                self.emit_label(end_label)
 
         elif isinstance(node, ReturnNode):
             if hasattr(node, "expr") and node.expr is not None:
@@ -203,21 +233,11 @@ class EBCCompiler:
             self.emit(Opcode.PRINT)
 
         elif isinstance(node, AssertNode):
-            self.visit_ast(node.condition_left)
-            self.visit_ast(node.condition_right)
-            op_map = {
-                "==": Opcode.EQ,
-                "!=": Opcode.NEQ,
-                "<": Opcode.LT,
-                ">": Opcode.GT,
-                "<=": Opcode.LTE,
-                ">=": Opcode.GTE,
-            }
-            self.emit(op_map.get(node.op, Opcode.EQ))
+            self._compile_condition(node.condition_left, node.op, node.condition_right)
             
             ok_label = Label("assert_ok")
             self.emit(Opcode.JMP_IF_TRUE, ok_label)
-            self.emit(Opcode.LOAD_CONST, f"Assertion Failed: {node.condition_left} {node.op} {node.condition_right}")
+            self.emit(Opcode.LOAD_CONST, f"Assertion Failed: {node.condition_left.to_source()} {node.op} {node.condition_right.to_source()}")
             self.emit(Opcode.THROW)
             self.emit_label(ok_label)
 
@@ -371,28 +391,42 @@ class EBCCompiler:
                 self.emit(Opcode.STORE_VAR, node.target.name)
                 
             elif isinstance(node.target, DotAccessNode):
-                self.visit_ast(node.target.obj)
                 if is_compound:
+                    temp_obj = self.get_temp_var()
                     self.visit_ast(node.target.obj)
+                    self.emit(Opcode.STORE_VAR, temp_obj)
+                    self.emit(Opcode.LOAD_VAR, temp_obj)
+                    self.emit(Opcode.LOAD_VAR, temp_obj)
                     self.emit(Opcode.GET_FIELD, node.target.member)
                     self.visit_ast(node.value)
                     self.emit(op_map[node.op])
+                    self.emit(Opcode.SET_FIELD, node.target.member)
                 else:
+                    self.visit_ast(node.target.obj)
                     self.visit_ast(node.value)
-                self.emit(Opcode.SET_FIELD, node.target.member)
+                    self.emit(Opcode.SET_FIELD, node.target.member)
                 
             elif isinstance(node.target, IndexAccessNode):
-                self.visit_ast(node.target.obj)
-                self.visit_ast(node.target.index)
                 if is_compound:
+                    temp_obj = self.get_temp_var()
+                    temp_idx = self.get_temp_var()
                     self.visit_ast(node.target.obj)
+                    self.emit(Opcode.STORE_VAR, temp_obj)
                     self.visit_ast(node.target.index)
+                    self.emit(Opcode.STORE_VAR, temp_idx)
+                    self.emit(Opcode.LOAD_VAR, temp_obj)
+                    self.emit(Opcode.LOAD_VAR, temp_idx)
+                    self.emit(Opcode.LOAD_VAR, temp_obj)
+                    self.emit(Opcode.LOAD_VAR, temp_idx)
                     self.emit(Opcode.GET_INDEX)
                     self.visit_ast(node.value)
                     self.emit(op_map[node.op])
+                    self.emit(Opcode.SET_INDEX)
                 else:
+                    self.visit_ast(node.target.obj)
+                    self.visit_ast(node.target.index)
                     self.visit_ast(node.value)
-                self.emit(Opcode.SET_INDEX)
+                    self.emit(Opcode.SET_INDEX)
             else:
                 raise ValueError(f"Invalid assignment target: {node.target}")
 
@@ -465,6 +499,48 @@ class EBCCompiler:
                     self.visit_ast(task)
             self.emit(Opcode.JOIN, len([t for t in node.tasks if isinstance(t, TaskStatementNode)]))
 
+        elif isinstance(node, MatchNode):
+            end_labels = []
+            for pattern_expr, body in node.cases:
+                self.visit_ast(node.expr)
+                self.visit_ast(pattern_expr)
+                self.emit(Opcode.EQ)
+                case_label = Label("case_match")
+                self.emit(Opcode.JMP_IF_TRUE, case_label)
+                end_labels.append(Label("case_end"))
+                self.emit(Opcode.JMP, end_labels[-1])
+                self.emit_label(case_label)
+                for stmt in body:
+                    self.visit_ast(stmt)
+                self.emit(Opcode.JMP, Label("match_end"))
+            if node.default_body:
+                for stmt in node.default_body:
+                    self.visit_ast(stmt)
+            match_end = Label("match_end")
+            self.emit_label(match_end)
+            for el in end_labels:
+                self.emit_label(el)
+
+        elif isinstance(node, StringInterpolationNode):
+            if len(node.parts) == 0:
+                self.emit(Opcode.LOAD_CONST, "")
+            elif len(node.parts) == 1 and isinstance(node.parts[0], str):
+                self.emit(Opcode.LOAD_CONST, node.parts[0])
+            else:
+                first = True
+                for part in node.parts:
+                    if isinstance(part, str):
+                        self.emit(Opcode.LOAD_CONST, part)
+                    else:
+                        self.visit_ast(part)
+                        # Convert to string at runtime
+                        self.emit(Opcode.LOAD_CONST, "str")
+                        self.emit(Opcode.CALL, (None, "std.string.format_int", 1))
+                    if not first:
+                        self.emit(Opcode.LOAD_CONST, "concat")
+                        self.emit(Opcode.CALL, (None, "std.string.concat", 2))
+                    first = False
+
         else:
             raise ValueError(f"Unknown AST node class: {type(node).__name__}")
 
@@ -492,8 +568,6 @@ class EBCCompiler:
                     if isinstance(arg, (int, float, complex)):
                         self.emit(Opcode.LOAD_CONST, arg)
                     elif isinstance(arg, str):
-                        from src.frontend.lexer import Lexer
-                        from src.frontend.parser import Parser
                         try:
                             tokens = Lexer(arg).tokenize()
                             if tokens and tokens[-1].type.name == 'EOF':
@@ -542,7 +616,89 @@ class EBCCompiler:
         self.emit(Opcode.HALT)
         return self.resolve_labels()
 
+    def optimize_peephole_raw(self):
+        if not self.peephole:
+            return
+        optimized = []
+        i = 0
+        n = len(self.raw_code)
+        while i < n:
+            item = self.raw_code[i]
+            if isinstance(item, Label):
+                optimized.append(item)
+                i += 1
+                continue
+            
+            # Pattern 1: LOAD_VAR + LOAD_CONST + ADD/SUB/LT/GT/LTE/GTE
+            if (i + 2 < n and 
+                isinstance(self.raw_code[i], Instruction) and 
+                isinstance(self.raw_code[i+1], Instruction) and 
+                isinstance(self.raw_code[i+2], Instruction)):
+                
+                inst1 = self.raw_code[i]
+                inst2 = self.raw_code[i+1]
+                inst3 = self.raw_code[i+2]
+                
+                if inst1.opcode == Opcode.LOAD_VAR and inst2.opcode == Opcode.LOAD_CONST:
+                    if inst3.opcode == Opcode.ADD:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_ADD, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+                    elif inst3.opcode == Opcode.SUB:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_SUB, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+                    elif inst3.opcode == Opcode.LT:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_LT, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+                    elif inst3.opcode == Opcode.GT:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_GT, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+                    elif inst3.opcode == Opcode.LTE:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_LTE, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+                    elif inst3.opcode == Opcode.GTE:
+                        new_inst = Instruction(Opcode.LOAD_VAR_LOAD_CONST_GTE, (inst1.arg, inst2.arg))
+                        new_inst.line = inst1.line
+                        optimized.append(new_inst)
+                        i += 3
+                        continue
+
+            # Pattern 2: LOAD_CONST + STORE_VAR
+            if (i + 1 < n and 
+                isinstance(self.raw_code[i], Instruction) and 
+                isinstance(self.raw_code[i+1], Instruction)):
+                
+                inst1 = self.raw_code[i]
+                inst2 = self.raw_code[i+1]
+                
+                if inst1.opcode == Opcode.LOAD_CONST and inst2.opcode == Opcode.STORE_VAR:
+                    new_inst = Instruction(Opcode.LOAD_CONST_STORE, (inst1.arg, inst2.arg))
+                    new_inst.line = inst1.line
+                    optimized.append(new_inst)
+                    i += 2
+                    continue
+            
+            optimized.append(item)
+            i += 1
+            
+        self.raw_code = optimized
+
     def resolve_labels(self) -> list[Instruction]:
+        self.optimize_peephole_raw()
         final_instructions = []
         label_to_index = {}
 

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eigen-lang"
-version = "2.4.0"
-description = "Eigen 2.4 — Mone: Runtime-first hybrid classical-quantum programming language"
+version = "2.5.0"
+description = "Eigen 2.5 — Mitz: Runtime-first hybrid classical-quantum programming language with fast-loop JIT, stabilizer simulator, and SABRE routing"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}

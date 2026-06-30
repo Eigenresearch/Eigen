@@ -95,7 +95,7 @@ class TestSSAIRBuilder(unittest.TestCase):
             Instruction(Opcode.PRINT),
             Instruction(Opcode.HALT)
         ]
-        opt_instrs = optimize_ebc(instructions)
+        opt_instrs = optimize_ebc(instructions, de_ssa=False)
         # Should fold 10 + 20 = 30 and load it directly
         has_load_30 = any(inst.opcode == Opcode.LOAD_CONST and inst.arg == 30 for inst in opt_instrs)
         self.assertTrue(has_load_30, f"Optimized instructions: {opt_instrs}")
@@ -113,7 +113,7 @@ class TestSSAIRBuilder(unittest.TestCase):
             Instruction(Opcode.PRINT),
             Instruction(Opcode.HALT)
         ]
-        opt_instrs = optimize_ebc(instructions)
+        opt_instrs = optimize_ebc(instructions, de_ssa=False)
         # y should be copy-propagated to x
         # So instead of loading y, it should load x (which is x_1)
         load_vars = [inst.arg for inst in opt_instrs if inst.opcode == Opcode.LOAD_VAR]
@@ -132,7 +132,7 @@ class TestSSAIRBuilder(unittest.TestCase):
             Instruction(Opcode.PRINT),
             Instruction(Opcode.HALT)
         ]
-        opt_instrs = optimize_ebc(instructions)
+        opt_instrs = optimize_ebc(instructions, de_ssa=False)
         # x_1 store and load should be eliminated since x is never read
         store_vars = [inst.arg for inst in opt_instrs if inst.opcode == Opcode.STORE_VAR]
         self.assertNotIn("x_1", store_vars)
@@ -152,7 +152,7 @@ class TestSSAIRBuilder(unittest.TestCase):
             Instruction(Opcode.STORE_VAR, "t2"),
             Instruction(Opcode.HALT)
         ]
-        opt_instrs = optimize_ebc(instructions)
+        opt_instrs = optimize_ebc(instructions, de_ssa=False)
         # The duplicate ADD should be replaced by loading t1 (or t1_1)
         # So we should see a store of t2_1 immediately after loading t1_1
         # Let's check instructions
@@ -172,7 +172,7 @@ class TestSSAIRBuilder(unittest.TestCase):
             Instruction(Opcode.STORE_VAR, "y"),
             Instruction(Opcode.HALT)
         ]
-        opt_instrs = optimize_ebc(instructions)
+        opt_instrs = optimize_ebc(instructions, de_ssa=False)
         # JMP_IF_FALSE should be simplified to JMP unconditional or eliminated
         opcodes = [inst.opcode for inst in opt_instrs]
         self.assertNotIn(Opcode.JMP_IF_FALSE, opcodes)

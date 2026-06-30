@@ -12,6 +12,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .eigen_cache/
+.coverage
+.kimchi/
 
 # PyInstaller / Build outputs
 build/
@@ -19,9 +21,23 @@ dist/
 *.spec
 *.ebc
 *.exe
+*.pdb
+*.o
+*.obj
+*.rcgu.o
 
 # Ignore crash logs
 crash-*.log
 .venv/
 eigen_lang.egg-info/
 native/rust/target/
+node_modules/
+
+# Ignore temp/build files
+scratch*/
+dummy*
+scratch_*
+test.4yz*
+test.dummy*
+2.4.md
+2.5.md

@@ -50,7 +50,7 @@ pub extern "C" fn eigen_qrt_init(mut seed: u64) -> *mut QrtSimulator {
 #[no_mangle]
 pub extern "C" fn eigen_qrt_alloc(sim: *mut QrtSimulator) -> i32 {
     let sim = unsafe { &mut *sim };
-    sim.sv.allocate_qubit();
+    let _ = sim.sv.allocate_qubit();
     // Return index of newly allocated qubit (num_qubits - 1)
     let n = sim.sv.get_state().len();
     (n.trailing_zeros() as i32) - 1
@@ -162,7 +162,7 @@ pub extern "C" fn eigen_qrt_trace(sim: *mut QrtSimulator) {
             parts.push(format!("{} * |{}> (prob={:.1}%)", amp_str, bitstring, prob * 100.0));
         }
     }
-    println!("[TRACE DIRECTIVE] Quantum State: {}", parts.join(" + "));
+    println!("Quantum State: {}", parts.join(" + "));
 }
 
 #[no_mangle]

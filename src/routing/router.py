@@ -282,6 +282,162 @@ class GreedyRouter:
         return result
 
 
+class SabreRouter:
+    """Routes circuits using the SABRE (Structure-Aware Bidirectional Router) algorithm.
+
+    Maintains a dynamic front layer of gates and selects SWAPs that minimize
+    the look-ahead distance of active and extended layer interactions.
+    """
+
+    def __init__(self, coupling_map: CouplingMap, lookahead_weight: float = 0.5):
+        self.coupling_map = coupling_map
+        self.lookahead_weight = lookahead_weight
+
+    def route(self, circuit_ops: list[dict], logical_qubits: list[str]) -> RoutedCircuit:
+        result = RoutedCircuit()
+
+        mapping = {}
+        reverse_mapping = {}
+        for i, lq in enumerate(logical_qubits):
+            if i >= self.coupling_map.num_qubits:
+                raise ValueError(
+                    f"Not enough physical qubits ({self.coupling_map.num_qubits}) "
+                    f"for {len(logical_qubits)} logical qubits."
+                )
+            mapping[lq] = i
+            reverse_mapping[i] = lq
+
+        result.initial_mapping = dict(mapping)
+
+        ops = []
+        for idx, op in enumerate(circuit_ops):
+            ops.append({
+                'id': idx,
+                'gate': op['gate'],
+                'targets': op['targets'],
+                'args': op.get('args', []),
+                'completed': False
+            })
+
+        max_iterations = len(circuit_ops) * self.coupling_map.num_qubits * 20
+        iteration = 0
+        completed_ops_count = 0
+
+        while completed_ops_count < len(ops) and iteration < max_iterations:
+            iteration += 1
+
+            front_layer = []
+            extended_layer = []
+
+            active_ops = set()
+            for lq in logical_qubits:
+                for op in ops:
+                    if not op['completed'] and lq in op['targets']:
+                        active_ops.add(op['id'])
+                        break
+
+            for op_id in active_ops:
+                op = ops[op_id]
+                is_ready = True
+                for t in op['targets']:
+                    for prev_op in ops[:op_id]:
+                        if not prev_op['completed'] and t in prev_op['targets']:
+                            is_ready = False
+                            break
+                    if not is_ready:
+                        break
+                if is_ready:
+                    front_layer.append(op)
+                else:
+                    extended_layer.append(op)
+
+            one_qubit_routed = False
+            for op in front_layer:
+                if len(op['targets']) <= 1:
+                    phys = [mapping[op['targets'][0]]]
+                    result.add_gate(op['gate'], phys, op['args'])
+                    op['completed'] = True
+                    completed_ops_count += 1
+                    one_qubit_routed = True
+
+            if one_qubit_routed:
+                continue
+
+            two_qubit_routed = False
+            for op in front_layer:
+                if len(op['targets']) == 2:
+                    p0 = mapping[op['targets'][0]]
+                    p1 = mapping[op['targets'][1]]
+                    if self.coupling_map.are_connected(p0, p1):
+                        result.add_gate(op['gate'], [p0, p1], op['args'])
+                        op['completed'] = True
+                        completed_ops_count += 1
+                        two_qubit_routed = True
+
+            if two_qubit_routed:
+                continue
+
+            best_swap = None
+            best_score = float('inf')
+
+            for edge_q1, edge_q2 in self.coupling_map.edges:
+                trial_mapping = dict(mapping)
+                lq_a = reverse_mapping.get(edge_q1)
+                lq_b = reverse_mapping.get(edge_q2)
+
+                if lq_a is not None:
+                    trial_mapping[lq_a] = edge_q2
+                if lq_b is not None:
+                    trial_mapping[lq_b] = edge_q1
+
+                front_score = 0.0
+                for op in front_layer:
+                    p0 = trial_mapping[op['targets'][0]]
+                    p1 = trial_mapping[op['targets'][1]]
+                    front_score += self.coupling_map.distance(p0, p1)
+                front_score /= len(front_layer)
+
+                extended_score = 0.0
+                if extended_layer:
+                    count = 0
+                    for op in extended_layer[:5]:
+                        if len(op['targets']) == 2:
+                            p0 = trial_mapping[op['targets'][0]]
+                            p1 = trial_mapping[op['targets'][1]]
+                            extended_score += self.coupling_map.distance(p0, p1)
+                            count += 1
+                    if count > 0:
+                        extended_score /= count
+
+                score = front_score + self.lookahead_weight * extended_score
+
+                if score < best_score:
+                    best_score = score
+                    best_swap = (edge_q1, edge_q2)
+
+            if best_swap is None:
+                raise ValueError("SABRE Router could not find any valid SWAP.")
+
+            sq1, sq2 = best_swap
+            result.add_swap(sq1, sq2)
+
+            lq_a = reverse_mapping.get(sq1)
+            lq_b = reverse_mapping.get(sq2)
+            if lq_a is not None:
+                mapping[lq_a] = sq2
+            if lq_b is not None:
+                mapping[lq_b] = sq1
+
+            reverse_mapping[sq1] = lq_b
+            reverse_mapping[sq2] = lq_a
+
+        if iteration >= max_iterations:
+            raise RuntimeError("SABRE Router exceeded maximum iterations limit.")
+
+        result.final_mapping = dict(mapping)
+        return result
+
+
 def route_eqir_graph(graph, coupling_map: CouplingMap, router_type: str = 'basic') -> RoutedCircuit:
     """Route an EQIR graph onto a hardware coupling map."""
     logical_qubits = []
@@ -312,6 +468,8 @@ def route_eqir_graph(graph, coupling_map: CouplingMap, router_type: str = 'basic
 
     if router_type == 'greedy':
         router = GreedyRouter(coupling_map)
+    elif router_type == 'sabre':
+        router = SabreRouter(coupling_map)
     else:
         router = BasicSwapRouter(coupling_map)
 

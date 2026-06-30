@@ -1,4 +1,3 @@
-import sys
 import hashlib
 import json
 from collections import OrderedDict
@@ -51,14 +50,14 @@ def get_function_hash(instructions_segment: list[Instruction]) -> str:
 
 
 class JITCompiler:
-    # Global LRU Cache for compiled JIT blocks: (function_hash, block_id) -> compiled_func
     GLOBAL_CACHE = LRUCache(maxsize=1024)
-    # Global execution counts: (function_hash, block_id) -> count
     GLOBAL_EXEC_COUNTS = {}
+    GLOBAL_EXEC_COUNTS_MAX = 4096
+    _inline_counter = 0
 
     def __init__(self, vm):
         self.vm = vm
-        self.hot_threshold = 10
+        self.hot_threshold = 3
         self.current_instructions = None
         self.ip_to_key = {}
 
@@ -103,11 +102,13 @@ class JITCompiler:
             return compiled_func
             
         # Update global execution counts
-        self.GLOBAL_EXEC_COUNTS[key] = self.GLOBAL_EXEC_COUNTS.get(key, 0) + 1
+        count = self.GLOBAL_EXEC_COUNTS.get(key, 0) + 1
+        if len(self.GLOBAL_EXEC_COUNTS) < self.GLOBAL_EXEC_COUNTS_MAX or key in self.GLOBAL_EXEC_COUNTS:
+            self.GLOBAL_EXEC_COUNTS[key] = count
         if self.GLOBAL_EXEC_COUNTS[key] >= self.hot_threshold:
             # Detect basic block starting at ip
             block = self.trace_basic_block(ip, instructions)
-            if len(block) > 3:  # Only compile blocks of reasonable size
+            if len(block) >= 2:  # Only compile blocks of reasonable size (superinstructions reduce count)
                 compiled_func = self.compile_block(block)
                 if compiled_func:
                     self.GLOBAL_CACHE.put(key, compiled_func)
@@ -136,7 +137,22 @@ class JITCompiler:
         local_vars = {}
         try:
             code_obj = compile(source, '<jit_block>', 'exec')
-            exec(code_obj, globals(), local_vars)
+            safe_globals = {
+                "__builtins__": {},
+                "type": type,
+                "repr": repr,
+                "bool": bool,
+                "int": int,
+                "float": float,
+                "str": str,
+                "len": len,
+                "abs": abs,
+                "range": range,
+                "isinstance": isinstance,
+                "hasattr": hasattr,
+                "getattr": getattr,
+            }
+            exec(code_obj, safe_globals, local_vars)
             return local_vars['compiled_block']
         except Exception as e:
             # Fallback on compilation failure
@@ -184,8 +200,8 @@ class JITCompiler:
         if has_jumps or ip >= len(self.vm.instructions):
             return None
             
-        import random
-        suffix = f"_{func_name}_inline_{random.randint(1000, 9999)}"
+        JITCompiler._inline_counter += 1
+        suffix = f"_{func_name}_inline_{JITCompiler._inline_counter}"
         renamed_instrs = []
         for inst in func_instrs:
             if inst.opcode in (Opcode.LOAD_VAR, Opcode.STORE_VAR):
@@ -232,6 +248,21 @@ class JITCompiler:
                             folded_val = inst1.arg <= inst2.arg
                         elif inst3.opcode == Opcode.GTE:
                             folded_val = inst1.arg >= inst2.arg
+                        elif inst3.opcode == Opcode.MOD:
+                            if inst2.arg != 0:
+                                folded_val = inst1.arg % inst2.arg
+                        elif inst3.opcode == Opcode.POW:
+                            folded_val = inst1.arg ** inst2.arg
+                        elif inst3.opcode == Opcode.BIT_AND:
+                            folded_val = inst1.arg & inst2.arg
+                        elif inst3.opcode == Opcode.BIT_OR:
+                            folded_val = inst1.arg | inst2.arg
+                        elif inst3.opcode == Opcode.BIT_XOR:
+                            folded_val = inst1.arg ^ inst2.arg
+                        elif inst3.opcode == Opcode.SHL:
+                            folded_val = inst1.arg << inst2.arg
+                        elif inst3.opcode == Opcode.SHR:
+                            folded_val = inst1.arg >> inst2.arg
                             
                         if folded_val is not None:
                             new_inst = Instruction(Opcode.LOAD_CONST, folded_val)
@@ -247,6 +278,8 @@ class JITCompiler:
                         folded_val = None
                         if inst2.opcode == Opcode.NOT:
                             folded_val = not inst1.arg
+                        elif inst2.opcode == Opcode.BIT_NOT:
+                            folded_val = ~inst1.arg
                         if folded_val is not None:
                             new_inst = Instruction(Opcode.LOAD_CONST, folded_val)
                             new_inst.line = inst1.line

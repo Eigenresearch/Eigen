@@ -182,8 +182,8 @@ class QueryDb:
         if query_name in ("parse", "resolve_imports", "type_check", "to_eqir"):
             with open(path, "wb") as f:
                 pickle.dump(result, f)
-        elif query_name in ("to_ssa", "optimize", "to_ebc"):
-            if query_name == "to_ebc":
+        elif query_name in ("to_ssa", "optimize", "to_ebc", "to_ebc_opt"):
+            if query_name in ("to_ebc", "to_ebc_opt"):
                 data = {
                     "major": 3,
                     "minor": 0,
@@ -206,10 +206,10 @@ class QueryDb:
         if query_name in ("parse", "resolve_imports", "type_check", "to_eqir"):
             with open(path, "rb") as f:
                 return pickle.load(f)
-        elif query_name in ("to_ssa", "optimize", "to_ebc"):
+        elif query_name in ("to_ssa", "optimize", "to_ebc", "to_ebc_opt"):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            if query_name in ("to_ebc", "optimize"):
+            if query_name in ("to_ebc", "to_ebc_opt", "optimize"):
                 from src.backend.bytecode import Instruction
                 if isinstance(data, dict) and "instructions" in data:
                     return [Instruction.from_dict(d) for d in data["instructions"]]

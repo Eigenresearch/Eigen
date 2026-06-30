@@ -14,3 +14,5 @@ from . import doc
 from . import lsp
 from . import test
 from . import reproduce
+from . import viz
+

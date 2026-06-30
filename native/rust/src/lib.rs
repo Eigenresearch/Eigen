@@ -56,6 +56,7 @@ fn eigen_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(zx::fast_spider_fusion, m)?)?;
     m.add_function(wrap_pyfunction!(routing::fast_shortest_path, m)?)?;
     m.add_function(wrap_pyfunction!(optimizer::fast_unused_vars, m)?)?;
+    m.add_function(wrap_pyfunction!(optimizer::optimize_eqir_native, m)?)?;
     m.add_function(wrap_pyfunction!(runtime::execute_bytecode_native, m)?)?;
     m.add_function(wrap_pyfunction!(parse_native, m)?)?;
     m.add_function(wrap_pyfunction!(type_check_source, m)?)?;

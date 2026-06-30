@@ -1,7 +1,7 @@
 """Memory safety and VM resilience tests for EigenVM."""
 import unittest
 from src.backend.bytecode import Opcode, Instruction
-from src.backend.vm import EigenVM, UnsupportedBytecodeVersionError
+from src.backend.vm import EigenVM, UnsupportedBytecodeVersionError, UndefinedVariableError
 
 
 class TestVMMemorySafety(unittest.TestCase):
@@ -147,22 +147,23 @@ class TestVMMemorySafety(unittest.TestCase):
         ]
         self.vm.execute(instructions)
         self.assertEqual(self.vm.lookup_var("x"), 42)
-        # y should not exist or be its default
-        self.assertNotEqual(self.vm.lookup_var("y"), 99)
+        # y is not defined, so lookup_var("y") should raise UndefinedVariableError
+        with self.assertRaises(UndefinedVariableError):
+            self.vm.lookup_var("y")
 
     def test_empty_instructions(self):
         """Executing an empty instruction list should not crash."""
         self.vm.execute([])
 
     def test_load_var_undefined(self):
-        """Loading an undefined variable should return the name string, not crash."""
+        """Loading an undefined variable should raise UndefinedVariableError, not crash."""
         instructions = [
             Instruction(Opcode.LOAD_VAR, "undefined_var"),
             Instruction(Opcode.STORE_VAR, "result"),
             Instruction(Opcode.HALT),
         ]
-        self.vm.execute(instructions)
-        # Should not crash; result is the name itself or some default
+        with self.assertRaises(UndefinedVariableError):
+            self.vm.execute(instructions)
 
     def test_bytecode_version_check(self):
         """UnsupportedBytecodeVersionError should be available."""

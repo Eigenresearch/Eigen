@@ -21,7 +21,6 @@ class EQIRProfiler:
         entangling_gates_count = 0
         
         entangling_types = {"CNOT", "CZ", "SWAP"}
-        rotation_types = {"RX", "RY", "RZ"}
         
         qubits = set()
         
