@@ -28,7 +28,7 @@ jobs:
 
       - name: Run Test Suite
         run: |
-          pytest --cov=src > test_output.log 2>&1 || (cat test_output.log && exit 1)
+          pytest --cov=src -q --tb=short > test_output.log 2>&1 || (cat test_output.log && exit 1)
 
       - name: Push Test Log on Failure
         if: failure()

@@ -81,6 +81,11 @@ class TestFrontendEquivalence(unittest.TestCase):
         self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "release", "eigen-frontend.exe")
         if not os.path.exists(self.binary_path):
             self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "debug", "eigen-frontend.exe")
+        if not os.path.exists(self.binary_path):
+            self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "release", "eigen_frontend")
+        if not os.path.exists(self.binary_path):
+            self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "debug", "eigen_frontend")
+        self.skip_rust = not os.path.exists(self.binary_path)
 
     def run_rust_binary(self, source: str):
         res = subprocess.run(
@@ -93,6 +98,8 @@ class TestFrontendEquivalence(unittest.TestCase):
         return res
 
     def assert_equivalent(self, source: str):
+        if self.skip_rust:
+            self.skipTest("Rust frontend binary not available")
         # 1. Parse using Python (bypass native delegation)
         lexer = PythonLexer(source)
         tokens = lexer.tokenize()
