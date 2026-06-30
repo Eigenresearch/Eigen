@@ -1,3 +1,4 @@
+﻿import sys
 import unittest
 import os
 import shutil
@@ -57,7 +58,7 @@ class TestExporters(unittest.TestCase):
 
     def test_cli_qasm_export(self):
         import subprocess
-        python_exe = os.path.join(self.workspace_root, ".venv", "Scripts", "python.exe")
+        python_exe = sys.executable
         main_py = os.path.join(self.workspace_root, "src", "main.py")
         
         qasm_file = os.path.join(self.test_dir, "temp_export_test.qasm")
@@ -79,7 +80,7 @@ class TestExporters(unittest.TestCase):
 
     def test_cli_quil_export(self):
         import subprocess
-        python_exe = os.path.join(self.workspace_root, ".venv", "Scripts", "python.exe")
+        python_exe = sys.executable
         main_py = os.path.join(self.workspace_root, "src", "main.py")
         
         quil_file = os.path.join(self.test_dir, "temp_export_test.quil")
@@ -101,3 +102,5 @@ class TestExporters(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+

@@ -1,3 +1,4 @@
+﻿import sys
 import unittest
 import math
 import cmath
@@ -78,7 +79,7 @@ class TestDensityMatrix(unittest.TestCase):
         
         test_dir = os.path.dirname(os.path.abspath(__file__))
         workspace_root = os.path.dirname(test_dir)
-        python_exe = os.path.join(workspace_root, ".venv", "Scripts", "python.exe")
+        python_exe = sys.executable
         main_py = os.path.join(workspace_root, "src", "main.py")
         
         source_file = os.path.join(test_dir, "temp_dm_test.eig")
@@ -101,3 +102,5 @@ class TestDensityMatrix(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
