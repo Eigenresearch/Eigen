@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import platform
 import subprocess
@@ -68,7 +68,7 @@ def main():
     if system == 'windows':
         # Standalone executable is the installer
         win_exe = os.path.join(dist_dir, "eigen.exe")
-        target_win = os.path.join(dist_dir, "Eigen-2.4-Windows-x64.exe")
+        target_win = os.path.join(dist_dir, "Eigen-2.5-Windows-x64.exe")
         if os.path.exists(win_exe):
             if os.path.exists(target_win):
                 os.remove(target_win)
@@ -119,7 +119,7 @@ def main():
             f.write(_make_minimal_png())
             
         # Download appimagetool
-        target_appimage = os.path.join(dist_dir, "Eigen-2.4-Linux.AppImage")
+        target_appimage = os.path.join(dist_dir, "Eigen-2.5-Linux.AppImage")
         appimagetool_path = shutil.which("appimagetool")
         
         if not appimagetool_path:
@@ -165,8 +165,8 @@ def main():
         if not appimage_ok:
             # Fallback: create a tar.gz with the standalone binary
             import tarfile
-            target_appimage = os.path.join(dist_dir, "Eigen-2.4-Linux.AppImage")
-            tar_path = os.path.join(dist_dir, "Eigen-2.4-Linux.tar.gz")
+            target_appimage = os.path.join(dist_dir, "Eigen-2.5-Linux.AppImage")
+            tar_path = os.path.join(dist_dir, "Eigen-2.5-Linux.tar.gz")
             with tarfile.open(tar_path, "w:gz") as tar:
                 tar.add(os.path.join(dist_dir, "eigen"), arcname="eigen")
             # Copy tar.gz as the AppImage artifact path so the workflow picks it up
@@ -181,11 +181,11 @@ def main():
         
         shutil.copy(os.path.join(dist_dir, "eigen"), os.path.join(usr_local_bin, "eigen"))
         
-        target_pkg = os.path.join(dist_dir, "Eigen-2.4-macOS.pkg")
+        target_pkg = os.path.join(dist_dir, "Eigen-2.5-macOS.pkg")
         pkgbuild_args = [
             "pkgbuild",
             "--identifier", "com.eigenresearch.eigen",
-            "--version", "2.4.0",
+            "--version", "2.5.0",
             "--root", pkg_root,
             target_pkg
         ]
@@ -199,3 +199,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
