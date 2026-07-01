@@ -56,8 +56,8 @@ Name: "dircontextmenu"; Description: "Add 'Open with Eigen' to directory context
 Source: "..\dist\eigen.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: core
 Source: "..\stdlib\*"; DestDir: "{app}\stdlib"; Flags: ignoreversion recursesubdirs; Components: stdlib
 Source: "..\examples\*"; DestDir: "{app}\examples"; Flags: ignoreversion recursesubdirs; Components: examples
-Source: "..\native\rust\target\release\eigen_native.dll"; DestDir: "{app}"; Flags: ignoreversion; Components: native
-Source: "..\vscode-extension\*"; DestDir: "{app}\vscode-extension"; Flags: ignoreversion recursesubdirs; Components: vscode
+Source: "..\native\rust\target\release\eigen_native.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist; Components: native
+Source: "..\vscode-extension\*"; DestDir: "{app}\vscode-extension"; Flags: ignoreversion recursesubdirs skipifsourcedoesntexist; Components: vscode
 
 [Icons]
 Name: "{group}\Eigen"; Filename: "{app}\eigen.exe"
