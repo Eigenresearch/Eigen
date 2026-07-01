@@ -84,7 +84,30 @@ class TestCouplingMap(unittest.TestCase):
 
     def test_heavy_hex(self):
         cm = CouplingMap.heavy_hex(3)
-        self.assertEqual(cm.num_qubits, 9)
+        self.assertGreater(cm.num_qubits, 9)
+        grid_cm = CouplingMap.grid(3, 3)
+        self.assertNotEqual(cm.edges, grid_cm.edges)
+
+    def test_heavy_hex_is_not_grid(self):
+        cm = CouplingMap.heavy_hex(4)
+        grid_cm = CouplingMap.grid(4, 4)
+        self.assertNotEqual(len(cm.edges), len(grid_cm.edges))
+
+    def test_ibm_eagle(self):
+        cm = CouplingMap.ibm_eagle()
+        self.assertEqual(cm.num_qubits, 127)
+
+    def test_ionq_alltoall(self):
+        cm = CouplingMap.ionq_alltoall(5)
+        for i in range(5):
+            for j in range(i + 1, 5):
+                self.assertTrue(cm.are_connected(i, j))
+
+    def test_rigetti_ring(self):
+        cm = CouplingMap.rigetti_ring(4)
+        self.assertTrue(cm.are_connected(0, 3))
+        self.assertTrue(cm.are_connected(0, 1))
+        self.assertFalse(cm.are_connected(0, 2))
 
     def test_bidirectional_edges(self):
         cm = CouplingMap([(0, 1)])

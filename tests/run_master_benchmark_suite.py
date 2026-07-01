@@ -927,7 +927,7 @@ def benchmark():
 
     # Generate Markdown Output File
     with open("master_benchmark_results.md", "w", encoding="utf-8") as f:
-        f.write("# Master Benchmark: Native Python vs Eigen VM (Nova 2.6)\n\n")
+        f.write("# Master Benchmark: Native Python vs Eigen VM (Misery 2.6)\n\n")
         f.write("Unified master benchmark results of all 35 tests, displaying execution speeds, verification accuracy, and outputs.\n\n")
         f.write("| Test Case | Native Python | Eigen VM | Python Output | Eigen VM Output | Accuracy / Verification |\n")
         f.write("| --- | --- | --- | --- | --- | --- |\n")
@@ -940,7 +940,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Nova» Master Dashboard</title>
+    <title>Eigen 2.6 «Misery» Master Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -1084,7 +1084,7 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Nova» Unified Master Dashboard</h1>
+        <h1>Eigen 2.6 «Misery» Unified Master Dashboard</h1>
         <div class="subtitle">Extensive compilation of all 35 tests, analyzing execution time, correctness, and exact outputs.</div>
         
         <input type="text" id="search" onkeyup="filterTable()" placeholder="Search test cases, outputs, or status..." class="search-box">

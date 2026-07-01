@@ -1,4 +1,4 @@
-# Eigen 2.6 «Nova» Execution Benchmarks
+# Eigen 2.6 «Misery» Execution Benchmarks
 
 Comparison of execution time between Pure Python VM execution (JIT Disabled) and JIT-compiled VM execution (JIT Enabled) across 50 runs.
 

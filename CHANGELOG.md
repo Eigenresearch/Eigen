@@ -64,7 +64,7 @@ Release 2.5.0 «Mitz» delivers a massive performance overhaul (1.8x faster than
 - `compute_depth` converted to iterative
 - `BoolOp` short-circuit evaluation in runtime
 - Duplicate `--strict` flag removed from CLI
-- CLI version updated to 2.6 Nova
+- CLI version updated to 2.6 Misery
 - Unused imports removed (sys, random, EQIRNode, EQIRConverter, rotation_types)
 - Workspace root searches upward for `eigen.toml`/`pyproject.toml`
 - `math.pi` instead of hardcoded `3.141592653589793`
@@ -76,9 +76,28 @@ Release 2.5.0 «Mitz» delivers a massive performance overhaul (1.8x faster than
 
 ## [2.6.0] - 2026-06-30
 
-Release 2.6.0 "Nova" addresses all remaining CRITICAL and HIGH bugs from the 2.5 audit (123 findings), adds key language features, and improves architectural quality.
+Release 2.6.0 "Misery" addresses all remaining CRITICAL and HIGH bugs from the 2.5 audit (123 findings), adds key language features, and improves architectural quality.
 
-### Added
+### Breaking Changes
+- **Stabilizer non-Clifford handling:** Non-Clifford gates on `StabilizerSimulator` now raise `NonCliffordGateError` (subclass of `ValueError`). When used via `QuantumSimulator(sim_type='stabilizer')`, an automatic fallback to the dense state-vector simulator occurs with a warning instead of a crash.
+- **`CouplingMap.heavy_hex()`:** Now generates a real IBM heavy-hex topology instead of returning `grid(n, n)`. Use `CouplingMap.grid(n, n)` explicitly if grid behavior is needed.
+- **GPU Engine logging:** `GPUEngine` now uses Python `logging` module (`eigen.gpu` logger) instead of `print()` statements.
+- **MPS default bond dimension:** Increased from 32 to 64. Added `auto_bond_dim` and `max_truncation_error` parameters for automatic accuracy management.
+- **Coverage configuration:** Critical components (simulator, runtime, compiler, VM, IR) are no longer excluded from coverage reports.
+- **Version synchronization:** All version identifiers unified to `2.6.0` across `pyproject.toml`, CLI, `Cargo.toml`, and CHANGELOG.
+
+### Added — Installer & Infrastructure
+- **Inno Setup Windows Installer:** Full GUI wizard with component selection, PATH management, `.eig` file association, and context menu integration (`installer/eigen_setup.iss`).
+- **Real IBM Heavy-Hex Topology:** `CouplingMap.heavy_hex()` now generates genuine IBM heavy-hex topology instead of a grid.
+- **Real Device Topologies:** `CouplingMap.ibm_eagle()`, `CouplingMap.ibm_condor()`, `CouplingMap.ionq_alltoall()`, `CouplingMap.rigetti_ring()`, `CouplingMap.google_sycamore()`.
+- **Advanced Noise Engine:** `NoiseChannel` abstract class, `T1T2NoiseModel` with physical timing, `CrosstalkModel` for two-qubit correlated errors, `DeviceNoiseProfile.from_ibm()`.
+- **Stabilizer Pre-flight Check:** `StabilizerSimulator.check_circuit_compatibility()` detects non-Clifford gates before execution.
+- **Stabilizer Auto-fallback:** `QuantumSimulator(sim_type='stabilizer')` automatically falls back to dense state-vector for non-Clifford circuits.
+- **MPS Auto Bond Dimension:** `auto_bond_dim` parameter with `max_truncation_error` threshold and accuracy degradation warnings.
+- **Structured GPU Logging:** `GPUEngine` uses Python `logging` module (`eigen.gpu` logger) instead of `print()`.
+- **Migration Guide:** `MIGRATION.md` with breaking changes and migration steps for 2.5 → 2.6.
+- **Version Synchronization:** All version identifiers unified to `2.6.0` across `pyproject.toml`, CLI, `Cargo.toml`, and CHANGELOG.
+- **Coverage Configuration:** Critical components (simulator, runtime, compiler, VM, IR) no longer excluded from coverage.
 - **Exponentiation Operator `**`:** Full support for `a ** b` across lexer, parser, type checker, EBC compiler, VM, JIT codegen, IR converter, and MLIR dialect.
 - **Void Functions:** `func foo() { ... }` without mandatory `-> type` return type annotation (defaults to `void`).
 - **Bytecode Version Validation:** `UnsupportedBytecodeVersionError` raised when loading bytecode with unsupported version.
@@ -105,7 +124,7 @@ Release 2.6.0 "Nova" addresses all remaining CRITICAL and HIGH bugs from the 2.5
 - **BUG-M09: Hot-Loop Import:** `import ast` moved to module level in `runtime.py`.
 - **BUG-M12: JIT Inline Name Collisions:** Replaced `random.randint` with atomic counter.
 - **BUG-M13: Native Codegen Opcode:** Safe `opcode.lower()` handling for both string and Enum types.
-- **BUG-M15: CLI Version String:** Updated to `v2.6 — Nova`.
+- **BUG-M15: CLI Version String:** Updated to `v2.6 — Misery`.
 - **BUG-M16: Duplicate `--strict`:** Removed top-level duplicate.
 - **BUG-M39: Workspace Root:** Now searches upward for `eigen.toml`/`pyproject.toml` instead of using CWD.
 - **BUG-M42: Hardcoded Pi:** Replaced `3.141592653589793` with `math.pi`.
@@ -119,7 +138,7 @@ Release 2.6.0 "Nova" addresses all remaining CRITICAL and HIGH bugs from the 2.5
 - **BUG-M35: String Comparisons:** Type checker now allows `string` in if/assert conditions.
 
 ### Test Results
-- **416 tests passed** (30 new tests for Nova fixes, 386 original tests, 0 regressions)
+- **416 tests passed** (30 new tests for Misery fixes, 386 original tests, 0 regressions)
 - **439 subtests passed**
 - **0 failures**
 

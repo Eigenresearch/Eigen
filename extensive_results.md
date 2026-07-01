@@ -1,4 +1,4 @@
-# Extensive Benchmark: Native Python vs Eigen VM (Nova 2.6)
+# Extensive Benchmark: Native Python vs Eigen VM (Misery 2.6)
 
 Comparison of execution time between native Python execution and Eigen VM (with JIT enabled) across 25 tests (including 11 accuracy/precision checks).
 

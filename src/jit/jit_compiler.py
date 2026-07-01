@@ -53,11 +53,13 @@ class JITCompiler:
     GLOBAL_CACHE = LRUCache(maxsize=1024)
     GLOBAL_EXEC_COUNTS = {}
     GLOBAL_EXEC_COUNTS_MAX = 4096
+    DEFAULT_HOT_THRESHOLD = 3
     _inline_counter = 0
 
-    def __init__(self, vm):
+    def __init__(self, vm, hot_threshold: int = None, exec_counts_max: int = None):
         self.vm = vm
-        self.hot_threshold = 3
+        self.hot_threshold = hot_threshold if hot_threshold is not None else JITCompiler.DEFAULT_HOT_THRESHOLD
+        self.exec_counts_max = exec_counts_max if exec_counts_max is not None else JITCompiler.GLOBAL_EXEC_COUNTS_MAX
         self.current_instructions = None
         self.ip_to_key = {}
 

@@ -174,9 +174,9 @@ jobs:
             dist/Eigen-*-Linux.AppImage
             dist/Eigen-*-macOS.pkg
           body: |
-            # Eigen ${{ steps.version.outputs.VERSION }} — «Mitz» Release
+            # Eigen ${{ steps.version.outputs.VERSION }} — «Misery» Release
 
-            Welcome to **Eigen 2.5 «Mitz»** — a runtime-first hybrid classical-quantum programming language with **1.8x faster** classical loops than CPython, a **1000-qubit stabilizer simulator**, and 8 new language features.
+            Welcome to **Eigen 2.6 «Misery»** — a runtime-first hybrid classical-quantum programming language with **1.8x faster** classical loops than CPython, a **1000-qubit stabilizer simulator**, advanced noise models, and an Inno Setup installer.
 
             ## Installers
             | Platform | File | Notes |

@@ -370,7 +370,8 @@ class StateVectorList(list):
 
 
 class QuantumSimulator:
-    def __init__(self, sim_type='dense', gpu_platform='none', seed=None):
+    def __init__(self, sim_type='dense', gpu_platform='none', seed=None,
+                 mps_max_bond_dim=None, mps_auto_bond_dim=False, mps_max_truncation_error=None):
         # sim_type: 'dense', 'sparse', or 'mps'
         self.sim_type = sim_type
         self.gpu_platform = gpu_platform
@@ -379,7 +380,7 @@ class QuantumSimulator:
         self.qubit_map = {}
         self.num_qubits = 0
         self.is_sparse = False
-        
+
         # Delegates
         self.sparse_sim = None
         self.mps_sim = None
@@ -387,6 +388,11 @@ class QuantumSimulator:
         self.dense_backend = None
         self.density_sim = None
         self.stabilizer_sim = None
+
+        # MPS configuration
+        self.mps_max_bond_dim = mps_max_bond_dim
+        self.mps_auto_bond_dim = mps_auto_bond_dim
+        self.mps_max_truncation_error = mps_max_truncation_error
         
         if self.gpu_platform != 'none' and self.sim_type == 'dense':
             from src.backend.gpu.gpu_engine import GPUEngine
@@ -400,7 +406,13 @@ class QuantumSimulator:
             self.sparse_sim = SparseQuantumSimulator()
             self.sparse_sim.rng = self.rng
         elif self.sim_type == 'mps':
-            self.mps_sim = MPSSimulator()
+            kwargs = {}
+            if self.mps_max_bond_dim is not None:
+                kwargs['max_bond_dim'] = self.mps_max_bond_dim
+            kwargs['auto_bond_dim'] = self.mps_auto_bond_dim
+            if self.mps_max_truncation_error is not None:
+                kwargs['max_truncation_error'] = self.mps_max_truncation_error
+            self.mps_sim = MPSSimulator(**kwargs)
             self.mps_sim.rng = self.rng
         elif self.sim_type == 'stabilizer':
             from src.stabilizer_simulator import StabilizerSimulator
@@ -481,7 +493,13 @@ class QuantumSimulator:
             for q in sorted_qubits:
                 self.sparse_sim.allocate_qubit(q)
         elif chosen_sim == 'mps':
-            self.mps_sim = MPSSimulator()
+            kwargs = {}
+            if self.mps_max_bond_dim is not None:
+                kwargs['max_bond_dim'] = self.mps_max_bond_dim
+            kwargs['auto_bond_dim'] = self.mps_auto_bond_dim
+            if self.mps_max_truncation_error is not None:
+                kwargs['max_truncation_error'] = self.mps_max_truncation_error
+            self.mps_sim = MPSSimulator(**kwargs)
             self.mps_sim.rng = self.rng
             sorted_qubits = sorted(self.qubit_map.keys(), key=lambda q: self.qubit_map[q])
             for q in sorted_qubits:
@@ -493,6 +511,32 @@ class QuantumSimulator:
                 self.dense_backend = PythonDenseStatevector()
             for _ in range(self.num_qubits):
                 self.dense_backend.allocate_qubit()
+
+    def _fallback_from_stabilizer(self, gate_name: str = None):
+        """Auto-fallback from stabilizer to dense state-vector simulator.
+
+        Called when a non-Clifford gate is applied to a stabilizer backend.
+        Switches to the dense backend so the circuit can run without crashing.
+        """
+        if not self.stabilizer_sim:
+            return
+        import warnings
+        gate_info = f" (gate: {gate_name})" if gate_name else ""
+        warnings.warn(
+            f"Non-Clifford gate{gate_info} detected on stabilizer backend. "
+            f"Auto-falling back to dense state-vector simulator. "
+            f"Stabilizer simulator only supports Clifford gates: "
+            f"{{H, S, X, Y, Z, CNOT, CZ, SWAP}}.",
+            stacklevel=3,
+        )
+        self.stabilizer_sim = None
+        self.sim_type = 'dense'
+        if native is not None and hasattr(native, 'RustStatevector'):
+            self.dense_backend = RustStatevectorWrapper()
+        else:
+            self.dense_backend = PythonDenseStatevector()
+        for _ in range(self.num_qubits):
+            self.dense_backend.allocate_qubit()
 
     def allocate_qubit(self, name: str):
         if name in self.qubit_map:
@@ -658,6 +702,8 @@ class QuantumSimulator:
         self.dense_backend.S(self.get_qubit_index(q))
 
     def T(self, q: str):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('T')
         if self.mps_sim:
             self.mps_sim.T(q)
             return
@@ -673,6 +719,8 @@ class QuantumSimulator:
         self.dense_backend.T(self.get_qubit_index(q))
 
     def RX(self, q: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('RX')
         if self.mps_sim:
             self.mps_sim.RX(q, theta)
             return
@@ -691,6 +739,8 @@ class QuantumSimulator:
         self.dense_backend.RX(self.get_qubit_index(q), theta)
 
     def RY(self, q: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('RY')
         if self.mps_sim:
             self.mps_sim.RY(q, theta)
             return
@@ -709,6 +759,8 @@ class QuantumSimulator:
         self.dense_backend.RY(self.get_qubit_index(q), theta)
 
     def RZ(self, q: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('RZ')
         if self.mps_sim:
             self.mps_sim.RZ(q, theta)
             return
@@ -779,6 +831,8 @@ class QuantumSimulator:
         self.dense_backend.SWAP(self.get_qubit_index(q1), self.get_qubit_index(q2))
 
     def CCX(self, control1: str, control2: str, target: str):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CCX')
         if self.mps_sim:
             self.mps_sim.CCX(control1, control2, target)
             return
@@ -807,6 +861,8 @@ class QuantumSimulator:
         self.dense_backend.CCX(self.get_qubit_index(control1), self.get_qubit_index(control2), self.get_qubit_index(target))
 
     def CSWAP(self, control: str, q1: str, q2: str):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CSWAP')
         if self.mps_sim:
             self.mps_sim.CSWAP(control, q1, q2)
             return
@@ -835,6 +891,8 @@ class QuantumSimulator:
         self.dense_backend.CSWAP(self.get_qubit_index(control), self.get_qubit_index(q1), self.get_qubit_index(q2))
 
     def CP(self, control: str, target: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CP')
         if self.mps_sim:
             self.mps_sim.CP(control, target, theta)
             return
@@ -858,6 +916,8 @@ class QuantumSimulator:
         self.dense_backend.CP(self.get_qubit_index(control), self.get_qubit_index(target), theta)
 
     def CRX(self, control: str, target: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CRX')
         if self.mps_sim:
             self.mps_sim.CRX(control, target, theta)
             return
@@ -883,6 +943,8 @@ class QuantumSimulator:
         self.dense_backend.CRX(self.get_qubit_index(control), self.get_qubit_index(target), theta)
 
     def CRY(self, control: str, target: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CRY')
         if self.mps_sim:
             self.mps_sim.CRY(control, target, theta)
             return
@@ -908,6 +970,8 @@ class QuantumSimulator:
         self.dense_backend.CRY(self.get_qubit_index(control), self.get_qubit_index(target), theta)
 
     def CRZ(self, control: str, target: str, theta: float):
+        if self.stabilizer_sim:
+            self._fallback_from_stabilizer('CRZ')
         if self.mps_sim:
             self.mps_sim.CRZ(control, target, theta)
             return

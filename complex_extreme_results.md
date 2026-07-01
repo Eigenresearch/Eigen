@@ -1,4 +1,4 @@
-# Extreme Performance & Correctness: Native Python vs Eigen VM (Nova 2.6)
+# Extreme Performance & Correctness: Native Python vs Eigen VM (Misery 2.6)
 
 Detailed verification of 10 highly complex algorithmic and quantum operations, showing execution speeds and exact outputs to verify compiler correctness.
 

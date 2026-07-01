@@ -605,7 +605,7 @@ def benchmark():
         
     # Write Markdown file
     with open("extensive_results.md", "w", encoding="utf-8") as f:
-        f.write("# Extensive Benchmark: Native Python vs Eigen VM (Nova 2.6)\n\n")
+        f.write("# Extensive Benchmark: Native Python vs Eigen VM (Misery 2.6)\n\n")
         f.write("Comparison of execution time between native Python execution and Eigen VM (with JIT enabled) across 25 tests (including 11 accuracy/precision checks).\n\n")
         f.write("## Performance & Correctness Summary\n\n")
         f.write("| Benchmark Test Case | Native Python | Eigen VM | Accuracy / Fidelity |\n")
@@ -620,7 +620,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Nova» Performance Dashboard</title>
+    <title>Eigen 2.6 «Misery» Performance Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -778,7 +778,7 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Nova» extensive Performance Dashboard</h1>
+        <h1>Eigen 2.6 «Misery» extensive Performance Dashboard</h1>
         <div class="subtitle">Detailed benchmark comparing Native Python vs. Eigen JIT VM execution across 25 tests.</div>
         
         <div class="grid">

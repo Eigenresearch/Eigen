@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eigen-lang"
-version = "2.5.0"
-description = "Eigen 2.5 — Mitz: Runtime-first hybrid classical-quantum programming language with fast-loop JIT, stabilizer simulator, and SABRE routing"
+version = "2.6.0"
+description = "Eigen 2.6 — Misery: Runtime-first hybrid classical-quantum programming language with fast-loop JIT, stabilizer simulator, SABRE routing, advanced noise models, and Inno Setup installer"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -53,22 +53,8 @@ omit = [
     "src/backend/distributed.py",
     "src/backend/llvm_compiler.py",
     "src/backend/qiskit_backend.py",
-    "src/backend/gpu/gpu_engine.py",
-    "src/backend/vm.py",
-    "src/backend/ebc_compiler.py",
-    "src/runtime.py",
-    "src/compiler.py",
     "src/crash_report.py",
-    "src/diagnostics.py",
-    "src/simulator.py",
-    "src/sparse_simulator.py",
-    "src/ir/mlir_dialect.py",
-    "src/ir/ir_graph.py",
-    "src/ir/ir_converter.py",
-    "src/ir/optimizer.py",
-    "src/ir/tensor_compiler.py",
     "src/profiler.py",
-    "src/tensor_network/mps.py",
 ]
 
 [tool.coverage.report]

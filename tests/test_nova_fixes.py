@@ -314,7 +314,7 @@ func greet() {
         import inspect
         source = inspect.getsource(cli)
         self.assertIn("2.6", source)
-        self.assertIn("Nova", source)
+        self.assertIn("Misery", source)
 
     # === BUG-M42: math.pi instead of hardcoded ===
     def test_optimizer_uses_math_pi(self):

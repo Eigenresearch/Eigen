@@ -1,3 +1,20 @@
+"""Mathematical equivalence checker for Eigen quantum circuits.
+
+This module provides the EquivalenceChecker class which verifies whether
+two EQIR graphs produce the same quantum operation (up to global phase).
+
+IMPORTANT: The canonical hash comparison (used in the IR graph layer) is
+a necessary but NOT sufficient condition for circuit equivalence.
+Canonical hash equality means the circuits have the same structural
+representation, but does not prove mathematical equivalence. Two
+circuits with different canonical hashes are definitely NOT equivalent
+(fast reject), but two circuits with the same canonical hash may still
+be non-equivalent due to hash collisions or incomplete canonicalization.
+
+For a full proof of equivalence, use the `are_equivalent()` method which
+performs unitary matrix comparison (for small circuits) or ZX-calculus
+rewriting (for larger circuits).
+"""
 from src.ir.ir_graph import EQIRGraph
 from src.simulator import QuantumSimulator
 from src.zx.exceptions import IndeterminateEquivalenceError
@@ -94,6 +111,23 @@ class EquivalenceChecker:
         return U
 
     def are_equivalent(self, graph1: EQIRGraph, graph2: EQIRGraph) -> bool:
+        """Check whether two EQIR graphs are mathematically equivalent.
+
+        This method performs a full unitary matrix comparison (for circuits
+        with <= 8 qubits) or ZX-calculus rewriting (for larger circuits).
+
+        Note: Canonical hash equality (available via graph.canonical_hash())
+        is a fast-reject mechanism, NOT a proof of equivalence. If canonical
+        hashes differ, the circuits are definitely not equivalent. If they
+        match, this method should be called for a definitive answer.
+
+        Args:
+            graph1: First EQIR graph.
+            graph2: Second EQIR graph.
+
+        Returns:
+            True if the circuits are equivalent up to global phase.
+        """
         # Get set of all qubits across both graphs
         qubits1 = self.get_all_qubits(graph1)
         qubits2 = self.get_all_qubits(graph2)

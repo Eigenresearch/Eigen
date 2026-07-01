@@ -419,7 +419,7 @@ def benchmark():
 
     # Generate Markdown File
     with open("complex_extreme_results.md", "w", encoding="utf-8") as f:
-        f.write("# Extreme Performance & Correctness: Native Python vs Eigen VM (Nova 2.6)\n\n")
+        f.write("# Extreme Performance & Correctness: Native Python vs Eigen VM (Misery 2.6)\n\n")
         f.write("Detailed verification of 10 highly complex algorithmic and quantum operations, showing execution speeds and exact outputs to verify compiler correctness.\n\n")
         f.write("| Test Case | Native Python Time | Eigen VM Time | Python Output | Eigen VM Output |\n")
         f.write("| --- | --- | --- | --- | --- |\n")
@@ -432,7 +432,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Nova» Complex Extreme Dashboard</title>
+    <title>Eigen 2.6 «Misery» Complex Extreme Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -576,7 +576,7 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Nova» Extreme Performance Dashboard</h1>
+        <h1>Eigen 2.6 «Misery» Extreme Performance Dashboard</h1>
         <div class="subtitle">Comparison of execution speeds and actual algorithm outputs (Native Python vs. Eigen VM).</div>
         
         <div class="grid">

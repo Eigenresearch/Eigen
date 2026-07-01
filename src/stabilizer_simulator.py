@@ -4,8 +4,45 @@ Uses the CHP (Clifford-Hadamard-Pauli) algorithm for O(n^2) simulation.
 
 Reference: Aaronson & Gottesman, "Improved Simulation of Stabilizer Circuits",
 Phys. Rev. A 70, 052328 (2004).
+
+The stabilizer simulator supports only the Clifford group:
+  {H, S, X, Y, Z, CNOT, CZ, SWAP}
+
+Non-Clifford gates (T, RX, RY, RZ, CCX, CSWAP, CP, CRX, CRY, CRZ) raise
+NonCliffordGateError. Use check_circuit_compatibility() for pre-flight
+circuit analysis, or use QuantumSimulator(sim_type='stabilizer') for
+automatic fallback to the dense state-vector simulator.
 """
 import random
+import warnings
+
+CLIFFORD_GATES = frozenset({
+    'H', 'S', 'X', 'Y', 'Z', 'CNOT', 'CZ', 'SWAP',
+    'SDG', 'I', 'SX',
+})
+
+NON_CLIFFORD_GATES = frozenset({
+    'T', 'TDG', 'RX', 'RY', 'RZ', 'CCX', 'CSWAP',
+    'CP', 'CRX', 'CRY', 'CRZ', 'U1', 'U2', 'U3',
+})
+
+
+class NonCliffordGateError(ValueError):
+    """Raised when a non-Clifford gate is applied to a stabilizer simulator.
+
+    Subclass of ValueError for backward compatibility with code that
+    catches ValueError from the old implementation.
+    """
+
+    def __init__(self, gate_name: str, message: str = None):
+        self.gate_name = gate_name
+        if message is None:
+            message = (
+                f"{gate_name} gate is non-Clifford, not supported by stabilizer simulator. "
+                f"Supported gates: {sorted(CLIFFORD_GATES)}. "
+                f"Use a state-vector backend or QuantumSimulator with auto-fallback."
+            )
+        super().__init__(message)
 
 class StabilizerSimulator:
     def __init__(self, rng=None, seed=None):
@@ -139,16 +176,16 @@ class StabilizerSimulator:
         self._apply_s(self.get_qubit_index(q))
 
     def T(self, q):
-        raise ValueError("T gate is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("T")
 
     def RX(self, q, theta):
-        raise ValueError("RX gate is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("RX")
 
     def RY(self, q, theta):
-        raise ValueError("RY gate is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("RY")
 
     def RZ(self, q, theta):
-        raise ValueError("RZ gate is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("RZ")
 
     def CNOT(self, control, target):
         self._apply_cnot(self.get_qubit_index(control), self.get_qubit_index(target))
@@ -168,22 +205,22 @@ class StabilizerSimulator:
         self._apply_cnot(c, t)
 
     def CCX(self, c1, c2, target):
-        raise ValueError("CCX (Toffoli) is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CCX")
 
     def CSWAP(self, control, q1, q2):
-        raise ValueError("CSWAP (Fredkin) is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CSWAP")
 
     def CP(self, control, target, theta):
-        raise ValueError("CP is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CP")
 
     def CRX(self, control, target, theta):
-        raise ValueError("CRX is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CRX")
 
     def CRY(self, control, target, theta):
-        raise ValueError("CRY is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CRY")
 
     def CRZ(self, control, target, theta):
-        raise ValueError("CRZ is non-Clifford, not supported by stabilizer simulator")
+        raise NonCliffordGateError("CRZ")
 
     def measure(self, q: str) -> int:
         """Measure qubit q in the computational basis (non-destructive)."""
@@ -224,3 +261,25 @@ class StabilizerSimulator:
 
     def get_amplitudes_dict(self) -> dict:
         return {}
+
+    @staticmethod
+    def check_circuit_compatibility(gates: list) -> list:
+        """Pre-flight check: detect non-Clifford gates in a circuit.
+
+        Args:
+            gates: List of (gate_name, targets, args) tuples.
+
+        Returns:
+            List of gate names that are non-Clifford (empty if all Clifford).
+        """
+        incompatible = []
+        for entry in gates:
+            gate_name = entry[0] if isinstance(entry, (list, tuple)) else entry
+            if isinstance(gate_name, str) and gate_name.upper() not in CLIFFORD_GATES:
+                incompatible.append(gate_name)
+        return incompatible
+
+    @staticmethod
+    def is_clifford_gate(gate_name: str) -> bool:
+        """Check whether a gate name is in the Clifford group."""
+        return gate_name.upper() in CLIFFORD_GATES

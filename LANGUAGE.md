@@ -1,6 +1,6 @@
-﻿# Eigen 2.4 вЂ” Mone Language Specification & Developer Reference
+﻿# Eigen 2.6 — Misery Language Specification & Developer Reference
 
-This document provides the authoritative language specification and developer reference for **Eigen 2.4 вЂ” Mone**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, and native acceleration.
+This document provides the authoritative language specification and developer reference for **Eigen 2.6 — Misery**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, advanced noise modelling, hardware-aware quantum routing, and native acceleration.
 
 ---
 
@@ -318,10 +318,51 @@ qfunc bell_state(qubit a, qubit b) {
 Decoherence and hardware readout errors can be simulated using the native `noise` statement, which applies noise channels:
 - **`noise depolarizing(p) q0`**: Applies a depolarizing channel with probability `p` $[0.0, 1.0]$.
 - **`noise bitflip(p) q0`**: Applies a probabilistic Pauli-X gate with probability `p`.
+- **`noise phaseflip(p) q0`**: Applies a probabilistic Pauli-Z gate with probability `p` (2.5+).
+- **`noise amplitude_damping(p) q0`**: Applies amplitude damping with Kraus operators (2.5+).
+- **`noise phase_damping(p) q0`**: Applies phase damping with Kraus operators (2.5+).
 
 ```eigen
 H q0
 noise depolarizing(0.02) q0  # 2% depolarizing channel noise
+```
+
+### 5.5.1 Advanced Noise Engine (2.6 «Misery»)
+
+Eigen 2.6 introduces a composable noise engine with physical T1/T2 relaxation, crosstalk, and device-specific calibration profiles:
+
+#### NoiseChannel Abstract Class
+```python
+from src.noise import NoiseChannel, NoisePipeline
+
+# Compose multiple noise channels
+pipeline = NoisePipeline()
+pipeline.add_channel(T1T2NoiseModel(t1=120.0, t2=80.0))  # IBM Sherbrooke-like
+pipeline.add_channel(CrosstalkModel(crosstalk_prob=0.001))
+```
+
+#### T1/T2 Relaxation Model
+The `T1T2NoiseModel` applies amplitude damping (T1) and phase damping (T2) based on **gate execution duration**:
+- Single-qubit gates: ~35ns
+- Two-qubit gates: ~300ns
+- Measurement: ~1000ns
+
+Longer gates accumulate more decoherence, matching real hardware behaviour.
+
+#### Crosstalk Model
+The `CrosstalkModel` introduces correlated errors on gate qubits and spectator errors on neighbouring qubits, using a coupling map for spatial awareness.
+
+#### Device Noise Profiles
+```python
+from src.noise import DeviceNoiseProfile
+
+# Load real IBM device calibration
+profile = DeviceNoiseProfile.from_ibm('ibm_sherbrooke')
+pipeline = profile.build_pipeline()
+
+# Available IBM devices: ibm_sherbrooke, ibm_brisbane, ibm_kyiv, ibm_osaka
+# Available IonQ devices: ionq_harmony, ionq_aria, ionq_forte
+# Custom JSON: DeviceNoiseProfile.from_json('calibration.json')
 ```
 
 ### 5.6 Qubit Indexing & Memory Layout Conventions
@@ -344,6 +385,74 @@ msb_dict = to_msb_first_dict(simulator.get_amplitudes_dict())
 # Reorder raw state vector lists
 msb_state_vector = reorder_state_vector(raw_state, num_qubits, source_convention="lsb", target_convention="msb")
 ```
+
+---
+
+## 5.7 Stabilizer Simulator & Clifford Gates (2.6 «Misery»)
+
+The stabilizer simulator uses the CHP (Clifford-Hadamard-Pauli) algorithm for O(n²) simulation of Clifford circuits, handling 1000+ qubits in seconds.
+
+### Clifford Gate Set
+The stabilizer simulator supports only the **Clifford group**:
+- **Single-qubit**: `H`, `S`, `X`, `Y`, `Z`
+- **Two-qubit**: `CNOT`, `CZ`, `SWAP`
+
+### Non-Clifford Gates
+Non-Clifford gates (`T`, `RX`, `RY`, `RZ`, `CCX`, `CSWAP`, `CP`, `CRX`, `CRY`, `CRZ`) raise `NonCliffordGateError` on the raw `StabilizerSimulator`.
+
+### Auto-Fallback
+When using `QuantumSimulator(sim_type='stabilizer')`, non-Clifford gates trigger an **automatic fallback** to the dense state-vector simulator with a warning. This prevents crashes and allows mixed circuits to run seamlessly.
+
+### Pre-flight Circuit Check
+```python
+from src.stabilizer_simulator import StabilizerSimulator
+
+gates = [('T', ['q0'], []), ('CNOT', ['q0', 'q1'], [])]
+incompatible = StabilizerSimulator.check_circuit_compatibility(gates)
+if incompatible:
+    print(f"Non-Clifford gates detected: {incompatible}")
+```
+
+---
+
+## 5.8 Hardware Topologies & Quantum Routing (2.6 «Misery»)
+
+Eigen 2.6 includes real quantum processor coupling maps:
+
+| Topology | Method | Description |
+|---|---|---|
+| `CouplingMap.linear(n)` | Linear chain | Simple 1D chain |
+| `CouplingMap.grid(r, c)` | 2D grid | Rectangular grid |
+| `CouplingMap.heavy_hex(d)` | **Real IBM heavy-hex** | Genuine IBM heavy-hex topology |
+| `CouplingMap.ibm_eagle()` | **IBM Eagle (127q)** | ibm_sherbrooke, ibm_brisbane, ibm_kyiv |
+| `CouplingMap.ibm_condor()` | **IBM Condor (1121q)** | Large-scale heavy-hex |
+| `CouplingMap.ionq_alltoall(n)` | **IonQ all-to-all** | Full connectivity |
+| `CouplingMap.rigetti_ring(n)` | **Rigetti ring** | Ring with wraparound |
+| `CouplingMap.google_sycamore(r, c)` | **Google Sycamore** | 2D grid |
+
+### Routing Algorithms
+- **BasicSwapRouter**: Shortest-path SWAP insertion
+- **GreedyRouter**: Look-ahead heuristic with configurable `lookahead` parameter
+- **SabreRouter**: Structure-Aware Bidirectional routing with `lookahead_weight`
+
+```python
+from src.routing.router import CouplingMap, SabreRouter
+
+coupling = CouplingMap.ibm_eagle()  # Real 127-qubit IBM topology
+router = SabreRouter(coupling)
+result = router.route(circuit_ops, logical_qubits)
+```
+
+---
+
+## 5.9 MPS Simulator with Auto Bond Dimension (2.6 «Misery»)
+
+The Matrix Product State (MPS) simulator now supports automatic bond dimension management:
+
+- **Default `max_bond_dim`**: 64 (increased from 32 in 2.5)
+- **`auto_bond_dim` mode**: Automatically increases bond dimension when truncation error exceeds `max_truncation_error`
+- **Accuracy warnings**: Emits warnings when simulation accuracy may be degraded
+- **Configurable via `QuantumSimulator`**: `mps_max_bond_dim`, `mps_auto_bond_dim`, `mps_max_truncation_error`
 
 ---
 

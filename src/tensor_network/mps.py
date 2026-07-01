@@ -2,6 +2,19 @@ import numpy as np
 import math
 import random
 import cmath
+import logging
+import warnings
+
+logger = logging.getLogger('eigen.mps')
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('[MPS] %(message)s'))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.WARNING)
+
+DEFAULT_MAX_BOND_DIM = 64
+DEFAULT_MAX_TRUNCATION_ERROR = 1e-4
+AUTO_BOND_DIM_FACTOR = 2
 
 def native_svd(matrix_2d):
     try:
@@ -17,13 +30,19 @@ def native_svd(matrix_2d):
         return np.linalg.svd(matrix_2d, full_matrices=False)
 
 class MPSSimulator:
-    def __init__(self, max_bond_dim=32, seed=None):
+    def __init__(self, max_bond_dim=DEFAULT_MAX_BOND_DIM, seed=None,
+                 auto_bond_dim=False, max_truncation_error=DEFAULT_MAX_TRUNCATION_ERROR):
         self.tensors = []       # List of np.ndarray of shape (left_bond, 2, right_bond)
         self.qubits = []        # List of qubit names in chain order
         self.qubit_map = {}     # qubit_name -> chain index
         self.max_bond_dim = max_bond_dim
+        self.auto_bond_dim = auto_bond_dim
+        self.max_truncation_error = max_truncation_error
         self.cumulative_truncation_error = 0.0
         self.last_entropy = 0.0
+        self.last_discarded_weight = 0.0
+        self._warned_degraded = False
+        self._warned_auto_increase = False
         self.rng = random.Random(seed)
         self.created_qubits = [] # Qubits in original creation order
 
@@ -45,6 +64,67 @@ class MPSSimulator:
         if name not in self.qubit_map:
             raise KeyError(f"Qubit '{name}' is not allocated in the simulator")
         return self.qubit_map[name]
+
+    def _truncate_svd(self, U, S, Vh):
+        """Truncate SVD result with optional auto bond dimension.
+
+        Returns truncated (U, S, Vh, chi) and updates tracking metrics.
+        Handles auto_bond_dim increase and accuracy warnings.
+        """
+        available = len(S)
+
+        if self.auto_bond_dim and available > self.max_bond_dim:
+            S_sum2 = np.sum(S**2)
+            if S_sum2 > 1e-15:
+                S_norm = S / np.sqrt(S_sum2)
+                for test_chi in range(self.max_bond_dim, available + 1):
+                    dw = np.sum(S_norm[test_chi:]**2) if test_chi < len(S_norm) else 0.0
+                    if dw <= self.max_truncation_error:
+                        chi = test_chi
+                        break
+                else:
+                    chi = available
+                if chi > self.max_bond_dim:
+                    self.max_bond_dim = chi
+                    if not self._warned_auto_increase:
+                        logger.info(
+                            "Auto-increased bond dimension to %d "
+                            "(truncation error threshold: %g)",
+                            chi, self.max_truncation_error
+                        )
+                        self._warned_auto_increase = True
+            else:
+                chi = min(available, self.max_bond_dim)
+        else:
+            chi = min(available, self.max_bond_dim)
+
+        S_sum2 = np.sum(S**2)
+        if S_sum2 > 1e-15:
+            S_norm = S / np.sqrt(S_sum2)
+            discarded_weight = np.sum(S_norm[chi:]**2) if chi < len(S_norm) else 0.0
+            self.cumulative_truncation_error += discarded_weight
+            self.last_discarded_weight = discarded_weight
+
+            schmidt = S_norm[:chi]
+            schmidt_sum2 = np.sum(schmidt**2)
+            if schmidt_sum2 > 1e-15:
+                schmidt = schmidt / np.sqrt(schmidt_sum2)
+                self.last_entropy = -float(np.sum(schmidt**2 * np.log2(schmidt**2 + 1e-15)))
+
+            if discarded_weight > self.max_truncation_error and not self._warned_degraded:
+                logger.warning(
+                    "Simulation accuracy may be degraded: "
+                    "discarded weight %g exceeds threshold %g "
+                    "(cumulative error: %g, bond dim: %d/%d available)",
+                    discarded_weight, self.max_truncation_error,
+                    self.cumulative_truncation_error, chi, available
+                )
+                self._warned_degraded = True
+
+        U = U[:, :chi]
+        S = S[:chi]
+        Vh = Vh[:chi, :]
+        return U, S, Vh, chi
 
     def apply_1qubit_gate(self, name: str, gate_matrix: list[list[complex]]):
         idx = self.get_qubit_index(name)
@@ -136,25 +216,8 @@ class MPSSimulator:
         # SVD
         U, S, Vh = native_svd(theta_mat)
         
-        # Truncate bond dimension
-        chi = min(len(S), self.max_bond_dim)
-        
-        # Track metrics
-        S_sum2 = np.sum(S**2)
-        if S_sum2 > 1e-15:
-            S_norm = S / np.sqrt(S_sum2)
-            discarded_weight = np.sum(S_norm[chi:]**2) if chi < len(S_norm) else 0.0
-            self.cumulative_truncation_error += discarded_weight
-            
-            schmidt = S_norm[:chi]
-            schmidt_sum2 = np.sum(schmidt**2)
-            if schmidt_sum2 > 1e-15:
-                schmidt = schmidt / np.sqrt(schmidt_sum2)
-                self.last_entropy = -float(np.sum(schmidt**2 * np.log2(schmidt**2 + 1e-15)))
-        
-        U = U[:, :chi]
-        S = S[:chi]
-        Vh = Vh[:chi, :]
+        # Truncate bond dimension with auto-increase support
+        U, S, Vh, chi = self._truncate_svd(U, S, Vh)
         
         # New tensors
         # New A shape: (L, 2_B, chi)
@@ -208,25 +271,8 @@ class MPSSimulator:
         res_mat = res.reshape(L * d1, d2 * R)
         U_svd, S, Vh = native_svd(res_mat)
         
-        # Truncate
-        chi = min(len(S), self.max_bond_dim)
-        
-        # Track metrics
-        S_sum2 = np.sum(S**2)
-        if S_sum2 > 1e-15:
-            S_norm = S / np.sqrt(S_sum2)
-            discarded_weight = np.sum(S_norm[chi:]**2) if chi < len(S_norm) else 0.0
-            self.cumulative_truncation_error += discarded_weight
-            
-            schmidt = S_norm[:chi]
-            schmidt_sum2 = np.sum(schmidt**2)
-            if schmidt_sum2 > 1e-15:
-                schmidt = schmidt / np.sqrt(schmidt_sum2)
-                self.last_entropy = -float(np.sum(schmidt**2 * np.log2(schmidt**2 + 1e-15)))
-        
-        U_svd = U_svd[:, :chi]
-        S = S[:chi]
-        Vh = Vh[:chi, :]
+        # Truncate with auto-increase support
+        U_svd, S, Vh, chi = self._truncate_svd(U_svd, S, Vh)
         
         self.tensors[i] = U_svd.reshape(L, d1, chi)
         self.tensors[j] = (np.diag(S) @ Vh).reshape(chi, d2, R)
@@ -439,3 +485,9 @@ class MPSSimulator:
 
     def get_cumulative_truncation_error(self) -> float:
         return self.cumulative_truncation_error
+
+    def get_last_discarded_weight(self) -> float:
+        return self.last_discarded_weight
+
+    def get_max_bond_dim(self) -> int:
+        return self.max_bond_dim

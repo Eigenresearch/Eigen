@@ -1,14 +1,21 @@
 import os
+import logging
 import platform
 
+logger = logging.getLogger('eigen.gpu')
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter('[GPU] %(message)s'))
+    logger.addHandler(_handler)
+    logger.setLevel(logging.WARNING)
+
 def detect_gpu_platform() -> str:
-    # 1. Check for CUDA
     try:
         import cupy
         return "cuda"
     except ImportError:
         pass
-        
+
     try:
         import torch
         if torch.cuda.is_available():
@@ -19,10 +26,10 @@ def detect_gpu_platform() -> str:
             return "metal"
     except ImportError:
         pass
-        
+
     if platform.system() == 'Darwin' and platform.machine() == 'arm64':
         return "metal"
-        
+
     return "none"
 
 class GPUEngine:
@@ -31,36 +38,36 @@ class GPUEngine:
             self.platform = detect_gpu_platform()
         else:
             self.platform = platform_name
-            
+
         self.xp = None
         self.device_state = None
-        
+
         if self.platform == 'cuda':
             try:
                 import cupy as cp
                 self.xp = cp
-                print("[GPU] Using CuPy CUDA acceleration.")
+                logger.info("Using CuPy CUDA acceleration.")
             except ImportError:
                 import numpy as np
                 self.xp = np
                 self.platform = 'none'
-                print("[GPU] CuPy not found. Falling back to CPU (NumPy).")
+                logger.warning("CuPy not found. Falling back to CPU (NumPy).")
         elif self.platform in ('rocm', 'metal'):
             try:
                 import torch
                 self.xp = torch
                 self.device = 'cuda' if self.platform == 'rocm' else 'mps'
-                print(f"[GPU] Using PyTorch {self.platform.upper()} acceleration on {self.device}.")
+                logger.info("Using PyTorch %s acceleration on %s.", self.platform.upper(), self.device)
             except ImportError:
                 import numpy as np
                 self.xp = np
                 self.platform = 'none'
-                print(f"[GPU] PyTorch not found. Falling back to CPU (NumPy).")
+                logger.warning("PyTorch not found. Falling back to CPU (NumPy).")
         else:
             import numpy as np
             self.xp = np
             self.platform = 'none'
-            print("[GPU] Running on CPU (NumPy).")
+            logger.info("Running on CPU (NumPy).")
 
     def initialize_state(self, num_qubits: int):
         size = 1 << num_qubits
@@ -75,19 +82,19 @@ class GPUEngine:
     def apply_gate(self, targets: list[int], gate_matrix: list[list[complex]]):
         if self.device_state is None:
             return
-            
+
         if self.platform in ('cuda', 'none'):
             num_qubits = int(self.xp.log2(len(self.device_state)))
             tensor = self.device_state.reshape([2] * num_qubits)
             U = self.xp.array(gate_matrix, dtype=complex).reshape([2] * (2 * len(targets)))
-            
+
             axes = (list(range(len(targets), 2 * len(targets))), targets)
             new_tensor = self.xp.tensordot(U, tensor, axes=axes)
-            
+
             unused_axes = [i for i in range(num_qubits) if i not in targets]
             current_order = targets + unused_axes
             inv_permutation = [current_order.index(i) for i in range(num_qubits)]
-            
+
             tensor = self.xp.transpose(new_tensor, inv_permutation)
             self.device_state = tensor.ravel()
         else:
@@ -95,14 +102,14 @@ class GPUEngine:
             num_qubits = int(self.xp.log2(self.device_state.numel()))
             tensor = self.device_state.view([2] * num_qubits)
             U = torch.tensor(gate_matrix, dtype=torch.complex128, device=self.device).view([2] * (2 * len(targets)))
-            
+
             dims = (list(range(len(targets), 2 * len(targets))), targets)
             new_tensor = torch.tensordot(U, tensor, dims=dims)
-            
+
             unused_axes = [i for i in range(num_qubits) if i not in targets]
             current_order = targets + unused_axes
             inv_permutation = [current_order.index(i) for i in range(num_qubits)]
-            
+
             tensor = new_tensor.permute(inv_permutation)
             self.device_state = tensor.reshape(-1)
 

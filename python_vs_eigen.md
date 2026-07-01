@@ -1,4 +1,4 @@
-# Language Benchmark: Native Python vs Eigen VM (Nova 2.6)
+# Language Benchmark: Native Python vs Eigen VM (Misery 2.6)
 
 Comparison of execution time between native Python execution and Eigen VM (with JIT compilation enabled) across 30 runs.
 
