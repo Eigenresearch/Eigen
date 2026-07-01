@@ -1,11 +1,36 @@
-# Ignore research paper as requested
+# Ignore research paper sources and build artifacts
 papers/
 paper_gen/
 paper.pdf
+paper.aux
+paper.log
+paper.out
+paper.tex
+paper.toc
 paper_build.md
 test_math.md
 test_math.pdf
+scripts/abstract_block.tex
+scripts/title_block.tex
+scripts/generate_paper_pdf.js
 photo_2026-06-23_17-28-06.jpg
+
+# Ignore benchmark HTML dashboards and temp results
+benchmark_dashboard.html
+complex_dashboard.html
+benchmark_comparison.md
+complex_extreme_results.md
+extensive_results.md
+python_vs_eigen.md
+tests_run_results.md
+release-report.md
+
+# Ignore old roadmap and audit files
+roadmap_2_5.md
+audit.md
+
+# Ignore agent configs
+.agents/
 
 # Ignore caches
 __pycache__/

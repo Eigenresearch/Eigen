@@ -7,10 +7,13 @@
 [![Tests](https://img.shields.io/badge/tests-449%20passed-brightgreen.svg)](tests/)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%E2%80%A2%20macOS%20%E2%80%A2%20Linux-blue.svg)](https://github.com/Eigenresearch/Eigen/releases)
 [![Quantum](https://img.shields.io/badge/quantum-1000%2B%20qubits-purple.svg)](https://github.com/Eigenresearch/Eigen)
+[![Paper](https://img.shields.io/badge/paper-research-yellow.svg)](https://drive.google.com/file/d/1YovOIB1VdZUUUfsKQw4WcI6BL_Ekjh2O/view?usp=drivesdk)
 
 > **«Faster. Harder. Less Python. More Quantum.»**
 >
 > Eigen 2.6 «Misery» is a **standalone, domain-specific, hybrid classical-quantum programming language** with a compiled runtime, **1.8x faster** classical loops than CPython, a **1000+ qubit stabilizer simulator**, advanced noise modelling with T1/T2 relaxation and crosstalk, real IBM device topologies, SABRE quantum routing, ZX-calculus formal verification, LLVM/QIR AOT compilation, and a full **Inno Setup GUI installer** for Windows.
+>
+> **Research Paper:** [Eigen: A Runtime-First Hybrid Classical-Quantum Programming Language](https://drive.google.com/file/d/1YovOIB1VdZUUUfsKQw4WcI6BL_Ekjh2O/view?usp=drivesdk)
 
 ---
 
@@ -1050,6 +1053,7 @@ See [MIGRATION.md](MIGRATION.md) for the full 2.5 → 2.6 migration guide.
 
 ## Community & Contributing
 
+- **Research Paper:** [Eigen: A Runtime-First Hybrid Classical-Quantum Programming Language](https://drive.google.com/file/d/1YovOIB1VdZUUUfsKQw4WcI6BL_Ekjh2O/view?usp=drivesdk)
 - **License:** [MIT License](LICENSE) — free for all use
 - **Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup
 - **Code of Conduct:** See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
@@ -1095,5 +1099,6 @@ See [MIGRATION.md](MIGRATION.md) for the full 2.5 → 2.6 migration guide.
   <a href="https://github.com/Eigenresearch/Eigen/releases">Releases</a> •
   <a href="https://github.com/Eigenresearch/Eigen/issues">Issues</a> •
   <a href="LANGUAGE.md">Language Spec</a> •
-  <a href="MIGRATION.md">Migration Guide</a>
+  <a href="MIGRATION.md">Migration Guide</a> •
+  <a href="https://drive.google.com/file/d/1YovOIB1VdZUUUfsKQw4WcI6BL_Ekjh2O/view?usp=drivesdk">Research Paper</a>
 </p>
