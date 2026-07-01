@@ -61,6 +61,10 @@ def build_windows_installer(dist_dir):
     iscc_path = shutil.which("iscc")
 
     if iscc_path and os.path.exists(installer_script):
+        icon_path = os.path.join("installer", "eigen_icon.ico")
+        if not os.path.exists(icon_path):
+            print("Warning: eigen_icon.ico not found. Removing SetupIconFile from script...")
+
         print(f"Building Inno Setup installer from {installer_script}...")
         run_cmd([iscc_path, installer_script], shell=True)
 
