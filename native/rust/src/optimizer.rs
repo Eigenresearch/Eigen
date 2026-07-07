@@ -251,9 +251,15 @@ pub fn optimize_eqir_native<'py>(py: Python<'py>, graph_dict: Bound<'py, PyDict>
     let rotation_gates: HashSet<&str> = ["RX", "RY", "RZ"].iter().cloned().collect();
     
     while !worklist.is_empty() && iterations < max_iterations {
-        // Pop an element from worklist
+        // Audit §2.3 (determinism): the prior code used
+        // `*worklist.iter().next().unwrap()`, which is non-deterministic
+        // because HashSet iteration order depends on the RandomState seed.
+        // Different pop orderings can yield different sets of surviving
+        // nodes (early rewrites change the graph), making the canonical hash
+        // of identical inputs vary across runs. Use the smallest id first,
+        // matching the Python optimizer's deterministic pop.
         let node_id = {
-            let id = *worklist.iter().next().unwrap();
+            let id = *worklist.iter().min().unwrap();
             worklist.remove(&id);
             id
         };
@@ -559,7 +565,13 @@ pub fn optimize_eqir_native<'py>(py: Python<'py>, graph_dict: Bound<'py, PyDict>
     ret_dict.set_item("optimizations_count", optimizations_count)?;
     
     let ret_nodes = PyList::empty_bound(py);
-    for (_, node) in nodes_map {
+    // Audit §2.3 (determinism): sort nodes by id before serializing so the
+    // returned list order is byte-identical across runs regardless of
+    // HashMap/HashSet hash-seed sensitivity.
+    let mut sorted_ids: Vec<usize> = nodes_map.keys().cloned().collect();
+    sorted_ids.sort();
+    for id in sorted_ids {
+        let node = nodes_map.remove(&id).unwrap();
         ret_nodes.append(node_to_dict(&node, py)?)?;
     }
     ret_dict.set_item("nodes", ret_nodes)?;

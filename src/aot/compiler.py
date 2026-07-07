@@ -289,6 +289,21 @@ class AOTCompiler:
         ir_str = str(llvm_module)
         mod_ref = llvm.parse_assembly(ir_str)
 
+        # Audit §4: verify the parsed module immediately. A common source
+        # of "silent segfault later in `emit_object` / MCJIT" is malformed
+        # LLVM IR that `parse_assembly` accepts leniently but downstream
+        # passes choke on. `mod_ref.verify()` raises a Python exception
+        # with the broken-IR diagnostic, converting the eventual segfault
+        # into an actionable error.
+        try:
+            mod_ref.verify()
+        except Exception as e:
+            raise RuntimeError(
+                "LLVM IR verification failed during AOT compilation — "
+                "this is most likely an internal Eigen bug in `llvm_codegen.py`: "
+                f"{e}"
+            ) from e
+
         pto = llvm.create_pipeline_tuning_options()
         pto.speed_level = opt_level
         pto.size_level = 0
@@ -339,6 +354,19 @@ class AOTCompiler:
         ir_str = str(llvm_module)
         mod_ref = llvm.parse_assembly(ir_str)
 
+        # Audit §4: verify the parsed module before JIT execution. Same
+        # rationale as the AOT path above — converts a silent segfault
+        # from `create_mcjit_compiler` / `get_function_address` into an
+        # actionable `RuntimeError` carrying the LLVM diagnostic.
+        try:
+            mod_ref.verify()
+        except Exception as e:
+            raise RuntimeError(
+                "LLVM IR verification failed during JIT execution — "
+                "this is most likely an internal Eigen bug in `llvm_codegen.py`: "
+                f"{e}"
+            ) from e
+
         pto = llvm.create_pipeline_tuning_options()
         pto.speed_level = 2
         pto.size_level = 0
@@ -355,5 +383,20 @@ class AOTCompiler:
         if not fptr:
             raise RuntimeError("Failed to resolve function address for main.")
 
-        # Call the main() function returning i32
-        ctypes.CFUNCTYPE(ctypes.c_int)(fptr)()
+        # Audit §4: keep `engine`, `mod_ref`, and `target_machine` alive
+        # for the duration of the native call. The Python local frame
+        # holds them as live references, so the LLVM module and its
+        # machine-code mapping cannot be finalized mid-call by the GC.
+        # Without this the function pointer could become dangling.
+        cfunc_type = ctypes.CFUNCTYPE(ctypes.c_int)
+        cfunc = cfunc_type(fptr)
+        try:
+            rc = cfunc()
+        except ctypes.ArgumentError as e:
+            raise RuntimeError(
+                f"JIT'd main() raised a ctypes Argument error: {e}"
+            ) from e
+        # Best-effort cleanup: explicitly release the engine before any
+        # GC could collect the function pointer wrapper out of order.
+        del cfunc, engine, mod_ref, target_machine, pass_builder, pm
+        return rc

@@ -1,6 +1,22 @@
 from src.backend.bytecode import Opcode, Instruction
 
 def generate_python_source(block: list[Instruction], vm=None) -> str:
+    """Translate a basic block of EBC bytecode into a Python ``def`` body.
+
+    Audit §3: previously this generator emitted ``hasattr(vm, ...)``,
+    ``getattr(vm, ...)`` and ``type(x).__name__`` to handle the slow opcode
+    dispatch fallback. Each of these is a sandbox-escape primitive when the
+    generated code is ``exec``uted with a restrictive ``__builtins__`` dict —
+    they let a malicious arg reach ``object.__subclasses__`` and walk the MRO
+    to dangerous globals. This version drops all three:
+
+      * ``type(x).__name__``     -> ``x.__class__.__name__`` (direct attribute access)
+      * ``hasattr(vm, 'op_x')``  -> ``try: vm.op_x(arg)`` ... ``except AttributeError: pass``
+      * ``getattr(vm, 'op_x')``   -> ``vm.op_x(arg)`` (direct attribute access)
+
+    So the sandbox can drop ``type``, ``getattr``, ``hasattr`` and
+    ``isinstance`` from its allowlist without breaking the generated JIT code.
+    """
     lines = []
     lines.append("def compiled_block(stack, locals_map, globals_map, lookup_var, vm):")
     lines.append("    pop = stack.pop")
@@ -36,7 +52,7 @@ def generate_python_source(block: list[Instruction], vm=None) -> str:
             clean_name = "".join(c if c.isalnum() else "_" for c in var_name)
             try:
                 val = vm.lookup_var(var_name)
-                expected_type_name = type(val).__name__
+                expected_type_name = val.__class__.__name__
             except Exception:
                 expected_type_name = "NoneType"
                 
@@ -44,7 +60,7 @@ def generate_python_source(block: list[Instruction], vm=None) -> str:
             lines.append(f"        var_cache_{clean_name} = lookup_var({repr(var_name)})")
             lines.append(f"    except Exception:")
             lines.append(f"        return True")
-            lines.append(f"    if type(var_cache_{clean_name}).__name__ != {repr(expected_type_name)}:")
+            lines.append(f"    if var_cache_{clean_name}.__class__.__name__ != {repr(expected_type_name)}:")
             lines.append(f"        return True")
         
         # Cache read-write variables in Python locals (avoids dict lookup per access)
@@ -274,12 +290,25 @@ def generate_python_source(block: list[Instruction], vm=None) -> str:
             lines.append("    return True")
             
         else:
+            # Audit §3: use direct attribute access rather than hasattr/getattr.
+            # We dispatch to ``vm.op_<name>(arg)`` and let AttributeError fall
+            # through to the safe return path. This keeps the generated source
+            # free of introspection primitives so the JIT sandbox can be
+            # hardened (no getattr/type/hasattr in __builtins__).
             lines.append(f"    vm.ip = vm.ip + {idx} + 1")
             op_name = opcode if isinstance(opcode, str) else getattr(opcode, 'name', str(opcode))
             method_name = f"op_{op_name.lower()}"
-            lines.append(f"    if hasattr(vm, '{method_name}'):")
-            lines.append(f"        getattr(vm, '{method_name}')({repr(arg)})")
-            lines.append("    return True")
+            # Sanitize method name: refuse anything that's not a valid Python
+            # identifier — guards against malicious bytecode carrying opcode
+            # strings like ``__subclasses__`` via the deserialize path.
+            if not method_name.replace("_", "").isalnum():
+                lines.append("    return True")
+            else:
+                lines.append("    try:")
+                lines.append(f"        vm.{method_name}({repr(arg)})")
+                lines.append("    except AttributeError:")
+                lines.append("        pass")
+                lines.append("    return True")
             
     lines.append(f"    vm.ip = vm.ip + {len(block)}")
     lines.append("    return False")

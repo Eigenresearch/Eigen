@@ -1,0 +1,41 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+qubit q3
+qubit anc
+H q0
+H q1
+H q2
+H q3
+X q0
+X q2
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q0
+X q2
+H q0
+H q1
+H q2
+H q3
+X q0
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q0
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3

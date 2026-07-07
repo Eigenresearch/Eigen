@@ -518,40 +518,127 @@ class SabreRouter:
             best_swap = None
             best_score = float('inf')
 
-            for edge_q1, edge_q2 in self.coupling_map.edges:
-                trial_mapping = dict(mapping)
-                lq_a = reverse_mapping.get(edge_q1)
-                lq_b = reverse_mapping.get(edge_q2)
+            # Audit §1.2: prefer the Rust kernel `eigen_native.fast_sabre_swap_score`
+            # for the inner swap-scoring loop when available (it implements the
+            # same arithmetic but with deterministic lexicographic tie-breaking,
+            # which keeps routing output byte-stable w.r.t. input edge order).
+            try:
+                import eigen_native as native
+                rust_kernel = native.fast_sabre_swap_score
+            except (ImportError, AttributeError):
+                rust_kernel = None
 
-                if lq_a is not None:
-                    trial_mapping[lq_a] = edge_q2
-                if lq_b is not None:
-                    trial_mapping[lq_b] = edge_q1
-
-                front_score = 0.0
-                for op in front_layer:
-                    p0 = trial_mapping[op['targets'][0]]
-                    p1 = trial_mapping[op['targets'][1]]
-                    front_score += self.coupling_map.distance(p0, p1)
-                front_score /= len(front_layer)
-
-                extended_score = 0.0
-                if extended_layer:
-                    count = 0
-                    for op in extended_layer[:5]:
-                        if len(op['targets']) == 2:
-                            p0 = trial_mapping[op['targets'][0]]
-                            p1 = trial_mapping[op['targets'][1]]
-                            extended_score += self.coupling_map.distance(p0, p1)
-                            count += 1
-                    if count > 0:
-                        extended_score /= count
-
-                score = front_score + self.lookahead_weight * extended_score
-
-                if score < best_score:
-                    best_score = score
+            if rust_kernel is not None:
+                # Convert front/extended layers to (l0, l1) tuples of
+                # logical indices that the Rust kernel expects. Logical
+                # qubit *keys* can be either ints (`0`, `1`, …) or strings
+                # (`'q0'`, `'q1'`, …); we build a stable integer-to-name
+                # mapping so the Rust kernel only ever sees integer
+                # indices into `mapping_list`.
+                logical_names = sorted(mapping.keys())
+                name_to_idx = {name: i for i, name in enumerate(logical_names)}
+                mapping_list = [mapping[name] for name in logical_names]
+                front_pairs = [
+                    (name_to_idx[op['targets'][0]], name_to_idx[op['targets'][1]])
+                    for op in front_layer
+                    if len(op['targets']) == 2
+                    and op['targets'][0] in name_to_idx
+                    and op['targets'][1] in name_to_idx
+                ]
+                extended_pairs = [
+                    (name_to_idx[op['targets'][0]], name_to_idx[op['targets'][1]])
+                    for op in extended_layer
+                    if len(op['targets']) == 2
+                    and op['targets'][0] in name_to_idx
+                    and op['targets'][1] in name_to_idx
+                ]
+                # Distance matrix: the Rust kernel needs the full
+                # `num_physical × num_physical` distance matrix. The
+                # `CouplingMap.distance` method supports caching — call
+                # it once per pair to populate the cache, then expose the
+                # matrix as a list of lists. `n_phys` is derived from all
+                # physical indices appearing either in the coupling-map
+                # edges or in the current mapping values, so it covers
+                # every reachable qubit.
+                all_phys = set()
+                for (p0, p1) in self.coupling_map.edges:
+                    all_phys.add(p0)
+                    all_phys.add(p1)
+                all_phys.update(mapping.values())
+                n_phys = (max(all_phys) + 1) if all_phys else 0
+                # `CouplingMap.distance` returns `float('inf')` for pairs that
+                # have no path between them in the coupling graph. The Rust
+                # kernel expects `usize`, so translate `inf` to a large but
+                # finite sentinel (chosen to comfortably exceed the maximum
+                # theoretical shortest-path length on a 10_000-node
+                # coupling graph) — this preserves ranking while keeping the
+                # sum finite for f64 comparison.
+                INF_SENTINEL = 99999
+                def _dist_to_int(d):
+                    if d == float('inf'):
+                        return INF_SENTINEL
+                    return int(d)
+                dist_matrix = [
+                    [_dist_to_int(self.coupling_map.distance(i, j)) for j in range(n_phys)]
+                    for i in range(n_phys)
+                ]
+                # `CouplingMap.edges` is already stored as a set of
+                # `(min, max)` pairs; preserve that ordering for the
+                # Rust kernel (which iterates them in input order).
+                phys_edges = list(self.coupling_map.edges)
+                result_pair = rust_kernel(
+                    phys_edges,
+                    dist_matrix,
+                    mapping_list,
+                    front_pairs,
+                    extended_pairs,
+                    self.lookahead_weight,
+                )
+                if result_pair is not None:
+                    edge_q1, edge_q2, score = result_pair
                     best_swap = (edge_q1, edge_q2)
+                    best_score = score
+            else:
+                for edge_q1, edge_q2 in self.coupling_map.edges:
+                    trial_mapping = dict(mapping)
+                    lq_a = reverse_mapping.get(edge_q1)
+                    lq_b = reverse_mapping.get(edge_q2)
+
+                    if lq_a is not None:
+                        trial_mapping[lq_a] = edge_q2
+                    if lq_b is not None:
+                        trial_mapping[lq_b] = edge_q1
+
+                    front_score = 0.0
+                    for op in front_layer:
+                        p0 = trial_mapping[op['targets'][0]]
+                        p1 = trial_mapping[op['targets'][1]]
+                        front_score += self.coupling_map.distance(p0, p1)
+                    front_score /= len(front_layer)
+
+                    extended_score = 0.0
+                    if extended_layer:
+                        count = 0
+                        for op in extended_layer[:5]:
+                            if len(op['targets']) == 2:
+                                p0 = trial_mapping[op['targets'][0]]
+                                p1 = trial_mapping[op['targets'][1]]
+                                extended_score += self.coupling_map.distance(p0, p1)
+                                count += 1
+                        if count > 0:
+                            extended_score /= count
+
+                    score = front_score + self.lookahead_weight * extended_score
+
+                    # Deterministic tie-break: strictly smaller score wins;
+                    # equal scores go to the lexicographically smallest
+                    # (edge_q1, edge_q2), matching `fast_sabre_swap_score`.
+                    if best_swap is None or score < best_score or (
+                        score == best_score and (edge_q1, edge_q2) < best_swap
+                    ):
+                        best_score = score
+                        best_swap = (edge_q1, edge_q2)
+
 
             if best_swap is None:
                 raise ValueError("SABRE Router could not find any valid SWAP.")

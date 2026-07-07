@@ -169,8 +169,9 @@ class TestQuantumSimulator(unittest.TestCase):
         from src.backend.vm import EigenVM
         from src.frontend.lexer import Lexer
         from src.frontend.parser import Parser
-        
-        # 1. 2 Qubits: should route to dense
+
+        # 1. 2 Qubits + Clifford-only gates: routes to stabilizer (sol.md §5.1
+        # "Только Clifford → Stabilizer").
         code_dense = """
         eigen 1.0
         qubit q0
@@ -181,54 +182,72 @@ class TestQuantumSimulator(unittest.TestCase):
         lexer = Lexer(code_dense)
         parser = Parser(lexer.tokenize())
         ast = parser.parse()
-        
+
         compiler = EBCCompiler()
         instructions = compiler.compile_ast(ast)
-        
+
         vm = EigenVM(sim_type='auto')
         vm.execute(instructions)
-        # Should be dense backend!
+        self.assertEqual(vm.simulator.sim_type, 'stabilizer')
+
+        # 1b. 2 Qubits with a non-Clifford T → dense statevector.
+        code_dense2 = """
+        eigen 1.0
+        qubit q0
+        qubit q1
+        H q0
+        T q0
+        CNOT q0, q1
+        """
+        lexer = Lexer(code_dense2)
+        parser = Parser(lexer.tokenize())
+        ast = parser.parse()
+        instructions = compiler.compile_ast(ast)
+        vm = EigenVM(sim_type='auto')
+        vm.execute(instructions)
         self.assertEqual(vm.simulator.sim_type, 'dense')
-        
-        # 2. 20 Qubits with few entangling gates (MPS)
+
+        # 2. 20 Qubits + low entanglement ratio + non-Clifford T → MPS.
         code_mps = ["eigen 1.0"]
         for i in range(20):
             code_mps.append(f"qubit q{i}")
         for i in range(20):
             code_mps.append(f"H q{i}")
+        code_mps.append("T q0")  # Force non-Clifford so stabilizer doesn't win.
         # Add 5 CNOT gates (ratio = 5/20 = 0.25 < 1.5)
         for i in range(5):
             code_mps.append(f"CNOT q{i}, q{i+1}")
-        
+
         lexer = Lexer("\n".join(code_mps))
         parser = Parser(lexer.tokenize())
         ast = parser.parse()
         instructions = compiler.compile_ast(ast)
-        
+
         vm = EigenVM(sim_type='auto')
         vm.execute(instructions)
-        # Should be mps backend!
         self.assertEqual(vm.simulator.sim_type, 'mps')
-        
-        # 3. 20 Qubits with many entangling gates (Sparse)
+
+        # 3. 30 Qubits + many entangling gates + non-Clifford T → sparse.
+        # 30 qubits exceeds the dense statevector cap (25), so the selector
+        # falls through to the sparse overflow fallback.
         code_sparse = ["eigen 1.0"]
-        for i in range(20):
+        for i in range(30):
             code_sparse.append(f"qubit q{i}")
         code_sparse.append("H q0")
-        for i in range(1, 20):
+        code_sparse.append("T q0")  # Force non-Clifford.
+        for i in range(1, 30):
             code_sparse.append(f"X q{i}")
-        # Add 35 CNOT gates (ratio = 35/20 = 1.75 >= 1.5)
-        for i in range(35):
-            code_sparse.append(f"CNOT q{i % 19}, q{(i + 1) % 19}")
-            
+        # Add 45 CNOT gates (ratio = 45/30 = 1.5 ≥ 1.5; high entanglement)
+        for i in range(45):
+            code_sparse.append(f"CNOT q{i % 29}, q{(i + 1) % 29}")
+
         lexer = Lexer("\n".join(code_sparse))
         parser = Parser(lexer.tokenize())
         ast = parser.parse()
         instructions = compiler.compile_ast(ast)
-        
+
         vm = EigenVM(sim_type='auto')
         vm.execute(instructions)
-        # Should be sparse backend!
         self.assertEqual(vm.simulator.sim_type, 'sparse')
 
 if __name__ == "__main__":

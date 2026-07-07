@@ -1,0 +1,13 @@
+eigen 1.0
+
+qubit q0  # decision bit
+qubit q1  # ancilla
+
+X q1
+H q0
+H q1
+# Oracle for f(x)=x: CNOT q0 -> q1
+CNOT q0, q1
+# Final Hadamards
+H q0
+H q1

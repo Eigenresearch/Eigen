@@ -74,10 +74,18 @@ class EBCCompiler:
         main_start = Label("main_start")
         self.emit(Opcode.JMP, main_start)
 
+        # Forward-reference prepass: register ALL function labels before any
+        # body is compiled so a function can call another function declared
+        # later in the same program (mutual recursion). Without this prepass
+        # the unresolved callee would fall back to the stdlib path and
+        # raise `ValueError: Invalid stdlib function call` at run time.
         for node in program.body:
             if isinstance(node, (QFuncDeclNode, FuncDeclNode)):
-                func_label = Label(f"func_{node.name}")
-                self.qfuncs[node.name] = func_label
+                self.qfuncs[node.name] = Label(f"func_{node.name}")
+
+        for node in program.body:
+            if isinstance(node, (QFuncDeclNode, FuncDeclNode)):
+                func_label = self.qfuncs[node.name]
                 
                 self.emit_label(func_label)
                 self.emit(Opcode.ENTER_FRAME)

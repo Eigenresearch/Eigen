@@ -1,0 +1,19 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+
+H q0
+H q1
+# Oracle for |11>: CZ inverts |11> phase
+CZ q0, q1
+# Diffusion operator: H - X - CZ - X - H
+H q0
+H q1
+X q0
+X q1
+CZ q0, q1
+X q0
+X q1
+H q0
+H q1

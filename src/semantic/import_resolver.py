@@ -3,9 +3,14 @@ import concurrent.futures
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.frontend.ast import ProgramNode, QFuncDeclNode, ImportNode, FuncDeclNode, StructDeclNode, EnumDeclNode
+from src.compiler_optimizations import ImportCache, LazyModuleLoader
 
 # Cache mapping file_path -> (mtime, ProgramNode)
 _PARSED_AST_CACHE = {}
+# §1.2 — File-hash-based import cache for unchanged modules
+_IMPORT_CACHE = ImportCache()
+# §1.2 — Lazy module loader for on-demand parsing
+_LAZY_LOADER = LazyModuleLoader()
 
 class ImportResolver:
     def __init__(self, workspace_root: str, stdlib_root: str | None = None):
@@ -17,6 +22,11 @@ class ImportResolver:
         self.resolved_modules = {}  # module_path (str) -> ProgramNode
 
     def resolve_module_file(self, module_path: str) -> str:
+        # §1.2 — Check import cache first
+        cached_path, fresh = _IMPORT_CACHE.get(module_path)
+        if cached_path and fresh:
+            return cached_path
+
         std_modules = {'math', 'std', 'collections', 'random', 'io', 'time', 'string', 'linalg', 'quantum'}
         relative_path = module_path.replace('.', '/') + ".eig"
         first_part = module_path.split('.')[0]
@@ -25,14 +35,17 @@ class ImportResolver:
         if first_part in std_modules:
             stdlib_path = os.path.join(self.stdlib_root, relative_path)
             if os.path.isfile(stdlib_path):
+                _IMPORT_CACHE.put(module_path, stdlib_path, stdlib_path)
                 return stdlib_path
 
         local_path = os.path.join(self.workspace_root, relative_path)
         if os.path.isfile(local_path):
+            _IMPORT_CACHE.put(module_path, local_path, local_path)
             return local_path
 
         stdlib_path = os.path.join(self.stdlib_root, relative_path)
         if os.path.isfile(stdlib_path):
+            _IMPORT_CACHE.put(module_path, stdlib_path, stdlib_path)
             return stdlib_path
 
         raise FileNotFoundError(
@@ -66,6 +79,21 @@ class ImportResolver:
             cached = _PARSED_AST_CACHE.get(file_path)
             if cached and cached[0] == content_hash:
                 return cached[1]
+
+            # §1.2 — LazyModuleLoader: register a lazy loader for
+            # this file so it's only re-parsed on demand.
+            module_name = os.path.basename(file_path).replace('.eig', '')
+            if not _LAZY_LOADER.is_loaded(module_name):
+                def _make_loader(path=file_path, ch=content_hash):
+                    def _load():
+                        with open(path, 'r', encoding='utf-8') as f2:
+                            c = f2.read()
+                        lexer = Lexer(c)
+                        tokens = lexer.tokenize()
+                        parser = Parser(tokens)
+                        return parser.parse()
+                    return _load
+                _LAZY_LOADER.register(module_name, _make_loader())
 
             lexer = Lexer(content)
             tokens = lexer.tokenize()

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import threading
 from collections import OrderedDict
 from src.backend.bytecode import Opcode, Instruction
 
@@ -49,19 +50,77 @@ def get_function_hash(instructions_segment: list[Instruction]) -> str:
     return hashlib.sha256(data_str.encode('utf-8')).hexdigest()
 
 
-class JITCompiler:
-    GLOBAL_CACHE = LRUCache(maxsize=1024)
-    GLOBAL_EXEC_COUNTS = {}
-    GLOBAL_EXEC_COUNTS_MAX = 4096
-    DEFAULT_HOT_THRESHOLD = 3
-    _inline_counter = 0
+def _build_sandbox_globals() -> dict:
+    """Build the restrictive globals dict for ``exec`` of JIT-compiled blocks.
 
-    def __init__(self, vm, hot_threshold: int = None, exec_counts_max: int = None):
+    Audit §3: the previous sandbox used ``{"__builtins__": {}} + {type, getattr,
+    hasattr, isinstance, ...}``. The four introspection primitives
+    ``type``/``getattr``/``hasattr``/``isinstance`` are well-known sandbox-escape
+    vectors — they let a generated block walk the MRO via
+    ``type(obj).__subclasses__()`` and reach ``os`` / builtins. We drop them
+    entirely. The generated fast-loop/JIT code (see ``native_codegen.py``) uses
+    only direct attribute access (``vm.op_x(arg)``, ``x.__class__.__name__``),
+    dict/list/arithmetic ops, and ``len``/``bool``/``int``/``float``/``str`` for
+    literal coercion. None of these need the four escape primitives.
+
+    CAVEAT: this is a defense in depth, not OS-level isolation. The audit
+    explicitly notes that the only *complete* defence against untrusted code is
+    a separate process / container / microVM, or to skip Python ``exec``
+    entirely and keep JIT within the bytecode VM. Use this in conjunction with
+    subprocess isolation when running untrusted ``.eig`` files (see
+    ``tests/test_aot.py`` for the same pattern).
+    """
+    return {
+        "__builtins__": {
+            # Coercion / numeric base types only.
+            "bool": bool,
+            "int": int,
+            "float": float,
+            "str": str,
+            "len": len,
+            "abs": abs,
+            "range": range,
+            "repr": repr,
+        },
+        # No `type`, `getattr`, `hasattr`, `isinstance` -- introspection escape
+        # primitives removed (audit §3).
+    }
+
+
+class JITCompiler:
+    """Per-VM JIT compiler with hot-trace detection.
+
+    Audit §1.1 BUG #5 / §2.3: the previous design stored ``GLOBAL_CACHE`` and
+    ``GLOBAL_EXEC_COUNTS`` as class attributes, which (a) leaks state across
+    distinct ``EigenVM`` instances and (b) means two programs with structurally
+    identical bytecode share a compiled artifact — a latent cache-collision
+    hazard analogous to BUG-C06. The cache and exec-counts are now per-instance,
+    not shared across ``EigenVM`` instantiations.
+    """
+
+    DEFAULT_HOT_THRESHOLD = 3
+    DEFAULT_CALL_HOT_THRESHOLD = 8  # recursion: higher threshold than loops
+    DEFAULT_EXEC_COUNTS_MAX = 4096
+    _inline_counter = 0  # name-suffix counter only, no security implication
+
+    def __init__(self, vm, hot_threshold: int = None, call_hot_threshold: int = None, exec_counts_max: int = None):
         self.vm = vm
         self.hot_threshold = hot_threshold if hot_threshold is not None else JITCompiler.DEFAULT_HOT_THRESHOLD
-        self.exec_counts_max = exec_counts_max if exec_counts_max is not None else JITCompiler.GLOBAL_EXEC_COUNTS_MAX
+        self.call_hot_threshold = (
+            call_hot_threshold if call_hot_threshold is not None else JITCompiler.DEFAULT_CALL_HOT_THRESHOLD
+        )
+        self.exec_counts_max = (
+            exec_counts_max if exec_counts_max is not None else JITCompiler.DEFAULT_EXEC_COUNTS_MAX
+        )
+        # Per-instance cache (audit BUG #5 / §2.3).
+        self.cache = LRUCache(maxsize=1024)
+        self.exec_counts = {}
         self.current_instructions = None
         self.ip_to_key = {}
+        # Hot-counter specifically for CALL sites — recursion trigger (BUG #3).
+        # Keyed by the called function's entry IP.
+        self.call_counts = {}
+        self._lock = threading.Lock()
 
     def analyze_program(self, instructions: list[Instruction]):
         self.current_instructions = instructions
@@ -98,24 +157,51 @@ class JITCompiler:
         if not key:
             return None
 
-        # Check global LRU cache
-        compiled_func = self.GLOBAL_CACHE.get(key)
-        if compiled_func:
-            return compiled_func
-            
-        # Update global execution counts
-        count = self.GLOBAL_EXEC_COUNTS.get(key, 0) + 1
-        if len(self.GLOBAL_EXEC_COUNTS) < self.GLOBAL_EXEC_COUNTS_MAX or key in self.GLOBAL_EXEC_COUNTS:
-            self.GLOBAL_EXEC_COUNTS[key] = count
-        if self.GLOBAL_EXEC_COUNTS[key] >= self.hot_threshold:
-            # Detect basic block starting at ip
-            block = self.trace_basic_block(ip, instructions)
-            if len(block) >= 2:  # Only compile blocks of reasonable size (superinstructions reduce count)
-                compiled_func = self.compile_block(block)
-                if compiled_func:
-                    self.GLOBAL_CACHE.put(key, compiled_func)
-                    return compiled_func
+        # Check per-instance LRU cache first
+        with self._lock:
+            compiled_func = self.cache.get(key)
+            if compiled_func:
+                return compiled_func
+
+            # Update execution counts (cap dict size; preserve hot entries)
+            count = self.exec_counts.get(key, 0) + 1
+            if len(self.exec_counts) < self.exec_counts_max or key in self.exec_counts:
+                self.exec_counts[key] = count
+        if count < self.hot_threshold:
+            return None
+
+        # Detect basic block starting at ip and try to compile it
+        block = self.trace_basic_block(ip, instructions)
+        if len(block) >= 2:  # Only compile blocks of reasonable size (superinstructions reduce count)
+            compiled_func = self.compile_block(block)
+            if compiled_func:
+                with self._lock:
+                    self.cache.put(key, compiled_func)
+                return compiled_func
         return None
+
+    def check_and_compile_call(self, func_target: int, instructions: list[Instruction]) -> callable:
+        """Hot-counter trigger for recursive call sites (audit BUG #3).
+
+        Returns the compiled entry block if the function `func_target` has been
+        entered `call_hot_threshold` times, else None. The threshold is higher
+        than the back-jump threshold (8 vs 3) because the only safe recursion
+        JIT is the entry-block compile (we cannot currently inline bodies that
+        contain CALL/JMP_IF_FALSE per ``inline_function``).
+        """
+        if (
+            self.current_instructions is not instructions
+            and instructions is not None
+        ):
+            self.analyze_program(instructions)
+
+        with self._lock:
+            count = self.call_counts.get(func_target, 0) + 1
+            self.call_counts[func_target] = count
+        if count < self.call_hot_threshold:
+            return None
+        compiled = self.check_and_compile(func_target, instructions)
+        return compiled
 
     def trace_basic_block(self, start_ip: int, instructions: list[Instruction]) -> list[Instruction]:
         block = []
@@ -139,24 +225,11 @@ class JITCompiler:
         local_vars = {}
         try:
             code_obj = compile(source, '<jit_block>', 'exec')
-            safe_globals = {
-                "__builtins__": {},
-                "type": type,
-                "repr": repr,
-                "bool": bool,
-                "int": int,
-                "float": float,
-                "str": str,
-                "len": len,
-                "abs": abs,
-                "range": range,
-                "isinstance": isinstance,
-                "hasattr": hasattr,
-                "getattr": getattr,
-            }
+            # Audit §3: hardened sandbox — no type/getattr/hasattr/isinstance.
+            safe_globals = _build_sandbox_globals()
             exec(code_obj, safe_globals, local_vars)
             return local_vars['compiled_block']
-        except Exception as e:
+        except Exception:
             # Fallback on compilation failure
             return None
 

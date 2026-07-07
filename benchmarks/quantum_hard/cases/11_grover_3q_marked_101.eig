@@ -1,0 +1,58 @@
+eigen 1.0
+
+qubit q0  # MSB
+qubit q1
+qubit q2  # LSB
+
+H q0
+H q1
+H q2
+# Oracle for |101>: phase-flip. To flip ONLY |101> = q0=1, q1=0, q2=1
+# Apply X to q1 (to make it |1> in oracle), then CCX/CCZ, then X q1 back.
+X q1
+# CCZ via H+CCX on q2 + H q2:
+H q2
+CCX q0, q1, q2
+H q2
+X q1
+# Diffusion: H on all qubits, then -|0..0><0..0| + I, then H back
+# Implement as H; X; multi-CZ; X; H. The multi-CZ is a CCZ on q0,q1,q2.
+H q0
+H q1
+H q2
+X q0
+X q1
+X q2
+H q2
+CCX q0, q1, q2
+H q2
+X q0
+X q1
+X q2
+H q0
+H q1
+H q2
+H q0
+H q1
+H q2
+# A SECOND iteration for amplification
+X q1
+H q2
+CCX q0, q1, q2
+H q2
+X q1
+H q0
+H q1
+H q2
+X q0
+X q1
+X q2
+H q2
+CCX q0, q1, q2
+H q2
+X q0
+X q1
+X q2
+H q0
+H q1
+H q2

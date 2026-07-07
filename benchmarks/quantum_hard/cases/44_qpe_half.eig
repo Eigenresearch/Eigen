@@ -1,0 +1,20 @@
+eigen 1.0
+
+qubit a0
+qubit a1
+qubit a2
+qubit e
+X e
+H a0
+H a1
+H a2
+CRZ a0, e, 12.566370614359172
+CRZ a1, e, 6.283185307179586
+CRZ a2, e, 3.141592653589793
+CRZ a1, a0, -1.5707963267948966
+CRZ a2, a0, -0.7853981633974483
+H a0
+CRZ a2, a1, -1.5707963267948966
+H a1
+H a2
+SWAP a0, a2

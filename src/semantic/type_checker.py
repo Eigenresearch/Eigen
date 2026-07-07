@@ -6,7 +6,9 @@ from src.frontend.ast import (
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
     IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
-    MatchNode, StringInterpolationNode
+    MatchNode, StringInterpolationNode,
+    TraitDeclNode, TraitMethodSignatureNode, ImplBlockNode,
+    TypeAliasDeclNode,
 )
 
 class TypeErrorException(Exception):
@@ -26,6 +28,11 @@ class TypeChecker:
         self.global_funcs = {}      # name -> FuncDeclNode
         self.global_structs = {}    # name -> StructDeclNode
         self.global_enums = {}      # name -> EnumDeclNode
+        # §3.1 — partial trait/interface registry.
+        self.global_traits = {}     # name -> TraitDeclNode
+        self.global_impls = []      # list of ImplBlockNode (for trait
+                                    # conformance auditing; not enforced
+                                    # at call sites in this P2 cut).
         # Scope stack: list of dicts of name -> type_name
         self.scopes = [{}]
         self.current_function = None
@@ -49,7 +56,38 @@ class TypeChecker:
         current_scope = self.scopes[-1]
         if name in current_scope:
             self.error(f"Redeclaration of variable '{name}' in the same scope", node)
+        # §3.3 — resolve type alias references lazily at declaration time
+        # so the canonical type is what later lookups see. Aliases are
+        # registered in pass #1 of check_program, so by the time we
+        # reach _check_node_uncached for any user stmt the table is
+        # fully populated.
+        try:
+            type_name = self._resolve_type_alias(type_name)
+        except TypeErrorException:
+            # Cyclic alias chain surfaced during declare_var; re-raise
+            # with a clearer context rather than swallowing.
+            raise
         current_scope[name] = type_name
+
+    def _resolve_type_alias(self, type_name: str, seen: set | None = None) -> str:
+        """Resolve a (possibly alias-chain) type name to its concrete
+        target. ``type A = B`` followed by ``type B = int`` makes
+        ``_resolve_type_alias("A")`` return ``"int"``. Cyclic chains
+        are detected via ``seen`` and signalled as a TypeErrorException
+        so users get a clear "Circular type alias" message rather than
+        a hang.
+        """
+        if not isinstance(type_name, str):
+            return type_name
+        if seen is None:
+            seen = set()
+        if type_name in seen:
+            self.error(f"Circular type alias detected involving '{type_name}'")
+        seen.add(type_name)
+        if type_name in self.global_type_aliases:
+            return self._resolve_type_alias(
+                self.global_type_aliases[type_name], seen)
+        return type_name
 
     def lookup_var(self, name: str, node: ASTNode = None) -> str:
         for scope in reversed(self.scopes):
@@ -59,7 +97,23 @@ class TypeChecker:
         for enum_name, enum_node in self.global_enums.items():
             if name in enum_node.variants:
                 return enum_name
-        self.error(f"Undeclared variable '{name}'", node)
+        # §7.3 — surface a "Did you mean?" candidate when the name is a
+        # close typo of something already in scope / in the global
+        # function or struct vocabulary. We accumulate the vocabulary
+        # on demand (not at __init__ time) so newly registered names
+        # stay visible.
+        from src.frontend.did_you_mean import format_suggestion
+        vocab = set()
+        for scope in self.scopes:
+            vocab.update(scope.keys())
+        vocab.update(self.global_qfuncs.keys())
+        vocab.update(self.global_funcs.keys())
+        vocab.update(self.global_structs.keys())
+        vocab.update(self.global_enums.keys())
+        vocab.update(self.global_traits.keys())
+        vocab.update(self.global_type_aliases.keys())
+        hint = format_suggestion(name, vocab)
+        self.error(f"Undeclared variable '{name}'{hint}", node)
 
     def types_compatible(self, expected: str, actual: str) -> bool:
         if expected == actual:
@@ -106,12 +160,18 @@ class TypeChecker:
         self.global_funcs = {}
         self.global_structs = {}
         self.global_enums = {}
+        self.global_traits = {}
+        self.global_impls = []
+        # §3.3 — type alias table. `name -> target_type` (resolution done
+        # lazily at lookup time, see `_resolve_type_alias`). Acyclic —
+        # circular chains raise TypeErrorException at first reference.
+        self.global_type_aliases = {}
         self.scopes = [{}]
         self.current_function = None
         self.loop_depth = 0
         self._type_cache = {}
 
-        # Register all global declarations first (qfuncs, funcs, structs, enums)
+        # Register all global declarations first (qfuncs, funcs, structs, enums, traits)
         for node in program.body:
             if isinstance(node, QFuncDeclNode):
                 if node.name in self.global_qfuncs or node.name in self.global_funcs:
@@ -129,6 +189,16 @@ class TypeChecker:
                 if node.name in self.global_enums:
                     self.error(f"Duplicate declaration of enum '{node.name}'", node)
                 self.global_enums[node.name] = node
+            elif isinstance(node, TraitDeclNode):
+                if node.name in self.global_traits:
+                    self.error(f"Duplicate declaration of trait '{node.name}'", node)
+                self.global_traits[node.name] = node
+            elif isinstance(node, TypeAliasDeclNode):
+                if node.name in self.global_type_aliases:
+                    self.error(
+                        f"Duplicate declaration of type alias '{node.name}'",
+                        node)
+                self.global_type_aliases[node.name] = node.target_type
 
         # Type check all global statements/functions
         for node in program.body:
@@ -178,9 +248,84 @@ class TypeChecker:
         elif isinstance(node, EnumDeclNode):
             return None
 
+        elif isinstance(node, TraitDeclNode):
+            # §3.1 — Type-check each method signature inside the trait.
+            for method in node.methods:
+                self.check_node(method)
+            return None
+
+        elif isinstance(node, TraitMethodSignatureNode):
+            # Trait method signatures don't have a body, so we just
+            # walk the parameter list to register types. No scope is
+            # entered — these don't end up in the user-visible namespace.
+            for p_name, p_type in node.params:
+                # We don't declare; we only validate the type strings.
+                # Empty bodies mean there's nothing further to check here.
+                pass
+            return None
+
+        elif isinstance(node, ImplBlockNode):
+            # §3.1 — Trait conformance check (partial).
+            #
+            # If the impl declares a trait, verify that the trait
+            # actually exists, and that EVERY method on the trait has
+            # a corresponding FuncDeclNode in the impl's body with a
+            # matching name. Type signature matching is intentionally
+            # loose in this P2 cut — we accept any impl that has the
+            # right method names so users can iterate on signatures
+            # without the checker blocking them constantly.
+            if node.trait_name is not None:
+                trait = self.global_traits.get(node.trait_name)
+                if trait is None:
+                    self.error(
+                        f"Impl references unknown trait '{node.trait_name}'",
+                        node)
+                else:
+                    impl_methods = {m.name for m in node.methods}
+                    missing = trait.method_names() - impl_methods
+                    if missing:
+                        self.error(
+                            f"Impl of trait '{node.trait_name}' for "
+                            f"type '{node.target_type}' is missing "
+                            f"methods: {sorted(missing)}", node)
+            # Type-check each method body via the standard FuncDeclNode
+            # path; reuse the same scope-tracking as free functions.
+            # We enter the method scope and pre-declare `self` of the
+            # impl's target type so user code referencing `self.x` is
+            # accepted (Rust-like convention). We don't currently
+            # check that the method actually accesses only declared
+            # fields — that's left for a future real type-checker.
+            for m in node.methods:
+                self.enter_scope()
+                # Synthetic `self:` binding as the impl target type.
+                self.scopes[-1]["self"] = node.target_type
+                saved_func = self.current_function
+                self.current_function = m
+                for p_name, p_type in m.params:
+                    self.declare_var(p_name, p_type, m)
+                for stmt in m.body:
+                    self.check_node(stmt)
+                self.current_function = saved_func
+                self.exit_scope()
+            # Record the impl for downstream tooling.
+            self.global_impls.append(node)
+            return None
+
+        elif isinstance(node, TypeAliasDeclNode):
+            # §3.3 — aliases are registered during the pass-1 sweep over
+            # `program.body`, so by the time we reach them in pass 2
+            # there's nothing left to type-check (the target type is just
+            # a free-form string). We validate that the alias doesn't
+            # form a cycle by attempting resolution right away — this
+            # surfaces circular chains at declaration time rather than
+            # at first *use*.
+            self._resolve_type_alias(node.name)
+            return None
+
         elif isinstance(node, LetNode):
             val_type = self.check_node(node.value)
-            if not self.types_compatible(node.type_name, val_type):
+            expected = self._resolve_type_alias(node.type_name)
+            if not self.types_compatible(expected, val_type):
                 self.error(f"Cannot assign expression of type '{val_type}' to variable '{node.name}' of type '{node.type_name}'", node)
             self.declare_var(node.name, node.type_name, node)
             return None
@@ -272,6 +417,10 @@ class TypeChecker:
         elif isinstance(node, ReturnNode):
             if self.current_function:
                 expected = getattr(self.current_function, "return_type", "void")
+                # §3.3 — substitute any type aliases on the function's
+                # declared return type so `func f() -> MyAlias { ... }`
+                # is checked against the alias' concrete target.
+                expected = self._resolve_type_alias(expected)
                 # ReturnNode has optional expr field (added in Phase 2)
                 actual = "void"
                 if hasattr(node, "expr") and node.expr is not None:

@@ -1,5 +1,12 @@
 # AWS Braket backend exporter for Eigen EQIR
+#
+# Audit §5: Previously this exporter carried an if/elif chain duplicated
+# across the four hardware exporter modules. It now routes through the
+# shared `gate_registry.GateSpec` table so adding a gate to one exporter
+# is reflected in all four.
 from src.ir.ir_graph import EQIRGraph
+from src.backend.gate_registry import get_gate_spec
+
 
 class BraketBackend:
     def export(self, graph: EQIRGraph) -> str:
@@ -10,46 +17,38 @@ class BraketBackend:
             "device_circuit = Circuit()",
             ""
         ]
-        
+
         qubits = set()
         for node in graph.nodes.values():
             if node.type == 'ALLOC':
                 qubits.add(node.targets[0])
-                
-        sorted_qubits = sorted(list(qubits))
+
+        sorted_qubits = sorted(qubits)
         q_map = {q: idx for idx, q in enumerate(sorted_qubits)}
-        
+
+        unsupported: list[str] = []
         for node in graph.topological_sort():
             if node.type != 'GATE':
                 continue
-                
-            g_name = node.gate_name.lower()
+            spec = get_gate_spec(node.gate_name)
+            if spec is None or not spec.braket_method:
+                unsupported.append(node.gate_name)
+                lines.append(f"# Unsupported gate: {node.gate_name} on {node.targets}")
+                continue
             targets = [q_map[t] for t in node.targets]
-            args = node.args
-            
-            if g_name == 'h':
-                lines.append(f"device_circuit.h({targets[0]})")
-            elif g_name == 'x':
-                lines.append(f"device_circuit.x({targets[0]})")
-            elif g_name == 'y':
-                lines.append(f"device_circuit.y({targets[0]})")
-            elif g_name == 'z':
-                lines.append(f"device_circuit.z({targets[0]})")
-            elif g_name == 's':
-                lines.append(f"device_circuit.s({targets[0]})")
-            elif g_name == 't':
-                lines.append(f"device_circuit.t({targets[0]})")
-            elif g_name == 'rx':
-                lines.append(f"device_circuit.rx({targets[0]}, {args[0]})")
-            elif g_name == 'ry':
-                lines.append(f"device_circuit.ry({targets[0]}, {args[0]})")
-            elif g_name == 'rz':
-                lines.append(f"device_circuit.rz({targets[0]}, {args[0]})")
-            elif g_name == 'cnot':
-                lines.append(f"device_circuit.cnot({targets[0]}, {targets[1]})")
-            elif g_name == 'cz':
-                lines.append(f"device_circuit.cz({targets[0]}, {targets[1]})")
-            elif g_name == 'swap':
-                lines.append(f"device_circuit.swap({targets[0]}, {targets[1]})")
-                
+            # Braket single-qubit rotations are .rx(q, angle); single-qubit
+            # gates are .h(q); two-qubit are .cnot(c, t); three-qubit .ccx(c, t1, t2).
+            if spec.takes_angle:
+                args = [str(targets[0]), repr(node.args[0])] + [str(t) for t in targets[1:]]
+            else:
+                args = [str(t) for t in targets]
+            args_str = ", ".join(args)
+            lines.append(f"device_circuit.{spec.braket_method}({args_str})")
+
+        if unsupported:
+            lines.append("")
+            lines.append(
+                f"# NOTE: {len(unsupported)} unsupported gate(s): "
+                f"{sorted(set(unsupported))}"
+            )
         return "\n".join(lines)

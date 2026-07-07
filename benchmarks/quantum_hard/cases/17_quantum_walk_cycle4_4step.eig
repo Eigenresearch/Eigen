@@ -1,0 +1,39 @@
+eigen 1.0
+
+qubit q0  # position MSB
+qubit q1  # position LSB
+qubit qc  # coin
+
+# Initialise coin in |+>
+H qc
+
+# One step = coin rotation + conditional shift.
+# Conditional shift on (q0,q1) controlled by qc=0 vs qc=1:
+# If qc=0, decrement position by 1; if qc=1, increment by 1.
+# Decrement on 4-cycle: 00->11, 01->00, 10->01, 11->10
+# Implement: if qc=0 then SWAP(q1,q0) - hmm we lack conditional-on-classical.
+
+# Simpler model: 4 separate single-step operators; each is
+#   TOFFOLI(qc, q1) -> q0; CNOT(qc, q1) — this is a (conditional) binary +1.
+# We use CCX as TOFFOLI to flip q0 when both qc=1 and q1=1.
+# And CNOT(qc,q1) flips q1 when qc=1. (This is +1 modulo 4 on the
+# position when qc=1, identity when qc=0.)
+# Step 1:
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+
+# Step 2:
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+
+# Step 3:
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+
+# Step 4:
+CCX qc, q1, q0
+CNOT qc, q1
+H qc

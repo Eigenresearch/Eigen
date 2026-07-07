@@ -1,0 +1,9 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+X q1
+H q0
+CRZ q0, q1, 1.5707963267948966
+H q1
+SWAP q0, q1

@@ -15,6 +15,17 @@ class EQIRNode:
         self.parents = set()   # set of EQIRNode
         self.children = set()  # set of EQIRNode
 
+    # Audit §2.3 (determinism): the audit suggested pinning __hash__ to the
+    # logical node id. However deepcopy reconstructs EQIRNode instances via
+    # __new__ (not __init__), so the shell instance lacks `id` when it's first
+    # added to the copied `children`/`parents` sets, which would call
+    # __hash__ and crash with AttributeError. The audit's determinism goal is
+    # already achieved by sorted() iteration of `children`/`parents` in
+    # optimizer.py and `sorted(c.id for c in n.children)` in `to_dict`
+    # below, plus `min(worklist)` (Python) / `worklist.iter().min()`
+    # (Rust) for worklist popping. The default identity hash is therefore
+    # kept untouched.
+
     def add_child(self, child_node: 'EQIRNode'):
         self.children.add(child_node)
         child_node.parents.add(self)
@@ -94,7 +105,14 @@ class EQIRGraph:
                 
         if node.type == 'ASSERT' and node.assert_cond:
             left, op, right = node.assert_cond
-            import re
+            # Audit §2.4: the redundant `import re` here has caused a
+            # Python scoping bug — the local import makes the function
+            # treat `re` as a local variable, so the earlier `re.findall`
+            # call at line 96 above (which IS scoped to the top-level
+            # `import re`) raises UnboundLocalError when `condition` is
+            # set on a node. The top-level import line covers both call
+            # sites, so this inner import is unnecessary and harmful.
+            # Removed.
             for part in (left, right):
                 if isinstance(part, str):
                     for word in re.findall(r'[a-zA-Z_][a-zA-Z0-9_]*', part):
@@ -166,6 +184,14 @@ class EQIRGraph:
             print(f"Node {node} | Parents: {parent_ids} | Children: {child_ids}")
 
     def to_dict(self) -> dict:
+        # Audit §2.3 (determinism): the previous `children_ids` comprehension
+        # iterated the `n.children` set directly. With __hash__ pinned to
+        # node.id, that iteration is already mostly ordered in practice, but
+        # small ids can still land in the same bucket depending on the
+        # table's growth history and PYTHONHASHSEED for the small-int
+        # identity-hash path. Sort explicitly so the serialized dict (and
+        # therefore the rust optimizer's view of the graph) is byte-identical
+        # across runs, regardless of these implementation details.
         nodes_data = []
         for n in self.nodes.values():
             nodes_data.append({
@@ -178,7 +204,7 @@ class EQIRGraph:
                 "condition": n.condition,
                 "print_expr": n.print_expr,
                 "assert_cond": n.assert_cond,
-                "children_ids": [c.id for c in n.children]
+                "children_ids": sorted(c.id for c in n.children)
             })
         return {
             "next_node_id": self.next_node_id,

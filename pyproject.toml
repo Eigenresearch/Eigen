@@ -4,13 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eigen-lang"
-version = "2.6.0"
-description = "Eigen 2.6 — Misery: Runtime-first hybrid classical-quantum programming language with fast-loop JIT, stabilizer simulator, SABRE routing, advanced noise models, and Inno Setup installer"
+version = "2.7.0"
+description = "Eigen 2.7 — Meridian: Runtime-first hybrid classical-quantum programming language with deterministic optimizer, hardened JIT sandbox, native-Python recursive-function codegen, OpenQASM 3.0 export, native ZX/routing acceleration, multi-provider Quantum Runtime submission (IBM Quantum Runtime + IonQ REST), and full CI coverage"
 readme = "README.md"
-requires-python = ">=3.10"
+# Bounded range. llvmlite historically lags CPython releases by weeks/months;
+# combined with the known AOT/LLVM instability (audit §6) an explicit upper bound
+# prevents silent breakage when a new CPython ships before llvmlite is ready.
+requires-python = ">=3.10,<3.14"
 license = {file = "LICENSE"}
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
@@ -23,6 +30,23 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "ruff>=0.4.0",
+    "mypy>=1.10",
+]
+# GPU acceleration paths (audit §1.3): only imported when one of these extras
+# is installed. Falls back to NumPy on CPU otherwise, with a single warning.
+gpu-cuda = [
+    "cupy-cuda12x>=13.0; platform_system!='Windows' or python_version<'3.13'",
+]
+gpu-torch = [
+    "torch>=2.0; platform_system!='Windows' or python_version<'3.13'",
+]
+# IBM Quantum Runtime job submission (audit §7): enables real job submission via
+# the existing Qiskit bridge. Optional — only used when an explicit API token is
+# provided at runtime; never auto-installed in production.
+hardware-ibm = [
+    "qiskit>=1.0",
+    "qiskit-ibm-runtime>=0.30",
 ]
 
 [project.scripts]
@@ -37,26 +61,124 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "--strict-markers --strict-config"
 
 [tool.coverage.run]
 source = ["src"]
+branch = true
 omit = [
-    "src/backend/backends/*",
-    "src/commands/*",
-    "src/cli.py",
-    "src/main.py",
-    "src/packager.py",
-    "src/formatter.py",
-    "src/doc_generator.py",
+    # LSP/Debugger are interactive-only; test them indirectly via integration.
     "src/lsp/*",
     "src/debugger/*",
-    "src/backend/distributed.py",
-    "src/backend/llvm_compiler.py",
-    "src/backend/qiskit_backend.py",
+    # Pure CLI glue: thin command dispatchers (covered via integration tests).
+    "src/cli.py",
+    "src/main.py",
+    "src/commands/*",
+    # Documentation generators: pure text formatting, validated separately.
+    "src/doc_generator.py",
+    "src/formatter.py",
+    # Crash reporting: only meaningful in production builds.
     "src/crash_report.py",
+    # Profiler: optional instrumentation harness, validated separately.
     "src/profiler.py",
+    # Packager: handles its own test fixtures under test_pkg/ and test_pkg_manual/.
+    "src/packager.py",
+    # LLVM/AOT path: tests isolated in subprocess (audit §4) because LLVM native
+    # execution is crash-prone. Coverage of the source files here is gated by the
+    # presence of llvmlite and native linker in the test environment rather than
+    # by an unconditional coverage threshold.
+    "src/backend/llvm_compiler.py",
+    "src/aot/*",
+    # Distributed backend: needs a multi-process harness; exercised via
+    # integration smoke tests rather than unit coverage.
+    "src/backend/distributed.py",
 ]
 
 [tool.coverage.report]
-fail_under = 60
+fail_under = 75
 show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+# --- Lint: ruff (audit §4 / §8 item 3) --------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    "build",
+    "dist",
+    "benchmark_comparison.md",
+    "docs",
+    "node_modules",
+    "paper_build",
+    "paper_gen",
+    "papers",
+    "test_pkg",
+    "test_pkg_manual",
+]
+
+[tool.ruff.lint]
+# Conservative selection: catches outright bugs without rewriting style that
+# could break existing call sites.
+select = [
+    "F",     # pyflakes (pylint-fatal bugs: undefined names, redefinitions, ...)
+    "E9",    # syntax errors
+    "F63",   # invalid assertions / comparisons
+    "UP004", # useless `object` inheritance
+    "UP018", # redundant type conversion (e.g. `str(x)` where x is already str)
+    "B",     # flake8-bugbear (likely-bug patterns)
+    "B950",  # bugbear's `line too long` with pragmatic slack
+]
+ignore = [
+    # allow class-level attrs used as defaults (Eigen uses this deliberately
+    # in a few places like JITCompiler caches prior to the 2.7 fix).
+    "B008",
+    # allow short f-string without placeholders
+    "F541",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011", "B015", "B017"]
+"stdlib/**" = ["B"]
+"src/zx/**" = ["B902"]  # internal helper APIs that return self
+
+# --- Type-check: mypy (audit §4 / §8 item 3) -------------------------------
+[tool.mypy]
+python_version = "3.10"
+# Don't fail every PR. After 2.7 stabilises, tighten these to "False".
+strict_optional = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+warn_return_any = false
+disallow_untyped_defs = false
+check_untyped_defs = true
+ignore_missing_imports = true
+files = [
+    "src/ir",
+    "src/zx",
+    "src/routing",
+    "src/canonicalizer.py",
+    "src/resource_estimator",
+    "src/backend/gate_registry.py",
+    "src/backend/gpu",
+    "src/backend/backends",
+]
+exclude = [
+    "build/",
+    "dist/",
+    "docs/",
+    "node_modules/",
+    "paper_build/",
+    "paper_gen/",
+    "papers/",
+    "test_pkg/",
+    "test_pkg_manual/",
+]
+
+[[tool.mypy.overrides]]
+module = ["numpy", "llvmlite", "cupy", "torch", "qiskit.*", "eigen_native"]
+ignore_missing_imports = true

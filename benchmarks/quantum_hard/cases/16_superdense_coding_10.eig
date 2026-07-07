@@ -1,0 +1,12 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+
+H q0
+CNOT q0, q1
+# Alice encodes "10": apply X to her half of the entangled pair.
+X q0
+# Bob decodes:
+CNOT q0, q1
+H q0

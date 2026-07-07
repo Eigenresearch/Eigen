@@ -1,0 +1,32 @@
+eigen 1.0
+
+qubit a0      # MSB of register a (= 0)
+qubit a1      # LSB of register a (= 1)  -> a = 01
+qubit b0      # MSB of register b (= 0)
+qubit b1      # LSB of register b (= 1)  -> b = 01
+
+# Prepare a = |01>, b = |01>
+X a1
+X b1
+
+# QFT3-on-a using 2 qubits (QFT2):
+H a0
+CRZ a1, a0, 1.5707963267948966   # pi/2
+H a1
+SWAP a0, a1
+
+# Add b1 (LSB of b) into register a: apply CP(pi/2^k) controlled by b1 at position k.
+# For 2-qubit adder the SUM bits are stored in a; b is unchanged.
+# j=1: b1 contributes phase pi/2^0 = pi to a's LSB.
+CZ b1, a1
+# j=0: b1 contributes phase pi/2^1 = pi/2 to a's MSB.
+CRZ b1, a0, 1.5707963267948966
+# b0 contributes only at MSB (phase pi/2^0*... but b0=0 anyway; skip CCZ).
+
+# Inverse QFT2 on a:
+SWAP a0, a1
+H a1
+CRZ a1, a0, -1.5707963267948966
+H a0
+
+# After this, a should hold |10> = 2.

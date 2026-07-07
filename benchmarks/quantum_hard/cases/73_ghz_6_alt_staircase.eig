@@ -1,0 +1,15 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+qubit q3
+qubit q4
+qubit q5
+H q0
+CNOT q0, q1
+CNOT q1, q2
+CNOT q2, q3
+CNOT q3, q4
+CNOT q4, q5
+H q5

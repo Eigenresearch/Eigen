@@ -122,7 +122,17 @@ class DeviceNoiseProfile:
 
     @staticmethod
     def from_ibm(backend_name: str, coupling_map=None, rng=None, seed=None) -> 'DeviceNoiseProfile':
-        """Load noise profile from IBM Quantum backend name.
+        """Load a *bundled historical snapshot* of an IBM Quantum backend's
+        calibration parameters.
+
+        The values come from `IBM_DEVICE_PROFILES` in this module (T1/T2
+        averages, single/two-qubit gate error, readout error, crosstalk
+        probability) captured from IBM Quantum's published calibration
+        pages at release time. This routine performs **no network call**
+        — there is no `requests`/`urllib`/`httpx` interaction with IBM
+        Quantum's REST API. For live calibration data, fetch it yourself
+        via Qiskit's `provider.backends.<name>.properties()` and feed the
+        result into `DeviceNoiseProfile(...)` or `from_json()`.
 
         Args:
             backend_name: IBM backend name (e.g. 'ibm_sherbrooke').
@@ -130,7 +140,8 @@ class DeviceNoiseProfile:
             rng: Random number generator.
 
         Returns:
-            DeviceNoiseProfile configured for the specified backend.
+            DeviceNoiseProfile configured with the bundled snapshot of
+            the specified backend.
 
         Raises:
             ValueError: If the backend name is not recognized.
@@ -153,13 +164,23 @@ class DeviceNoiseProfile:
 
     @staticmethod
     def from_ionq(backend_name: str, coupling_map=None, rng=None, seed=None) -> 'DeviceNoiseProfile':
-        """Load noise profile from IonQ backend name.
+        """Load a *bundled historical snapshot* of an IonQ backend's
+        calibration parameters.
+
+        The values come from `IONQ_DEVICE_PROFILES` in this module,
+        captured from IonQ's published calibration pages at release
+        time. This routine performs **no network call** — there is
+        no `requests`/`urllib`/`httpx` interaction with IonQ's REST
+        API. For live calibration data, fetch it yourself via the
+        IonQ SDK and feed the result into `DeviceNoiseProfile(...)`
+        or `from_json()`.
 
         Args:
             backend_name: IonQ backend name (e.g. 'ionq_harmony').
 
         Returns:
-            DeviceNoiseProfile configured for the specified backend.
+            DeviceNoiseProfile configured with the bundled snapshot
+            of the specified IonQ backend.
         """
         name = backend_name.lower()
         if name not in IONQ_DEVICE_PROFILES:

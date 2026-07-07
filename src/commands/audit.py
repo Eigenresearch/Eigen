@@ -5,7 +5,7 @@ import datetime
 from src.cli import register_command
 from src.packager import EigenPackager, parse_toml
 from src.compiler import compile_to_eqir
-from src.backend.qiskit_backend import QiskitBackend
+from src.backend.unified_backend import get_quantum_backend
 
 @register_command("audit")
 def audit_command(args, workspace_root):
@@ -31,7 +31,15 @@ def audit_command(args, workspace_root):
             if f.endswith('.eig'):
                 files.append(os.path.join(root, f))
                 
-    qiskit = QiskitBackend()
+    # §4.1 Unified Backend Interface: route every backend through a single
+    # QuantumBackend adapter so audit can run against ionq / braket / azure
+    # / ibm without bespoke case-by-case code.
+    backend_name = getattr(args, "backend", "qiskit") or "qiskit"
+    try:
+        backend = get_quantum_backend(backend_name)
+    except KeyError:
+        # Unknown backend name → fall back to qiskit for back-compat.
+        backend = get_quantum_backend("qiskit")
     
     total_supported = 0.0
     total_emulated = 0.0
@@ -42,15 +50,15 @@ def audit_command(args, workspace_root):
         f_rel = os.path.relpath(f_path, workspace_root)
         try:
             g, a = compile_to_eqir(f_path, workspace_root)
-            script, report = qiskit.transpile(g, a)
+            report = backend.validate(g, a)
             
-            total_supported += report.stats["supported"]
-            total_emulated += report.stats["emulated"]
-            total_unsupported += report.stats["unsupported"]
+            total_supported += report.supported_pct
+            total_emulated += report.emulated_pct
+            total_unsupported += report.unsupported_pct
             file_count += 1
             
             if report.unsupported_nodes > 0:
-                print(f"  WARNING: File '{f_rel}' uses {report.unsupported_nodes} constructs unsupported by {args.backend} backend.")
+                print(f"  WARNING: File '{f_rel}' uses {report.unsupported_nodes} constructs unsupported by {backend.name} backend.")
                 for w in report.warnings:
                     print(f"    - {w}")
                 if strict_mode:

@@ -1,6 +1,30 @@
-# Ignore research paper sources and build artifacts
-papers/
-paper_gen/
+# === Python / venv ===
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.eigen_cache/
+.coverage
+.kimchi/
+*.egg-info/
+eigen_lang.egg-info/
+
+# === Rust / Native ===
+native/rust/target/
+*.pdb
+*.o
+*.obj
+*.rcgu.o
+
+# === Build outputs ===
+build/
+dist/
+*.spec
+*.ebc
+*.exe
+
+# === Paper artifacts (root level) ===
 paper.pdf
 paper.aux
 paper.log
@@ -8,14 +32,18 @@ paper.out
 paper.tex
 paper.toc
 paper_build.md
-test_math.md
-test_math.pdf
-scripts/abstract_block.tex
-scripts/title_block.tex
-scripts/generate_paper_pdf.js
-photo_2026-06-23_17-28-06.jpg
+paperdo.md
 
-# Ignore benchmark HTML dashboards and temp results
+# === Paper generation reference (kept locally, not in git) ===
+paper_gen/
+papers/
+
+# === Paper build artifacts ===
+paper/abstract_block.tex
+paper/paper_build.md
+paper/paper.pdf
+
+# === Benchmark temp results ===
 benchmark_dashboard.html
 complex_dashboard.html
 benchmark_comparison.md
@@ -24,45 +52,47 @@ extensive_results.md
 python_vs_eigen.md
 tests_run_results.md
 release-report.md
+benchmarks/results.json
 
-# Ignore old roadmap and audit files
-roadmap_2_5.md
+# === Old roadmap / audit / scratch files ===
+2.4.md
+2.5.md
+2.6.md
 audit.md
+auditfix.md
+roadmap_2_5.md
+test_math.md
+test_math.pdf
+sol.md
 
-# Ignore agent configs
-.agents/
-
-# Ignore caches
-__pycache__/
-*.pyc
-.pytest_cache/
-.eigen_cache/
-.coverage
-.kimchi/
-
-# PyInstaller / Build outputs
-build/
-dist/
-*.spec
-*.ebc
-*.exe
-*.pdb
-*.o
-*.obj
-*.rcgu.o
-
-# Ignore crash logs
-crash-*.log
-.venv/
-eigen_lang.egg-info/
-native/rust/target/
-node_modules/
-
-# Ignore temp/build files
+# === Scratch / temp ===
 scratch*/
 dummy*
 scratch_*
 test.4yz*
 test.dummy*
-2.4.md
-2.5.md
+
+# === Agent configs ===
+.agents/
+
+# === Crash logs ===
+crash-*.log
+
+# === Node ===
+node_modules/
+
+# === IDE / OS ===
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+.DS_Store
+
+# === Photos ===
+photo_*.jpg
+
+# === Scripts (one-off) ===
+scripts/abstract_block.tex
+scripts/title_block.tex
+scripts/generate_paper_pdf.js

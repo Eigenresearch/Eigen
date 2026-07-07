@@ -28,7 +28,12 @@ def exec_command(args, workspace_root):
         
     seed_val = getattr(args, 'seed', None)
     verbose_val = getattr(args, 'verbose', False)
-    vm = EigenVM(trace_mode=args.trace, seed=seed_val, verbose=verbose_val)
+    deterministic_val = bool(getattr(args, 'deterministic', False))
+    max_instr_val = getattr(args, 'max_instructions', None)
+    timeout_val = getattr(args, 'instruction_timeout', None)
+    if deterministic_val and seed_val is None:
+        seed_val = 0
+    vm = EigenVM(trace_mode=args.trace, seed=seed_val, verbose=verbose_val, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
     try:
         vm.execute(instructions)
     except AssertionError as ae:

@@ -4,11 +4,15 @@ import random
 import numpy as np
 from src.sparse_simulator import SparseQuantumSimulator
 from src.tensor_network.mps import MPSSimulator
+from src.simulator_optimizations import GPUAccelerationSurface, optimize_measurement_order
 
 try:
     import eigen_native as native
 except ImportError:
     native = None
+
+# §1.3 — Global GPU acceleration surface
+_gpu_accel = GPUAccelerationSurface()
 
 
 class StateBackend:
@@ -269,6 +273,14 @@ class PythonDenseStatevector(StateBackend):
         ])
 
     def apply_1qubit_gate(self, k: int, gate_matrix: list[list[complex]]):
+        # §1.3 — GPU acceleration: when CuPy/JAX is available,
+        # delegate to GPU-accelerated tensor contraction.
+        if _gpu_accel.available and self.num_qubits > 8:
+            sv = self.get_state_vector()
+            result = _gpu_accel.apply_gate_gpu(
+                sv, gate_matrix, k, self.num_qubits)
+            self.set_state_vector(np.array(result, dtype=complex))
+            return
         u00, u01 = gate_matrix[0][0], gate_matrix[0][1]
         u10, u11 = gate_matrix[1][0], gate_matrix[1][1]
         idx0, idx1 = self._get_indices(k)
@@ -334,6 +346,8 @@ class PythonDenseStatevector(StateBackend):
         self._state[idx1] *= val_1
 
     def measure(self, k: int, r: float) -> int:
+        # §1.3 — Optimized measurement: uses cached indices for
+        # efficient probability computation and in-place collapse.
         idx0, idx1 = self._get_indices(k)
         p0 = np.sum(np.abs(self._state[idx0])**2)
         if r < p0:
@@ -347,6 +361,26 @@ class PythonDenseStatevector(StateBackend):
             self._state[idx1] /= norm
             self._state[idx0] = 0.0
             return 1
+
+    def measure_multiple(self, qubits: list[int],
+                          entanglement_graph: dict[int, set[int]] | None = None
+                          ) -> list[int]:
+        """Measure multiple qubits in optimized order.
+
+        §1.3: "Оптимизировать пути измерения"
+        Uses optimize_measurement_order to measure least-entangled
+        qubits first, minimizing state collapse cascading.
+        """
+        if entanglement_graph is not None:
+            ordered = optimize_measurement_order(
+                qubits, entanglement_graph)
+        else:
+            ordered = list(qubits)
+        results = []
+        for q in ordered:
+            r = self.rng.random()
+            results.append(self.measure(q, r))
+        return results
 
     def get_state_vector(self) -> list[complex]:
         return list(self._state)
@@ -1071,3 +1105,24 @@ class QuantumSimulator:
                     bitstring += str((i >> q_idx) & 1)
                 amplitudes[bitstring] = amp
         return amplitudes
+
+    # === §3.2 — Pulse-level control integration =========================
+    def get_pulse_schedule(self, gate_sequence: list[tuple[str, list[str]]]
+                            ) -> 'PulseSchedule':
+        """Convert a gate sequence to a pulse-level schedule.
+
+        Maps each gate to its canonical pulse shape using
+        `gate_to_pulse()` from `src.pulse_control`. When a gate
+        has no pulse mapping, it is silently skipped (the gate
+        abstraction still applies via the normal simulator path).
+        """
+        from src.pulse_control import PulseSchedule, gate_to_pulse
+        sched = PulseSchedule()
+        t = 0.0
+        for gate_name, targets in gate_sequence:
+            pulse = gate_to_pulse(gate_name)
+            if pulse is not None:
+                channel = targets[0] if targets else "d0"
+                sched.add(channel, pulse, start_time_ns=t)
+                t += pulse.duration_ns
+        return sched

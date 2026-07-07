@@ -303,6 +303,9 @@ class MLIRToEQIRConverter:
         self.graph = EQIRGraph()
         self.qfuncs = {}  # name -> func definition for inlining
         self.constants = {} # name -> value
+        self._inlining_stack = set()  # guards against self/mutual recursion
+        self._max_inline_depth = 16
+        self._inline_depth = 0
 
     def convert(self, module: MLIRModule) -> EQIRGraph:
         # 1. Register all functions first (for inlining calls)
@@ -320,6 +323,23 @@ class MLIRToEQIRConverter:
     def convert_function(self, func: MLIRFunction, param_map: dict = None):
         if param_map is None:
             param_map = {}
+
+        # Recursion guard — prevent infinite inlining of self/mutually
+        # recursive qfuncs.  If we're already inlining this function (or
+        # we've exceeded the depth limit), emit a placeholder call op
+        # instead of recursing further.
+        is_recursive_call = func.name in self._inlining_stack
+        if is_recursive_call or self._inline_depth >= self._max_inline_depth:
+            self.graph.add_operation(
+                'GATE',
+                gate_name='RECURSIVE_CALL',
+                targets=[],
+                args=[func.name],
+            )
+            return
+
+        self._inlining_stack.add(func.name)
+        self._inline_depth += 1
 
         def resolve_name(name: str) -> str:
             return param_map.get(name, name)
@@ -400,3 +420,7 @@ class MLIRToEQIRConverter:
                             local_map[param[0]] = resolve_name(operand.name)
                         # Inline target function operations
                         self.convert_function(target_func, local_map)
+
+        # Pop from recursion-guard stack on exit
+        self._inlining_stack.discard(func.name)
+        self._inline_depth -= 1

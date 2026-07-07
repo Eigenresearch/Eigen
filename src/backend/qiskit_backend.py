@@ -91,7 +91,10 @@ class QiskitBackend:
                         f"Classical function declaration '{node.name}' is not supported by Qiskit backend.",
                         SourceLocation("ast")
                     )
-                    unsupported_ops.append(UnsupportedOp("FuncDeclNode", None, f"func {node.name}", "Classical functions not supported"))
+                    unsupported_ops.append(UnsupportedOp(
+                        "FuncDeclNode", None,
+                        f"func {node.name}", "Classical functions not supported",
+                    ))
             elif isinstance(node, StructDeclNode):
                 if self.capabilities.supports_structs == CapabilityLevel.UNSUPPORTED:
                     diag_engine.emit(
@@ -131,7 +134,11 @@ class QiskitBackend:
                         f"Struct instantiation of '{node.struct_name}' is not supported by Qiskit backend.",
                         SourceLocation("ast")
                     )
-                    unsupported_ops.append(UnsupportedOp("StructLiteralNode", None, f"{node.struct_name} {{...}}", "Structs not supported"))
+                    unsupported_ops.append(UnsupportedOp(
+                        "StructLiteralNode", None,
+                        f"{node.struct_name} {{...}}",
+                        "Structs not supported",
+                    ))
             elif isinstance(node, ArrayLiteralNode):
                 if self.capabilities.supports_arrays == CapabilityLevel.UNSUPPORTED:
                     diag_engine.emit(
@@ -296,6 +303,10 @@ class QiskitBackend:
                     lines.append(f"qc.cz({q_indices[0]}, {q_indices[1]}){cond_suffix}")
                 elif g_name == 'swap':
                     lines.append(f"qc.swap({q_indices[0]}, {q_indices[1]}){cond_suffix}")
+                elif g_name == 'ccx':
+                    lines.append(f"qc.ccx({q_indices[0]}, {q_indices[1]}, {q_indices[2]}){cond_suffix}")
+                elif g_name == 'cswap':
+                    lines.append(f"qc.cswap({q_indices[0]}, {q_indices[1]}, {q_indices[2]}){cond_suffix}")
                 elif g_name in ('rx', 'ry', 'rz'):
                     angle = node.args[0] if node.args else 0.0
                     # Check if angle is unsupported placeholder
@@ -303,6 +314,20 @@ class QiskitBackend:
                         lines.append(f"# Skipped gate {node.gate_name} due to unsupported classical angle expression: {angle}")
                     else:
                         lines.append(f"qc.{g_name}({angle}, {q_indices[0]}){cond_suffix}")
+                # Audit §2.4: previously CRX/CRY/CRZ/CP fell through to the
+                # `else` "Unsupported gate" branch. Add explicit Qiskit
+                # method dispatch so the extended test suite confirms
+                # they emit `qc.crx(θ, c, t)` / etc., matching the Qiskit
+                # standard library's `QuantumCircuit.crx/cry/crz/cp`
+                # methods. (Per the qiskit backend's existing pattern, the
+                # angle parameter comes first and is followed by the
+                # qubit indices.)
+                elif g_name in ('crx', 'cry', 'crz', 'cp'):
+                    angle = node.args[0] if node.args else 0.0
+                    if isinstance(angle, str) and angle.startswith("__") and angle.endswith("__"):
+                        lines.append(f"# Skipped gate {node.gate_name} due to unsupported classical angle expression: {angle}")
+                    else:
+                        lines.append(f"qc.{g_name}({angle}, {q_indices[0]}, {q_indices[1]}){cond_suffix}")
                 else:
                     lines.append(f"# Unsupported gate: {node.gate_name} on {node.targets}")
 
@@ -336,6 +361,19 @@ class QiskitBackend:
                     lines.append(f"# Eigen warning: unsupported assert omitted ({left} {op} {right})")
                 else:
                     lines.append(f"# Assert condition: {left} {op} {right}")
+
+        # Audit §2.4 (extend tests): when the EQIR graph contains no
+        # MEASURE nodes AND no TRACE nodes, the generated qiskit script
+        # would call `get_counts(qc)` on a circuit with no classical
+        # measurement, returning a useless empty counts dict. Emit a
+        # `save_statevector()` call (guarded by `hasattr` for the case
+        # where the user's qiskit version doesn't include Aer's
+        # statevector saving) before the simulator footer so the
+        # script returns amplitudes rather than an empty `counts`.
+        has_measure = any(n.type == 'MEASURE' for n in graph.nodes.values())
+        has_trace = any(n.type == 'TRACE' for n in graph.nodes.values())
+        if not has_measure and not has_trace:
+            lines.append("qc.save_statevector() if hasattr(qc, 'save_statevector') else None")
 
         # Add execution footer
         lines.extend([

@@ -1,0 +1,76 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+qubit q3
+qubit q4
+qubit q5
+qubit q6
+qubit q7
+qubit q8
+qubit q9
+qubit q10
+qubit q11
+qubit q12
+qubit q13
+qubit q14
+qubit q15
+qubit q16
+qubit q17
+qubit q18
+qubit q19
+qubit q20
+qubit q21
+qubit q22
+qubit q23
+# GHZ staircase.
+H q0
+CNOT q0, q1
+CNOT q0, q2
+CNOT q0, q3
+CNOT q0, q4
+CNOT q0, q5
+CNOT q0, q6
+CNOT q0, q7
+CNOT q0, q8
+CNOT q0, q9
+CNOT q0, q10
+CNOT q0, q11
+CNOT q0, q12
+CNOT q0, q13
+CNOT q0, q14
+CNOT q0, q15
+CNOT q0, q16
+CNOT q0, q17
+CNOT q0, q18
+CNOT q0, q19
+CNOT q0, q20
+CNOT q0, q21
+CNOT q0, q22
+CNOT q0, q23
+# Final Hadamard layer populates all 2^n amplitudes.
+H q0
+H q1
+H q2
+H q3
+H q4
+H q5
+H q6
+H q7
+H q8
+H q9
+H q10
+H q11
+H q12
+H q13
+H q14
+H q15
+H q16
+H q17
+H q18
+H q19
+H q20
+H q21
+H q22
+H q23

@@ -75,5 +75,26 @@ def get_backend_capabilities(backend_name: str) -> BackendCapabilities:
             supports_field_access=CapabilityLevel.EMULATED,
             supports_index_access=CapabilityLevel.EMULATED,
         )
+    elif backend_name in ("ionq", "braket", "azure", "ibm",
+                          "ibm_runtime", "ionq_runtime"):
+        # Hardware exporters/submitter: they accept the standard Eigen
+        # quantum gate vocabulary (H/X/Y/Z/S/T/CNOT/CZ/SWAP/RX/RY/RZ/...)
+        # and measurements. Classical flow constructs (loops, recursion,
+        # exceptions, structs, imports) are not part of the export target
+        # language — the caller must lower those to gates before export.
+        return BackendCapabilities(
+            supports_quantum_gates=CapabilityLevel.SUPPORTED,
+            supports_measurements=CapabilityLevel.SUPPORTED,
+            supports_classical_functions=CapabilityLevel.UNSUPPORTED,
+            supports_recursion=CapabilityLevel.UNSUPPORTED,
+            supports_arrays=CapabilityLevel.UNSUPPORTED,
+            supports_maps=CapabilityLevel.UNSUPPORTED,
+            supports_structs=CapabilityLevel.UNSUPPORTED,
+            supports_exceptions=CapabilityLevel.UNSUPPORTED,
+            supports_imports=CapabilityLevel.UNSUPPORTED,
+            supports_loops=CapabilityLevel.UNSUPPORTED,
+            supports_field_access=CapabilityLevel.UNSUPPORTED,
+            supports_index_access=CapabilityLevel.UNSUPPORTED,
+        )
     else:
         return BackendCapabilities()

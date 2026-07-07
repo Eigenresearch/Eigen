@@ -32,6 +32,9 @@ def main():
     run_parser.add_argument("--noise-prob", type=float, default=0.0, help="Noise probability/rate")
     run_parser.add_argument("--gpu", choices=["auto", "cuda", "rocm", "metal", "none"], default="none", help="GPU acceleration engine target")
     run_parser.add_argument("--seed", type=int, default=None, help="Random number generator seed for deterministic simulation")
+    run_parser.add_argument("--deterministic", action="store_true", help="Force fully reproducible execution (sol.md §2.1): implies a fixed RNG seed and rejects non-deterministic operations")
+    run_parser.add_argument("--max-instructions", type=int, default=None, help="VM instruction-count limit (sol.md §7.1 hardening). Aborts with TimeoutError once exceeded")
+    run_parser.add_argument("--instruction-timeout", type=float, default=None, help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
     run_parser.add_argument("--verbose", action="store_true", help="Print debug prefixes in output")
 
     # Debug command
@@ -94,6 +97,9 @@ def main():
     exec_parser.add_argument("file", help="Path to compiled EBC file")
     exec_parser.add_argument("--trace", action="store_true", help="Enable VM trace mode")
     exec_parser.add_argument("--seed", type=int, default=None, help="Random number generator seed")
+    exec_parser.add_argument("--deterministic", action="store_true", help="Force fully reproducible execution (sol.md §2.1)")
+    exec_parser.add_argument("--max-instructions", type=int, default=None, help="VM instruction-count limit (sol.md §7.1 hardening)")
+    exec_parser.add_argument("--instruction-timeout", type=float, default=None, help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
     exec_parser.add_argument("--verbose", action="store_true", help="Print debug prefixes in output")
 
     # Bench command

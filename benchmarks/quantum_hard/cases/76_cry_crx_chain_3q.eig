@@ -1,0 +1,12 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+H q0
+CRY q0, q1, 0.7
+CRX q1, q2, 0.4
+CRY q0, q2, 1.2
+H q1
+RZ q0, 0.3

@@ -108,17 +108,232 @@ OPCODE_LIST = [
 OPCODE_TO_INT = {op: i for i, op in enumerate(OPCODE_LIST)}
 INT_TO_OPCODE = list(OPCODE_LIST)
 
-BYTECODE_VERSION = 1
+
+# === §4.4 Bytecode Versioning ==============================================
+# Major.minor versioning with forward-compatible handling:
+#   * Major increments when the bytecode wire format changes in a way
+#     that breaks backward/forward compatibility (e.g., opcodes removed,
+#     instruction layout restructured).
+#   * Minor increments when new opcodes/fields are ADDED in a way that
+#     older interpreters can still load the file (forward-compatibility).
+# An interpreter compiled against (1, 0) can safely execute a (1, k)
+# bytecode file for any k >= 0: unknown opcodes are reported lazily as
+# "unsupported opcode" rather than rejected up-front.
+
+BYTECODE_VERSION_MAJOR = 1
+BYTECODE_VERSION_MINOR = 0
+# Scalar fallback retained for legacy code paths and existing tests that
+# compare `version > BYTECODE_VERSION`.
+BYTECODE_VERSION = BYTECODE_VERSION_MAJOR
+
+
+class BytecodeVersion:
+    """Major.minor bytecode version with rich comparison & formatting."""
+
+    __slots__ = ("major", "minor")
+
+    def __init__(self, major: int, minor: int = 0):
+        if not isinstance(major, int) or isinstance(major, bool):
+            raise TypeError("major must be an int")
+        if not isinstance(minor, int) or isinstance(minor, bool):
+            raise TypeError("minor must be an int")
+        if major < 0 or minor < 0:
+            raise ValueError("version components must be non-negative")
+        self.major = major
+        self.minor = minor
+
+    @classmethod
+    def from_int(cls, value: int) -> "BytecodeVersion":
+        return cls(int(value), 0)
+
+    @classmethod
+    def from_tuple(cls, value) -> "BytecodeVersion":
+        if len(value) < 1:
+            raise ValueError("version tuple must have at least one element")
+        major = int(value[0])
+        minor = int(value[1]) if len(value) > 1 else 0
+        return cls(major, minor)
+
+    @classmethod
+    def from_str(cls, value: str) -> "BytecodeVersion":
+        text = value.strip().lstrip("v")
+        if not text:
+            raise ValueError("empty version string")
+        parts = text.split(".")
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        return cls(major, minor)
+
+    @classmethod
+    def parse(cls, value) -> "BytecodeVersion":
+        """Best-effort parse from int, tuple/list, str, or BytecodeVersion."""
+        if isinstance(value, BytecodeVersion):
+            return cls(value.major, value.minor)
+        if isinstance(value, bool):
+            raise TypeError("bool is not a valid version")
+        if isinstance(value, int):
+            return cls.from_int(value)
+        if isinstance(value, (tuple, list)):
+            return cls.from_tuple(value)
+        if isinstance(value, str):
+            return cls.from_str(value)
+        raise TypeError(f"unsupported version type: {type(value).__name__}")
+
+    def as_tuple(self):
+        return (self.major, self.minor)
+
+    def as_int(self) -> int:
+        """Backward-compatible int form (major only)."""
+        return self.major
+
+    def __str__(self) -> str:
+        return f"{self.major}.{self.minor}"
+
+    def __repr__(self) -> str:
+        return f"BytecodeVersion({self.major}, {self.minor})"
+
+    def __eq__(self, other) -> bool:
+        other = BytecodeVersion.parse(other)
+        return self.major == other.major and self.minor == other.minor
+
+    def __lt__(self, other) -> bool:
+        other = BytecodeVersion.parse(other)
+        return self.as_tuple() < other.as_tuple()
+
+    def __le__(self, other) -> bool:
+        other = BytecodeVersion.parse(other)
+        return self.as_tuple() <= other.as_tuple()
+
+    def __gt__(self, other) -> bool:
+        other = BytecodeVersion.parse(other)
+        return self.as_tuple() > other.as_tuple()
+
+    def __ge__(self, other) -> bool:
+        other = BytecodeVersion.parse(other)
+        return self.as_tuple() >= other.as_tuple()
+
+    def __hash__(self) -> int:
+        return hash(self.as_tuple())
+
+
+# The supported (max) bytecode version this interpreter understands.
+SUPPORTED_BYTECODE_VERSION = BytecodeVersion(
+    BYTECODE_VERSION_MAJOR, BYTECODE_VERSION_MINOR
+)
+
+
+class CompatibilityStatus:
+    """Enum-like class describing how a requested version relates
+    to the interpreter's supported version."""
+    EXACT = "exact"                 # same (major, minor)
+    FORWARD_MINOR = "forward_minor"  # same major, higher minor (forward-compat)
+    BACKWARD = "backward"           # strictly older (same or lower major)
+    INCOMPATIBLE_MAJOR = "incompatible_major"  # different major (forward)
+    INCOMPATIBLE_FUTURE = "incompatible_future"  # higher major than supported
+
+
+def parse_bytecode_version(value) -> BytecodeVersion:
+    """Public entrypoint for parsing a version from any supported form."""
+    return BytecodeVersion.parse(value)
+
+
+def check_bytecode_compatibility(requested) -> str:
+    """Return the CompatibilityStatus label for ``requested`` against
+    the interpreter's supported version.  Never raises."""
+    try:
+        rv = BytecodeVersion.parse(requested)
+    except (TypeError, ValueError):
+        return CompatibilityStatus.INCOMPATIBLE_MAJOR
+    sv = SUPPORTED_BYTECODE_VERSION
+    if rv == sv:
+        return CompatibilityStatus.EXACT
+    if rv.major == sv.major:
+        if rv.minor > sv.minor:
+            return CompatibilityStatus.FORWARD_MINOR
+        return CompatibilityStatus.BACKWARD
+    if rv.major < sv.major:
+        return CompatibilityStatus.BACKWARD
+    return CompatibilityStatus.INCOMPATIBLE_FUTURE
+
+
+def format_version_error(requested, supported=SUPPORTED_BYTECODE_VERSION) -> str:
+    """Produce a clear, actionable error message for a version mismatch."""
+    rv = BytecodeVersion.parse(requested)
+    sv = BytecodeVersion.parse(supported) if not isinstance(
+        supported, BytecodeVersion) else supported
+    return (
+        f"Bytecode version {rv} is not supported by this interpreter "
+        f"(max supported: {sv}). Major version mismatch — bytecode was "
+        f"produced by a newer, incompatible release. Upgrade the runtime "
+        f"or recompile the source with a compatible toolchain."
+    )
+
+
+def is_bytecode_compatible(requested) -> bool:
+    """True if the requested version can be loaded by this interpreter
+    without raising UnsupportedBytecodeVersionError. Forward-compatible
+    minor bumps are considered compatible."""
+    status = check_bytecode_compatibility(requested)
+    return status in (
+        CompatibilityStatus.EXACT,
+        CompatibilityStatus.FORWARD_MINOR,
+        CompatibilityStatus.BACKWARD,
+    )
+
 
 def validate_bytecode_version(data: dict) -> bool:
+    """Validate ``data["bytecode_version"]`` against the supported
+    bytecode version.
+
+    Returns True if the bytecode can be loaded by this interpreter.
+    Raises UnsupportedBytecodeVersionError if the requested version
+    has a HIGHER major than the interpreter supports (incompatible).
+
+    Forward-compatible handling: a bytecode file with a higher MINOR
+    version (same major) is loadable; the interpreter will only fail
+    later if it encounters an unknown opcode, which is the proper
+    forward-compatible behaviour.
+    """
     if isinstance(data, dict):
         version = data.get("bytecode_version", 0)
-        if version > BYTECODE_VERSION:
+        status = check_bytecode_compatibility(version)
+        if status in (
+            CompatibilityStatus.INCOMPATIBLE_MAJOR,
+            CompatibilityStatus.INCOMPATIBLE_FUTURE,
+        ):
             raise UnsupportedBytecodeVersionError(
-                f"Bytecode version {version} is not supported (max supported: {BYTECODE_VERSION})"
+                format_version_error(version)
             )
         return True
     return True
+
+
+def load_bytecode(data: dict) -> tuple[list, str]:
+    """Load a bytecode dictionary with full version validation.
+
+    Returns (instructions, compatibility_status).  Raises
+    UnsupportedBytecodeVersionError for incompatible major versions.
+
+    For forward-compatible minor versions (same major, higher minor),
+    the instructions are loaded normally — the VM will raise
+    InvalidOpcodeError lazily if it encounters an unknown opcode from
+    the newer minor version.
+    """
+    status = "exact"
+    if isinstance(data, dict):
+        version = data.get("bytecode_version", 0)
+        status = check_bytecode_compatibility(version)
+        if status in (
+            CompatibilityStatus.INCOMPATIBLE_MAJOR,
+            CompatibilityStatus.INCOMPATIBLE_FUTURE,
+        ):
+            raise UnsupportedBytecodeVersionError(
+                format_version_error(version)
+            )
+        raw_instructions = data.get("instructions", [])
+        instructions = [Instruction.from_dict(d) for d in raw_instructions]
+        return instructions, status
+    return [], "exact"
 
 
 class Instruction:

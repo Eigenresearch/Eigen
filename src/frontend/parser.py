@@ -7,7 +7,9 @@ from src.frontend.ast import (
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
     IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
-    MatchNode, StringInterpolationNode
+    MatchNode, StringInterpolationNode,
+    TraitDeclNode, TraitMethodSignatureNode, ImplBlockNode,
+    TypeAliasDeclNode,
 )
 
 def node_to_str(node) -> str:
@@ -133,7 +135,20 @@ class Parser:
             ])
         tok = self.match(*types_to_match)
         if not tok:
-            self.error("Expected type name")
+            # §7.3 — surface a "Did you mean?" suggestion when the caller's
+            # token looks like a typo of a known primitive type or gate.
+            from src.frontend.did_you_mean import format_suggestion
+            cur = self.current()
+            vocab = ["int", "float", "string", "bool", "qubit", "cbit",
+                     "array", "map", "H", "X", "Y", "Z", "S", "T",
+                     "CNOT", "CZ", "SWAP", "RX", "RY", "RZ", "CCX",
+                     "CSWAP", "CP", "CRX", "CRY", "CRZ"]
+            # Tight cap (1) — we only want close single-edit typos since
+            # the type slot's vocab is short tokens where 2-edit matches
+            # are too permissive ("42" → "H" is 2 edits but not a
+            # meaningful suggestion).
+            hint = format_suggestion(str(cur.value), vocab, max_distance=1)
+            self.error(f"Expected type name{hint}")
         
         type_str = tok.value
         # Check if it has generic parameters, e.g. <T> or <K, V>
@@ -164,6 +179,19 @@ class Parser:
         # enum declaration
         if tok.type == TokenType.ENUM:
             return self.parse_enum_decl()
+
+        # §3.1 — Trait declaration: `trait Foo { fn bar(...) -> ...; ... }`
+        if tok.type == TokenType.TRAIT:
+            return self.parse_trait_decl()
+
+        # §3.1 — Impl block: `impl Trait for Type { ... }` (or
+        # `impl Type { ... }` inherent impl).
+        if tok.type == TokenType.IMPL:
+            return self.parse_impl_block()
+
+        # §3.3 — Type alias: `type Name = Target;`
+        if tok.type == TokenType.TYPE:
+            return self.parse_type_alias_decl()
 
         # let assignment
         if tok.type == TokenType.LET:
@@ -479,6 +507,153 @@ class Parser:
                 variants.append(v_tok.value)
         self.consume(TokenType.RBRACE, "Expected '}'")
         return EnumDeclNode(name_tok.value, variants)
+
+    # === §3.1 — Trait/Interface System (partial: AST/parser surface). =====
+
+    def parse_trait_decl(self) -> TraitDeclNode:
+        """Parse `trait Foo[<T>] { [fn name(...) -> ...;]* }`.
+
+        Trait methods have signature-only bodies — they use
+        `FuncDeclNode`'s parameter grammar but emit
+        `TraitMethodSignatureNode` with an empty body.
+        """
+        self.consume(TokenType.TRAIT, "Expected 'trait'")
+        name_tok = self.consume(TokenType.IDENTIFIER, "Expected trait name")
+
+        generic_params = []
+        if self.match(TokenType.LT):
+            generic_params.append(self.parse_generic_param_name())
+            while self.match(TokenType.COMMA):
+                generic_params.append(self.parse_generic_param_name())
+            self.consume(TokenType.GT, "Expected '>'")
+
+        self.consume(TokenType.LBRACE, "Expected '{'")
+
+        methods = []
+        while self.current().type not in (TokenType.RBRACE, TokenType.EOF):
+            # Require `fn` ... but Eigen uses `func` historically; accept
+            # both so users migrating existing struct method syntax can
+            # reuse `func`.
+            method_kw = self.match(TokenType.FUNC, TokenType.QFUNC)
+            if method_kw is None:
+                self.error("Expected 'func' inside trait body")
+            m_name = self.consume(TokenType.IDENTIFIER,
+                                   "Expected method name").value
+            # Per-method generics (rare): skip if present.
+            m_generics = []
+            if self.match(TokenType.LT):
+                m_generics.append(self.parse_generic_param_name())
+                while self.match(TokenType.COMMA):
+                    m_generics.append(self.parse_generic_param_name())
+                self.consume(TokenType.GT, "Expected '>'")
+            self.consume(TokenType.LPAREN, "Expected '('")
+            params = []
+            if self.current().type != TokenType.RPAREN:
+                p_name_tok = self.consume(TokenType.IDENTIFIER,
+                                            "Expected parameter name")
+                self.consume(TokenType.COLON, "Expected ':'")
+                p_type = self.parse_type()
+                params.append((p_name_tok.value, p_type))
+                while self.match(TokenType.COMMA):
+                    p_name_tok = self.consume(TokenType.IDENTIFIER,
+                                                "Expected parameter name")
+                    self.consume(TokenType.COLON, "Expected ':'")
+                    p_type = self.parse_type()
+                    params.append((p_name_tok.value, p_type))
+            self.consume(TokenType.RPAREN, "Expected ')'")
+            return_type = "void"
+            if self.match(TokenType.ARROW):
+                return_type = self.parse_type()
+            # Trait method signatures end with ';' or '}' (we accept both
+            # for compatibility with users who'd otherwise write the body).
+            self.match(TokenType.SEMICOLON)
+            methods.append(TraitMethodSignatureNode(
+                m_name, m_generics, params, return_type,
+            ))
+
+        self.consume(TokenType.RBRACE, "Expected '}'")
+        return TraitDeclNode(name_tok.value, generic_params, methods)
+
+    # === §3.3 — Type Aliases (partial: AST/parser surface). =============
+
+    def parse_type_alias_decl(self) -> TypeAliasDeclNode:
+        """Parse `type Name = Target;`.
+
+        The target type is parsed as the existing free-form type grammar
+        via `parse_type` (allowing references to existing types and
+        generic shapes like `Map<string, int>`). The body is single-
+        statement and must end with either a `;` or the start of the
+        next statement (`func`, `qfunc`, `let`, EOF, etc.) — we accept
+        `;` optimally, otherwise we let the caller's statement-loop
+        continue without consuming a lookahead token.
+
+        Alias resolution is done lazily by the type checker at every
+        type-reference site, so circular aliases (`type A = B; type B =
+        A;`) will fail at first lookup with an explicit Undeclared-
+        variable-style error rather than hanging.
+        """
+        self.consume(TokenType.TYPE, "Expected 'type'")
+        name_tok = self.consume(TokenType.IDENTIFIER,
+                                "Expected type alias name")
+        self.consume(TokenType.EQUALS, "Expected '=' after type alias name")
+        target = self.parse_type(allow_gates=False)
+        # `;` is the canonical terminator; we accept no-semicolon for
+        # newline-friendly source where the next token unambiguously
+        # starts a new statement.
+        self.match(TokenType.SEMICOLON)
+        return TypeAliasDeclNode(name_tok.value, target)
+
+    def parse_impl_block(self) -> ImplBlockNode:
+        """Parse `impl Trait for Type { ...func... }` or `impl Type { ... }`.
+
+        The first IDENT after `impl` may be either:
+          * a trait name (if followed by `for Type`), or
+          * the target type itself (an inherent impl; `trait_name = None`).
+        """
+        self.consume(TokenType.IMPL, "Expected 'impl'")
+        first_name = self.consume(TokenType.IDENTIFIER, "Expected identifier after 'impl'").value
+
+        # Optional generic parameters on the impl, e.g. `impl Vector<T> for Foo<T>`.
+        if self.match(TokenType.LT):
+            # Skip generics — we just record the name.
+            self.parse_generic_param_name()
+            while self.match(TokenType.COMMA):
+                self.parse_generic_param_name()
+            self.consume(TokenType.GT, "Expected '>'")
+
+        # `for Type` form. We support the `for` keyword as a contextual
+        # marker: if the next token is `FOR`, this is a trait impl; else
+        # it's an inherent impl (`impl Type { ... }`).
+        trait_name = None
+        target_type = first_name
+        if self.match(TokenType.FOR):
+            target_type = self.consume(TokenType.IDENTIFIER,
+                                        "Expected type name after 'for'").value
+            trait_name = first_name
+
+        # Strip any optional generic-args tail on the target type
+        # (e.g. `impl Trait for Vector<T>` — we keep just `Vector`).
+        if self.match(TokenType.LT):
+            self.parse_generic_param_name()
+            while self.match(TokenType.COMMA):
+                self.parse_generic_param_name()
+            self.consume(TokenType.GT, "Expected '>'")
+
+        self.consume(TokenType.LBRACE, "Expected '{'")
+        methods = []
+        while self.current().type not in (TokenType.RBRACE, TokenType.EOF):
+            # Use the existing func-decl parser to keep method signatures
+            # and bodies consistent with free functions. The func-decl
+            # parser expects `func` as the first token, so it composes
+            # cleanly.
+            stmt = self.parse_statement()
+            if isinstance(stmt, FuncDeclNode):
+                methods.append(stmt)
+            else:
+                self.error(f"Expected 'func' inside impl block, got {type(stmt).__name__}")
+
+        self.consume(TokenType.RBRACE, "Expected '}'")
+        return ImplBlockNode(trait_name, target_type, methods)
 
     def parse_let(self) -> LetNode:
         self.consume(TokenType.LET, "Expected 'let'")

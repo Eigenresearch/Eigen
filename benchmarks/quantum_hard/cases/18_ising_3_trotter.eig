@@ -1,0 +1,44 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+# Prepare |+++> with q0=|+>, q1=|->, q2=|+> for non-trivial dynamics.
+H q0
+X q1
+H q1
+H q2
+
+# Trotter step: e^{-i*ZZ*dt} ≈ RZ(2*dt) on each qubit applied as CNOT - RZ - CNOT
+# Hamiltonian H = Z0Z1 + Z1Z2; dt = pi/16
+# Apply e^{-i dt ZZ} on pair (q0, q1):
+CNOT q0, q1
+RZ q1, 0.19634954084936207      # pi/16
+CNOT q0, q1
+# Repeat for pair (q1, q2):
+CNOT q1, q2
+RZ q2, 0.19634954084936207
+CNOT q1, q2
+
+# Repeat the same 4 times for total t = pi/4.
+CNOT q0, q1
+RZ q1, 0.19634954084936207
+CNOT q0, q1
+CNOT q1, q2
+RZ q2, 0.19634954084936207
+CNOT q1, q2
+
+CNOT q0, q1
+RZ q1, 0.19634954084936207
+CNOT q0, q1
+CNOT q1, q2
+RZ q2, 0.19634954084936207
+CNOT q1, q2
+
+CNOT q0, q1
+RZ q1, 0.19634954084936207
+CNOT q0, q1
+CNOT q1, q2
+RZ q2, 0.19634954084936207
+CNOT q1, q2

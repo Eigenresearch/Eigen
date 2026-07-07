@@ -45,7 +45,12 @@ def run_command(args, workspace_root):
         gpu_platform = getattr(args, 'gpu', 'none')
         seed_val = getattr(args, 'seed', None)
         verbose_val = getattr(args, 'verbose', False)
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level)
+        deterministic_val = bool(getattr(args, 'deterministic', False))
+        max_instr_val = getattr(args, 'max_instructions', None)
+        timeout_val = getattr(args, 'instruction_timeout', None)
+        if deterministic_val and seed_val is None:
+            seed_val = 0
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
         vm.execute(instructions)
         return
 
@@ -59,16 +64,19 @@ def run_command(args, workspace_root):
         print(f"EQIR Optimizer: Performed {optimizer.optimizations_count} optimization rewrites.")
         
     if args.backend in ("qiskit", "ibmq"):
-        from src.backend.qiskit_backend import QiskitBackend
-        backend_transpiler = QiskitBackend()
-        qiskit_script, report = backend_transpiler.transpile(graph, ast)
-        
-        if strict_mode and report.unsupported_nodes > 0:
+        # §4.1 Unified Backend Interface: route through the QuantumBackend
+        # adapter so callers don't import QiskitBackend directly.
+        from src.backend.unified_backend import get_quantum_backend
+        backend = get_quantum_backend(args.backend)
+        report = backend.validate(graph, ast)
+
+        if strict_mode and not report.ok:
             print(f"ERROR: Backend capabilities violation for {args.backend}.", file=sys.stderr)
             for w in report.warnings:
                 print(f"  - {w}", file=sys.stderr)
             sys.exit(1)
-            
+
+        qiskit_script = backend.compile(graph, ast)
         out_path = args.file.rsplit('.', 1)[0] + "_qiskit.py"
         with open(out_path, 'w', encoding='utf-8') as f:
             f.write(qiskit_script)
@@ -80,9 +88,12 @@ def run_command(args, workspace_root):
     
     sim_backend_type = 'dense'
     if args.backend == 'auto':
+        from src.backend.gate_registry import CLIFFORD_GATES
+        from src.backend.sim_selector import select_from_counts
         allocated_qubits = set()
         cnot_count = 0
         gate_count = 0
+        is_all_clifford = True
         for node in graph.nodes.values():
             if node.type == 'ALLOC':
                 allocated_qubits.update(node.targets)
@@ -90,24 +101,31 @@ def run_command(args, workspace_root):
                 gate_count += 1
                 if node.gate_name in ('CNOT', 'CZ', 'SWAP'):
                     cnot_count += 1
+                if is_all_clifford and node.gate_name not in CLIFFORD_GATES:
+                    is_all_clifford = False
         num_qubits = len(allocated_qubits)
         density = gate_count / max(1, num_qubits)
         entanglement = cnot_count / max(1, num_qubits)
-        
-        if num_qubits <= 12:
-            sim_backend_type = 'dense'
-        elif entanglement < 0.25 and num_qubits > 16:
-            sim_backend_type = 'mps'
-        elif density < 2.0 and num_qubits > 12:
-            sim_backend_type = 'sparse'
-        else:
-            sim_backend_type = 'dense' if num_qubits <= 16 else 'sparse'
-            
-        print(f"[Auto Backend] Selected '{sim_backend_type}' simulator target based on circuit metrics:")
+
+        noise_active = bool(getattr(args, 'noise', None) is not None
+                            and getattr(args, 'noise_prob', 0.0) > 0)
+        report = select_from_counts(
+            n_qubits=num_qubits,
+            n_2q_gates=cnot_count,
+            n_gates=gate_count,
+            is_all_clifford=is_all_clifford,
+            noise_active=noise_active,
+        )
+        sim_backend_type = report.chosen
+
+        print(f"[Auto Backend] Selected '{sim_backend_type}' simulator target ({report.reason}):")
         print(f"  Qubits:       {num_qubits}")
         print(f"  Gate Count:   {gate_count}")
         print(f"  Gate Density: {density:.2f}")
         print(f"  Entanglement: {entanglement:.2f}")
+        print(f"  All-Clifford: {is_all_clifford}")
+        if report.fallback_used:
+            print(f"  Fallback:     '{report.fallback_from}' -> '{report.chosen}' (memory budget)")
     elif args.backend == 'sparse':
         sim_backend_type = 'sparse'
     elif args.backend == 'mps':
@@ -127,8 +145,20 @@ def run_command(args, workspace_root):
         gpu_platform = getattr(args, 'gpu', 'none')
         seed_val = getattr(args, 'seed', None)
         verbose_val = getattr(args, 'verbose', False)
-        
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level)
+        deterministic_val = bool(getattr(args, 'deterministic', False))
+        max_instr_val = getattr(args, 'max_instructions', None)
+        timeout_val = getattr(args, 'instruction_timeout', None)
+        if deterministic_val and seed_val is None:
+            seed_val = 0
+
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
+        # Native-Python recursion fast path: pre-compile qualifying pure
+        # recursive functions to Python callables that bypass VM dispatch.
+        try:
+            from src.jit.recursive_codegen import compile_recursive_functions
+            vm.recursive_funcs = compile_recursive_functions(ast)
+        except Exception:
+            vm.recursive_funcs = {}
         try:
             vm.execute(instructions)
         except AssertionError as ae:

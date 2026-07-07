@@ -1,0 +1,21 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+# Prepare |001> = q2 in |1>
+X q2
+
+# QFT-3 manual decomposition:
+# H on q0 (MSB), then controlled-R2 on q0<-q1, R3 on q0<-q2.
+# H on q1 (middle), controlled-R2 on q1<-q2.
+# H on q2 (LSB).
+# Then SWAP q0 <-> q2 to put bits in conventional QFT order.
+H q0
+CRZ q1, q0, 1.5707963267948966   # pi/2
+CRZ q2, q0, 0.7853981633974483   # pi/4
+H q1
+CRZ q2, q1, 1.5707963267948966   # pi/2
+H q2
+SWAP q0, q2

@@ -13,6 +13,19 @@ if not logger.handlers:
     logger.setLevel(logging.WARNING)
 
 DEFAULT_MAX_BOND_DIM = 64
+
+# === sol.md P0 §1.3 — cached standard 1-qubit gate matrices as NumPy
+# arrays. Reused by all standard gate applications on the MPS path, avoiding
+# a per-call rebuild of the 2x2 np.ndarray.
+_INV_SQRT2_MPS = 1.0 / math.sqrt(2.0)
+_MPS_GATE_NP_CACHE = {
+    'H': np.array([[_INV_SQRT2_MPS, _INV_SQRT2_MPS], [_INV_SQRT2_MPS, -_INV_SQRT2_MPS]], dtype=complex),
+    'X': np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex),
+    'Y': np.array([[0.0, -1j], [1j, 0.0]], dtype=complex),
+    'Z': np.array([[1.0, 0.0], [0.0, -1.0]], dtype=complex),
+    'S': np.array([[1.0, 0.0], [0.0, 1j]], dtype=complex),
+    'T': np.array([[1.0, 0.0], [0.0, _INV_SQRT2_MPS + _INV_SQRT2_MPS * 1j]], dtype=complex),
+}
 DEFAULT_MAX_TRUNCATION_ERROR = 1e-4
 AUTO_BOND_DIM_FACTOR = 2
 
@@ -137,43 +150,31 @@ class MPSSimulator:
         # Transpose to (L, 2_new, R)
         self.tensors[idx] = np.transpose(res, (1, 0, 2))
 
+    def _apply_named_1qubit_np(self, q: str, U_np: np.ndarray):
+        """Apply a pre-built NumPy 2x2 gate (cached for one of H/X/Y/Z/S/T)
+        directly, skipping the list -> np.array conversion. Used by the
+        standard 1-qubit gate shortcuts below."""
+        idx = self.get_qubit_index(q)
+        res = np.tensordot(U_np, self.tensors[idx], axes=(1, 1))
+        self.tensors[idx] = np.transpose(res, (1, 0, 2))
+
     def H(self, q: str):
-        inv_sqrt2 = 0.7071067811865475
-        self.apply_1qubit_gate(q, [
-            [inv_sqrt2, inv_sqrt2],
-            [inv_sqrt2, -inv_sqrt2]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['H'])
 
     def X(self, q: str):
-        self.apply_1qubit_gate(q, [
-            [0.0, 1.0],
-            [1.0, 0.0]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['X'])
 
     def Y(self, q: str):
-        self.apply_1qubit_gate(q, [
-            [0.0, -1j],
-            [1j, 0.0]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['Y'])
 
     def Z(self, q: str):
-        self.apply_1qubit_gate(q, [
-            [1.0, 0.0],
-            [0.0, -1.0]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['Z'])
 
     def S(self, q: str):
-        self.apply_1qubit_gate(q, [
-            [1.0, 0.0],
-            [0.0, 1j]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['S'])
 
     def T(self, q: str):
-        val = 0.7071067811865475 + 0.7071067811865475j
-        self.apply_1qubit_gate(q, [
-            [1.0, 0.0],
-            [0.0, val]
-        ])
+        self._apply_named_1qubit_np(q, _MPS_GATE_NP_CACHE['T'])
 
     def RX(self, q: str, theta: float):
         cos_val = math.cos(theta / 2)

@@ -1,0 +1,24 @@
+eigen 1.0
+
+qubit q0  # MSB
+qubit q1
+qubit q2
+qubit q3  # LSB
+
+# Prepare |1101>
+X q0
+X q1
+X q3
+
+H q0
+CRZ q1, q0, 1.5707963267948966        # pi/2
+CRZ q2, q0, 0.7853981633974483        # pi/4
+CRZ q3, q0, 0.39269908169872414       # pi/8
+H q1
+CRZ q2, q1, 1.5707963267948966        # pi/2
+CRZ q3, q1, 0.7853981633974483        # pi/4
+H q2
+CRZ q3, q2, 1.5707963267948966        # pi/2
+H q3
+SWAP q0, q3
+SWAP q1, q2

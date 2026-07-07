@@ -1,0 +1,12 @@
+eigen 1.0
+
+qubit q0  # Alice's half
+qubit q1  # Bob's half
+
+# Prepare Bell |Phi+>
+H q0
+CNOT q0, q1
+# Alice encodes "00": identity, no operation.
+# Bob decodes: CNOT q0 -> q1, then H q0.
+CNOT q0, q1
+H q0

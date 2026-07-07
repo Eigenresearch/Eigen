@@ -50,9 +50,11 @@ class EigenRuntime:
             if isinstance(node, ast.Expression):
                 return safe_eval(node.body, variables)
             elif isinstance(node, ast.Constant):
+                # `ast.Constant` covers all numeric/string/bool/None literals
+                # since Python 3.8; the legacy `ast.Num` fallback below was
+                # dead code that triggered a DeprecationWarning in 3.12 and
+                # would break in 3.14 (where the alias is removed entirely).
                 return node.value
-            elif hasattr(ast, 'Num') and isinstance(node, ast.Num):  # Fallback for older python
-                return node.n
             elif isinstance(node, ast.Name):
                 if node.id in ('True', 'False', 'None'):
                     return {'True': True, 'False': False, 'None': None}[node.id]
@@ -146,22 +148,30 @@ class EigenRuntime:
 
     def execute(self, graph: EQIRGraph):
         if getattr(self.simulator, 'sim_type', None) == 'auto':
+            from src.backend.gate_registry import CLIFFORD_GATES
+            from src.backend.sim_selector import select_from_counts
             n_qubits = 0
             n_2q = 0
+            n_gates = 0
+            is_all_clifford = True
             for node in graph.nodes.values():
                 if node.type == 'ALLOC':
                     n_qubits += 1
                 elif node.type == 'GATE':
+                    n_gates += 1
                     if node.gate_name in ('CNOT', 'CZ', 'SWAP'):
                         n_2q += 1
-            if n_qubits <= 16:
-                chosen = 'dense'
-            else:
-                if n_2q < n_qubits * 1.5:
-                    chosen = 'mps'
-                else:
-                    chosen = 'sparse'
-            self.simulator.configure_backend(chosen)
+                    if is_all_clifford and node.gate_name not in CLIFFORD_GATES:
+                        is_all_clifford = False
+            noise_active = bool(self.noise_model and self.noise_model.noise_prob > 0)
+            report = select_from_counts(
+                n_qubits=n_qubits,
+                n_2q_gates=n_2q,
+                n_gates=n_gates,
+                is_all_clifford=is_all_clifford,
+                noise_active=noise_active,
+            )
+            self.simulator.configure_backend(report.chosen)
 
         nodes = graph.topological_sort()
         

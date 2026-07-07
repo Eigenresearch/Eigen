@@ -58,6 +58,11 @@ def profile_command(args, workspace_root):
     t_ebc_compile = (time.perf_counter() - t0) * 1000.0
     
     vm = EigenVM()
+    try:
+        from src.jit.recursive_codegen import compile_recursive_functions
+        vm.recursive_funcs = compile_recursive_functions(ast)
+    except Exception:
+        vm.recursive_funcs = {}
     t_exec_start = time.perf_counter()
     try:
         vm.execute(instrs)
@@ -96,7 +101,7 @@ def profile_command(args, workspace_root):
     print("-" * 60)
     print(f"JIT Executions:        {vm.jit_hits}")
     print(f"JIT Deopts:            {vm.jit_deopts}")
-    print(f"JIT Compiled Blocks:   {len(vm.jit.GLOBAL_CACHE.cache)}")
+    print(f"JIT Compiled Blocks:   {len(vm.jit.cache.cache)}")
     print("=" * 60)
 
     if getattr(args, 'flamegraph', False):

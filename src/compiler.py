@@ -9,6 +9,7 @@ from src.semantic.import_resolver import ImportResolver
 from src.semantic.type_checker import TypeChecker, TypeErrorException
 from src.ir.ir_graph import EQIRGraph
 from src.backend.bytecode import Instruction
+from src.compiler_optimizations import IncrementalCache, LazyModuleLoader
 
 def get_workspace_root() -> str:
     root = os.getcwd()
@@ -73,6 +74,10 @@ def get_file_hash(filepath: str) -> str:
 from src.compiler_db import QueryDb
 
 _DBS = {}
+
+# §1.2 — Module-level incremental compilation caches
+_incremental_cache = IncrementalCache()
+_lazy_loader = LazyModuleLoader()
 
 def get_db(workspace_root: str) -> QueryDb:
     global _DBS
@@ -262,8 +267,86 @@ def compile_to_eqir(filepath: str, workspace_root: str) -> tuple:
         print(f"Error: File '{filepath}' not found.", file=sys.stderr)
         sys.exit(1)
     
+    # §1.2 — Check incremental AST/EQIR cache
     try:
-        return to_eqir(filepath, workspace_root)
+        with open(filepath, 'r', encoding='utf-8') as f:
+            source = f.read()
+        cached_ast, ast_hit = _incremental_cache.get_ast(source)
+        if ast_hit and cached_ast is not None:
+            # AST cache hit — skip parse + type_check, go straight to EQIR
+            from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
+            mlir_converter = ASTToMLIRConverter()
+            mlir_module = mlir_converter.convert(cached_ast)
+            eqir_converter = MLIRToEQIRConverter()
+            graph = eqir_converter.convert(mlir_module)
+            return graph, cached_ast
+    except Exception:
+        pass  # Fall through to normal pipeline on any cache error
+    
+    try:
+        result = to_eqir(filepath, workspace_root)
+        # §1.2 — Cache the AST for incremental compilation
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                source = f.read()
+            _incremental_cache.put_ast(source, result[1])
+        except Exception:
+            pass
+        return result
     except TypeErrorException as e:
         print(f"Type Verification Failed:\n{e}", file=sys.stderr)
         sys.exit(1)
+
+
+def compile_multiple_parallel(filepaths: list[str],
+                                workspace_root: str,
+                                max_workers: int = 4) -> dict:
+    """Compile multiple modules in parallel.
+
+    §8.2: "Параллельная компиляция — несколько модулей одновременно"
+
+    Uses the ParallelCompiler to compile independent modules
+    simultaneously, respecting cross-module dependencies.
+    Returns a dict of {filepath: (graph, ast) or error_string}.
+    """
+    from src.parallel_compiler import (
+        CompilationTask, compile_in_parallel,
+    )
+    import os
+
+    tasks = []
+    for fp in filepaths:
+        deps = []
+        # Detect dependencies by parsing imports
+        try:
+            with open(fp, 'r', encoding='utf-8') as f:
+                content = f.read()
+            from src.frontend.lexer import Lexer as _L
+            from src.frontend.parser import Parser as _P
+            ast = _P(_L(content).tokenize()).parse()
+            for imp in ast.imports:
+                # Map import path to a file in the same list
+                dep_path = imp.module_path.replace('.', '/') + '.eig'
+                for other in filepaths:
+                    if other.endswith(dep_path):
+                        deps.append(os.path.basename(other).replace('.eig', ''))
+                        break
+        except Exception:
+            pass
+        tasks.append(CompilationTask(
+            module_name=os.path.basename(fp).replace('.eig', ''),
+            source_path=fp,
+            dependencies=deps,
+        ))
+
+    def _compile_one(task: CompilationTask):
+        return compile_to_eqir(task.source_path, workspace_root)
+
+    result = compile_in_parallel(tasks, _compile_one, max_workers=max_workers)
+    output = {}
+    for t in result.tasks:
+        if t.status == "done":
+            output[t.source_path] = t.result
+        else:
+            output[t.source_path] = t.error or "unknown error"
+    return output

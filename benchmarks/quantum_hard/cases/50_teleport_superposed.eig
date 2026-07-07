@@ -1,0 +1,13 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+H q0
+T q0
+H q1
+CNOT q1, q2
+CNOT q0, q1
+H q0
+CZ q0, q2
+CNOT q1, q2

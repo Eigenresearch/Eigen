@@ -278,11 +278,35 @@ assert result == 0
         pkg_ver = data.get('package', {}).get('version', '1.0.0')
         
         print(f"Publishing package '{pkg_name}' v{pkg_ver} to registry.eigen-lang.org...")
-        
+
         # Write to local registry dir to simulate registry upload
         tar_path = os.path.join(self.registry_dir, f"{pkg_name}-{pkg_ver}.tar")
         with open(tar_path, 'w') as f:
             f.write(f"MOCK PACKAGE CONTENT FOR {pkg_name} VERSION {pkg_ver}")
+
+        # P3 §11.1: ALSO register metadata in the structured
+        # PackageRegistry (see `src/registry.py`) so that semver
+        # resolve, conflict detection, checksum verification,
+        # signature, and vulnerability scanning are available for
+        # the published artifact. We use the same `registry_dir`
+        # as the registry root, so the index.json + tarballs/ live
+        # alongside the legacy flat .tar file — both stay intact.
+        try:
+            from src.registry import PackageRegistry
+            regs = PackageRegistry(self.registry_dir)
+            deps = data.get('dependencies', {})
+            with open(tar_path, "rb") as tf:
+                tar_bytes = tf.read()
+            regs.add(
+                pkg_name, pkg_ver,
+                tarball_bytes=tar_bytes,
+                dependencies=dict(deps) if deps else {},
+            )
+        except Exception:
+            # Registry indexing is best-effort — the legacy
+            # publish flow must still succeed for users that run
+            # `eigen publish` outside a workspace.
+            pass
             
         print(f"Package published successfully. Target: {tar_path}")
         return True

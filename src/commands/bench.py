@@ -93,6 +93,13 @@ def bench_command(args, workspace_root):
             continue
             
         vm = EigenVM(trace_mode=False)
+        # Native-Python recursion fast path so benchmarks reflect the
+        # production code path that the run/CLI uses, not just VM dispatch.
+        try:
+            from src.jit.recursive_codegen import compile_recursive_functions
+            vm.recursive_funcs = compile_recursive_functions(ast)
+        except Exception:
+            vm.recursive_funcs = {}
         t_exec_start = time.perf_counter()
         try:
             f_null = io.StringIO()

@@ -4,6 +4,25 @@ import math
 import cmath
 import random
 
+# === P0 (sol.md §1.3): cache standard single-qubit gate matrices as NumPy
+# arrays so each H/X/Y/Z/S/T call does not allocate a fresh np.ndarray on
+# every gate application. The parameterised gates (RX/RY/RZ/CP/CR*/...)
+# cannot benefit from a static cache because the matrix depends on theta;
+# they keep building a small 2x2 array per call.
+_INV_SQRT2 = 1.0 / math.sqrt(2.0)
+_GATE_NP_CACHE = {
+    'H':  np.array([[_INV_SQRT2, _INV_SQRT2], [_INV_SQRT2, -_INV_SQRT2]], dtype=complex),
+    'X':  np.array([[0.0, 1.0], [1.0, 0.0]], dtype=complex),
+    'Y':  np.array([[0.0, -1j], [1j, 0.0]], dtype=complex),
+    'Z':  np.array([[1.0, 0.0], [0.0, -1.0]], dtype=complex),
+    'S':  np.array([[1.0, 0.0], [0.0, 1j]], dtype=complex),
+    'T':  np.array([[1.0, 0.0], [0.0, _INV_SQRT2 + _INV_SQRT2 * 1j]], dtype=complex),
+    'I2': np.array([[1.0, 0.0], [0.0, 1.0]], dtype=complex),
+    'P0': np.array([[1.0, 0.0], [0.0, 0.0]], dtype=complex),
+    'P1': np.array([[0.0, 0.0], [0.0, 1.0]], dtype=complex),
+}
+
+
 class DensityMatrixSimulator:
     def __init__(self, rng=None, seed=None):
         self.qubit_map = {}
@@ -49,33 +68,27 @@ class DensityMatrixSimulator:
     # 1-Qubit Gates
     def H(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[1, 1], [1, -1]], dtype=complex) / math.sqrt(2)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['H']))
 
     def X(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[0, 1], [1, 0]], dtype=complex)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['X']))
 
     def Y(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[0, -1j], [1j, 0]], dtype=complex)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['Y']))
 
     def Z(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[1, 0], [0, -1]], dtype=complex)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['Z']))
 
     def S(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[1, 0], [0, 1j]], dtype=complex)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['S']))
 
     def T(self, q: str):
         idx = self.get_qubit_index(q)
-        U = np.array([[1, 0], [0, cmath.exp(1j * math.pi / 4)]], dtype=complex)
-        self._apply_unitary(self._get_1qubit_operator_full(idx, U))
+        self._apply_unitary(self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['T']))
 
     def RX(self, q: str, theta: float):
         idx = self.get_qubit_index(q)
@@ -102,15 +115,13 @@ class DensityMatrixSimulator:
     def CNOT(self, control: str, target: str):
         c_idx = self.get_qubit_index(control)
         t_idx = self.get_qubit_index(target)
-        X = np.array([[0, 1], [1, 0]], dtype=complex)
-        U_full = self._get_controlled_operator_full(c_idx, t_idx, X)
+        U_full = self._get_controlled_operator_full(c_idx, t_idx, _GATE_NP_CACHE['X'])
         self._apply_unitary(U_full)
 
     def CZ(self, control: str, target: str):
         c_idx = self.get_qubit_index(control)
         t_idx = self.get_qubit_index(target)
-        Z = np.array([[1, 0], [0, -1]], dtype=complex)
-        U_full = self._get_controlled_operator_full(c_idx, t_idx, Z)
+        U_full = self._get_controlled_operator_full(c_idx, t_idx, _GATE_NP_CACHE['Z'])
         self._apply_unitary(U_full)
 
     def SWAP(self, q1: str, q2: str):
@@ -123,8 +134,7 @@ class DensityMatrixSimulator:
         c1_idx = self.get_qubit_index(control1)
         c2_idx = self.get_qubit_index(control2)
         t_idx = self.get_qubit_index(target)
-        X = np.array([[0, 1], [1, 0]], dtype=complex)
-        U_full = self._get_double_controlled_operator_full(c1_idx, c2_idx, t_idx, X)
+        U_full = self._get_double_controlled_operator_full(c1_idx, c2_idx, t_idx, _GATE_NP_CACHE['X'])
         self._apply_unitary(U_full)
 
     def CSWAP(self, control: str, q1: str, q2: str):
@@ -169,40 +179,40 @@ class DensityMatrixSimulator:
         self._apply_unitary(U_full)
 
     def _get_controlled_operator_full(self, control_idx: int, target_idx: int, target_op: np.ndarray) -> np.ndarray:
-        P0 = np.array([[1.0, 0.0], [0.0, 0.0]])
-        P1 = np.array([[0.0, 0.0], [0.0, 1.0]])
-        
-        op0 = self._get_1qubit_operator_full(control_idx, P0) @ self._get_1qubit_operator_full(target_idx, np.eye(2))
+        P0 = _GATE_NP_CACHE['P0']
+        P1 = _GATE_NP_CACHE['P1']
+
+        op0 = self._get_1qubit_operator_full(control_idx, P0) @ self._get_1qubit_operator_full(target_idx, _GATE_NP_CACHE['I2'])
         op1 = self._get_1qubit_operator_full(control_idx, P1) @ self._get_1qubit_operator_full(target_idx, target_op)
         return op0 + op1
 
     def _get_double_controlled_operator_full(self, c1_idx: int, c2_idx: int, target_idx: int, target_op: np.ndarray) -> np.ndarray:
-        P1 = np.array([[0.0, 0.0], [0.0, 1.0]])
+        P1 = _GATE_NP_CACHE['P1']
         proj_11 = self._get_1qubit_operator_full(c1_idx, P1) @ self._get_1qubit_operator_full(c2_idx, P1)
         I_full = np.eye(1 << self.num_qubits)
-        op0 = (I_full - proj_11) @ self._get_1qubit_operator_full(target_idx, np.eye(2))
+        op0 = (I_full - proj_11) @ self._get_1qubit_operator_full(target_idx, _GATE_NP_CACHE['I2'])
         op1 = proj_11 @ self._get_1qubit_operator_full(target_idx, target_op)
         return op0 + op1
 
     # Noise Channels
     def apply_bit_flip_noise(self, q: str, p: float):
         idx = self.get_qubit_index(q)
-        E0 = math.sqrt(1 - p) * np.eye(2)
-        E1 = math.sqrt(p) * np.array([[0, 1], [1, 0]], dtype=complex)
+        E0 = math.sqrt(1 - p) * _GATE_NP_CACHE['I2']
+        E1 = math.sqrt(p) * _GATE_NP_CACHE['X']
         self._apply_channel(idx, [E0, E1])
 
     def apply_phase_flip_noise(self, q: str, p: float):
         idx = self.get_qubit_index(q)
-        E0 = math.sqrt(1 - p) * np.eye(2)
-        E1 = math.sqrt(p) * np.array([[1, 0], [0, -1]], dtype=complex)
+        E0 = math.sqrt(1 - p) * _GATE_NP_CACHE['I2']
+        E1 = math.sqrt(p) * _GATE_NP_CACHE['Z']
         self._apply_channel(idx, [E0, E1])
 
     def apply_depolarizing_noise(self, q: str, p: float):
         idx = self.get_qubit_index(q)
-        E0 = math.sqrt(1 - p) * np.eye(2)
-        E1 = math.sqrt(p / 3) * np.array([[0, 1], [1, 0]], dtype=complex) # X
-        E2 = math.sqrt(p / 3) * np.array([[0, -1j], [1j, 0]], dtype=complex) # Y
-        E3 = math.sqrt(p / 3) * np.array([[1, 0], [0, -1]], dtype=complex) # Z
+        E0 = math.sqrt(1 - p) * _GATE_NP_CACHE['I2']
+        E1 = math.sqrt(p / 3) * _GATE_NP_CACHE['X']
+        E2 = math.sqrt(p / 3) * _GATE_NP_CACHE['Y']
+        E3 = math.sqrt(p / 3) * _GATE_NP_CACHE['Z']
         self._apply_channel(idx, [E0, E1, E2, E3])
 
     def apply_amplitude_damping_noise(self, q: str, p: float):
@@ -221,7 +231,7 @@ class DensityMatrixSimulator:
     def measure(self, q: str) -> int:
         idx = self.get_qubit_index(q)
         # Probability of 0: Tr(P0 * rho)
-        P0 = self._get_1qubit_operator_full(idx, np.array([[1.0, 0.0], [0.0, 0.0]]))
+        P0 = self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['P0'])
         prob_0 = np.trace(P0 @ self._state).real
         
         # Sample outcome using seeded RNG
@@ -232,7 +242,7 @@ class DensityMatrixSimulator:
             proj = P0
             p = prob_0
         else:
-            proj = self._get_1qubit_operator_full(idx, np.array([[0.0, 0.0], [0.0, 1.0]]))
+            proj = self._get_1qubit_operator_full(idx, _GATE_NP_CACHE['P1'])
             p = 1.0 - prob_0
             
         if p > 1e-12:

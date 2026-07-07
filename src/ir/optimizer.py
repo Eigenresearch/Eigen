@@ -29,6 +29,17 @@ class EQIROptimizer:
         except (ImportError, AttributeError):
             pass
 
+        # Audit §2.3 (determinism): the prior worklist used `set.pop()`, which is
+        # documented as "remove and return an arbitrary element". The choice of
+        # which node gets visited next can change which rewrites fire first,
+        # and in some graphs that means a different set of nodes survives the
+        # pass — yielding a different optimized graph and therefore a
+        # different canonical hash for the same source file across runs
+        # (PYTHONHASHSEED sensitivity). Fix: always visit the lowest node id
+        # first. Combined with the id-based __hash__ on EQIRNode and sorted()
+        # iteration of `children`/`parents`, this makes the optimizer output
+        # byte-identical for identical input regardless of interpreter hash
+        # seed or process-local memory layout.
         worklist = set(graph.nodes.keys())
         max_iterations = len(graph.nodes) * 5 + 1000
         iterations = 0
@@ -37,7 +48,9 @@ class EQIROptimizer:
         rotation_gates = {"RX", "RY", "RZ"}
         
         while worklist and iterations < max_iterations:
-            node_id = worklist.pop()
+            # Deterministic pop: smallest id first.
+            node_id = min(worklist)
+            worklist.discard(node_id)
             if node_id not in graph.nodes:
                 continue
                 
@@ -51,7 +64,7 @@ class EQIROptimizer:
             if node.gate_name in self_inverse_gates:
                 target_qubit = node.targets[0]
                 next_node = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if target_qubit in child.targets:
                         next_node = child
                         break
@@ -71,7 +84,7 @@ class EQIROptimizer:
             if node.gate_name in rotation_gates:
                 target_qubit = node.targets[0]
                 next_node = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if target_qubit in child.targets:
                         next_node = child
                         break
@@ -106,13 +119,13 @@ class EQIROptimizer:
             if node.gate_name == 'H':
                 q = node.targets[0]
                 n2 = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if child.targets and child.targets[0] == q:
                         n2 = child
                         break
                 if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name in ('X', 'Z'):
                     n3 = None
-                    for child in n2.children:
+                    for child in sorted(n2.children, key=lambda c: c.id):
                         if child.targets and child.targets[0] == q:
                             n3 = child
                             break
@@ -131,7 +144,7 @@ class EQIROptimizer:
             if node.gate_name in ('S', 'T'):
                 q = node.targets[0]
                 n2 = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if child.targets and child.targets[0] == q:
                         n2 = child
                         break
@@ -149,13 +162,13 @@ class EQIROptimizer:
             if node.gate_name == 'Z':
                 q0 = node.targets[0]
                 n2 = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if child.targets and child.targets[0] == q0:
                         n2 = child
                         break
                 if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name == 'CNOT' and n2.targets[0] == q0:
                     n3 = None
-                    for child in n2.children:
+                    for child in sorted(n2.children, key=lambda c: c.id):
                         if child.targets and child.targets[0] == q0:
                             n3 = child
                             break
@@ -171,13 +184,13 @@ class EQIROptimizer:
             if node.gate_name == 'X':
                 q1 = node.targets[0]
                 n2 = None
-                for child in node.children:
+                for child in sorted(node.children, key=lambda c: c.id):
                     if child.targets and len(child.targets) > 1 and child.targets[1] == q1:
                         n2 = child
                         break
                 if n2 and n2.id in graph.nodes and n2.type == 'GATE' and n2.gate_name == 'CNOT' and n2.targets[1] == q1:
                     n3 = None
-                    for child in n2.children:
+                    for child in sorted(n2.children, key=lambda c: c.id):
                         if child.targets and child.targets[0] == q1:
                             n3 = child
                             break
@@ -193,8 +206,8 @@ class EQIROptimizer:
         return graph
 
     def _cancel_nodes(self, graph: EQIRGraph, node1: EQIRNode, node2: EQIRNode):
-        parents = list(node1.parents)
-        children = list(node2.children)
+        parents = sorted(node1.parents, key=lambda n: n.id)
+        children = sorted(node2.children, key=lambda n: n.id)
         for parent in parents:
             parent.remove_child(node1)
             for child in children:
@@ -211,8 +224,8 @@ class EQIROptimizer:
             del graph.nodes[node2.id]
 
     def _bypass_node(self, graph: EQIRGraph, node: EQIRNode):
-        parents = list(node.parents)
-        children = list(node.children)
+        parents = sorted(node.parents, key=lambda n: n.id)
+        children = sorted(node.children, key=lambda n: n.id)
         for parent in parents:
             parent.remove_child(node)
             for child in children:

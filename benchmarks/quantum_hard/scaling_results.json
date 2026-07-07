@@ -1,0 +1,71 @@
+{
+  "metric": "scaling_bench",
+  "metric_description": "one canonical circuit (GHZ staircase + Hadamard layer) at N qubits",
+  "qubit_counts": [
+    10,
+    14,
+    18,
+    22
+  ],
+  "timing_unit": "milliseconds (best-of-2)",
+  "accuracy_formula": "1 - 0.5 * sum(|p_eigen - p_numpy|)",
+  "pass_threshold": 0.999,
+  "results": [
+    {
+      "n_qubits": 10,
+      "state_size": 1024,
+      "bytes_per_sim": 16384,
+      "n_gates": 20,
+      "depth": 11,
+      "eigen_ms": 1.386,
+      "numpy_ms": 1.501,
+      "speedup": 1.08,
+      "accuracy": 0.9999999999999989,
+      "max_dev": 4.336808689942018e-18,
+      "status": "PASS",
+      "error": ""
+    },
+    {
+      "n_qubits": 14,
+      "state_size": 16384,
+      "bytes_per_sim": 262144,
+      "n_gates": 28,
+      "depth": 15,
+      "eigen_ms": 28.312,
+      "numpy_ms": 32.878,
+      "speedup": 1.16,
+      "accuracy": 0.9999999999999987,
+      "max_dev": 3.3881317890172014e-19,
+      "status": "PASS",
+      "error": ""
+    },
+    {
+      "n_qubits": 18,
+      "state_size": 262144,
+      "bytes_per_sim": 4194304,
+      "n_gates": 36,
+      "depth": 19,
+      "eigen_ms": 626.587,
+      "numpy_ms": 670.673,
+      "speedup": 1.07,
+      "accuracy": 0.9999999999999982,
+      "max_dev": 2.625802136488331e-20,
+      "status": "PASS",
+      "error": ""
+    },
+    {
+      "n_qubits": 22,
+      "state_size": 4194304,
+      "bytes_per_sim": 67108864,
+      "n_gates": 44,
+      "depth": 23,
+      "eigen_ms": 15372.985,
+      "numpy_ms": 12539.294,
+      "speedup": 0.82,
+      "accuracy": 0.999999999999998,
+      "max_dev": 1.9587636905255695e-21,
+      "status": "PASS",
+      "error": ""
+    }
+  ]
+}

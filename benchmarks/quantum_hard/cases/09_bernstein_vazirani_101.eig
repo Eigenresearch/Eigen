@@ -1,0 +1,18 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+qubit qa
+
+X qa
+H q0
+H q1
+H q2
+H qa
+# Oracle for s = 0b101 (q0=1, q1=0, q2=1, MSB-first => q2 in position s_2)
+CNOT q0, qa
+CNOT q2, qa
+H q0
+H q1
+H q2

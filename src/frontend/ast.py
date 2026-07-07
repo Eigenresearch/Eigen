@@ -369,6 +369,101 @@ class StringInterpolationNode(ASTNode):
     def __repr__(self):
         return f"StringInterpolationNode(parts={self.parts})"
 
+
+# §3.1 — Trait/Interface System (partial: AST/parser only).
+
+class TraitMethodSignatureNode(ASTNode):
+    """A single method signature inside a trait declaration.
+
+    Reuses FuncDeclNode's parameter/return-type shape but with an empty
+    body, since traits only declare method *signatures*, not
+    implementations. The parser may later attach a default body for
+    optional methods — for now `body` is always `[]`.
+    """
+    def __init__(self, name: str, generic_params: list[str],
+                 params: list[tuple[str, str]], return_type: str):
+        self.name = name
+        self.generic_params = generic_params
+        self.params = params
+        self.return_type = return_type
+        self.body = []  # trait signatures have no default body
+
+    def __repr__(self):
+        return (f"TraitMethodSignatureNode({self.name}, "
+                f"generics={self.generic_params}, "
+                f"params={self.params}, return={self.return_type})")
+
+
+class TraitDeclNode(ASTNode):
+    """A trait declaration: `trait Foo { fn bar(...) -> ...; ... }`.
+
+    Traits collect a set of method signatures. Concrete types implement
+    them via `ImplBlockNode`. Trait bounds on functions / structs are
+    not enforced at type-check time in this partial P2 implementation —
+    the goal is to get the language surface in place so user code can
+    cite traits by name in impl blocks and downstream tools (a future
+    Rust-type-check system) can verify conformance.
+    """
+    def __init__(self, name: str, generic_params: list[str],
+                 methods: list["TraitMethodSignatureNode"]):
+        self.name = name
+        self.generic_params = generic_params
+        self.methods = methods
+
+    def __repr__(self):
+        return (f"TraitDeclNode({self.name}, "
+                f"generics={self.generic_params}, "
+                f"methods={len(self.methods)})")
+
+    def method_names(self) -> set:
+        return {m.name for m in self.methods}
+
+
+class ImplBlockNode(ASTNode):
+    """An `impl Trait for Type { ... }` block.
+
+    Carries the bound trait name (or `None` when the impl is not
+    constrained, i.e. `impl Type { ... }` as in Rust's "inherent impl"),
+    the target type name being provided with methods, and the function
+    declarations that fulfill the trait's method signatures.
+    """
+    def __init__(self, trait_name: str | None,
+                 target_type: str,
+                 methods: list["FuncDeclNode"]):
+        self.trait_name = trait_name
+        self.target_type = target_type
+        self.methods = methods
+
+    def __repr__(self):
+        if self.trait_name is None:
+            return f"ImplBlockNode(inherent for {self.target_type}, methods={len(self.methods)})"
+        return (f"ImplBlockNode(impl {self.trait_name} for "
+                f"{self.target_type}, methods={len(self.methods)})")
+
+
+class TypeAliasDeclNode(ASTNode):
+    """§3.3 — A `type Name = Target;` declaration.
+
+    Carries the alias name and the target type as a raw string (parsed
+    loosely — anything after `=` up to a `;` or newline block). The type
+    checker substitutes the alias name for the target type lazily at
+    every type-reference site, allowing users to give meaningful names
+    to complex composite types like `(Qubit, Qubit)` or `Map<string,
+    int>` without committing to a specific structural shape in source.
+
+    This is a P2 surface-level extension: aliases are stored and
+    resolved textually. Higher-kinded / generic aliases (`type
+    Pair[T] = (T, T)`) are NOT supported yet — generic aliases would
+    require either AST rewriting or a substitution context.
+    """
+    def __init__(self, name: str, target_type: str):
+        self.name = name
+        self.target_type = target_type
+
+    def __repr__(self):
+        return f"TypeAliasDeclNode({self.name} = {self.target_type})"
+
+
 try:
     import eigen_native
     NATIVE_AVAILABLE = True

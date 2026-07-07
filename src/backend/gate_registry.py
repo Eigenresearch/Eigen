@@ -1,5 +1,7 @@
 import math
 import cmath
+from dataclasses import dataclass
+from typing import Optional as _Opt
 
 SINGLE_QUBIT_GATES = {"H", "X", "Y", "Z", "S", "T"}
 TWO_QUBIT_GATES = {"CNOT", "CZ", "SWAP"}
@@ -74,3 +76,82 @@ def get_gate_matrix(gate_name: str, theta: float = None) -> list[list[complex]]:
         return [[1,0,0,0,0,0,0,0],[0,1,0,0,0,0,0,0],[0,0,1,0,0,0,0,0],[0,0,0,1,0,0,0,0],
                 [0,0,0,0,1,0,0,0],[0,0,0,0,0,0,1,0],[0,0,0,0,0,1,0,0],[0,0,0,0,0,0,0,1]]
     return None
+
+
+# === Audit §5: Shared gate registry for the four exporter backends ======
+#
+# Previously each of the four hardware-backend exporter modules
+# (`ibm_backend.py`, `ionq_backend.py`, `azure_backend.py`,
+# `braket_backend.py`) carried its own large `if/elif` chain dispatching by
+# gate name. Adding a new gate required touching all four files, and the
+# audit specifically called out two cases of this duplication causing bugs:
+#  - Azure's exporter had not been updated for SWAP, silently dropping it.
+#  - The IBM exporter was pinned to OpenQASM 2.0 while Qiskit has moved
+#    to 3.0 as its primary interchange format.
+#
+# The unification here places *one* canonical, per-exporter encoding table in
+# this module. `get_gate_spec(gate_name)` returns a `GateSpec`
+# with metadata for the four exporters. Each exporter's `export()` becomes
+# a uniform ~10-line dispatch loop, reducing the chance of new gates being
+# added in some exporters but forgotten in others.
+
+@dataclass(frozen=True)
+class GateSpec:
+    """Per-exporter encoding metadata for a single Eigen gate."""
+    qubit_count: int
+    takes_angle: bool
+    is_clifford: bool
+    # OpenQASM 2.0/3.0 stdgates name (e.g. "h", "rz", "cx", "swap"). Controlled
+    # rotations in 3.0 use the `ctrl @ <base>(angle)` form, which is also a
+    # valid OpenQASM 2.0 qelib1.inc gate name for the legacy `crx/cry/crz/cp`.
+    qasm_name: str
+    # OpenQASM 3.0-only spelling if it differs from `qasm_name`; otherwise
+    # `None`. Used by exporters that prefer the modern 3.0 form (`ctrl @ ...`).
+    qasm3_rendering: _Opt[str] = None
+    # Azure QIR callee function (without the
+    # `__quantum__qis__` prefix or `__body` suffix - the exporter builds the
+    # full `__quantum__qis__<func>__body` identifier).
+    qir_func: str = ""
+    # Braket `Circuit` method name (e.g. "h", "cnot", "rz").
+    braket_method: str = ""
+    # IonQ JSON "gate" field value (e.g. "h", "cnot", "swap").
+    ionq_gate: str = ""
+
+    def qir_callee(self) -> str:
+        """Full QIR function identifier for the Azure exporter."""
+        return f"__quantum__qis__{self.qir_func}__body"
+
+
+_GATE_SPEC_TABLE: dict[str, GateSpec] = {
+    "H":     GateSpec(1, False, True,  "h",    None,            "h",            "h",    "h"),
+    "X":     GateSpec(1, False, True,  "x",    None,            "x",            "x",    "x"),
+    "Y":     GateSpec(1, False, True,  "y",    None,            "y",            "y",    "y"),
+    "Z":     GateSpec(1, False, True,  "z",    None,            "z",            "z",    "z"),
+    "S":     GateSpec(1, False, True,  "s",    None,            "s",            "s",    "s"),
+    "T":     GateSpec(1, False, False, "t",    None,            "t",            "t",    "t"),
+    "RX":    GateSpec(1, True,  False, "rx",   None,            "rx",           "rx",   "rx"),
+    "RY":    GateSpec(1, True,  False, "ry",   None,            "ry",           "ry",   "ry"),
+    "RZ":    GateSpec(1, True,  False, "rz",   None,            "rz",           "rz",   "rz"),
+    "CNOT":  GateSpec(2, False, True,  "cx",   None,            "cnot",         "cnot", "cnot"),
+    "CZ":    GateSpec(2, False, True,  "cz",   None,            "cz",           "cz",   "cz"),
+    "SWAP":  GateSpec(2, False, True,  "swap", None,            "swap",         "swap", "swap"),
+    "CCX":   GateSpec(3, False, False, "ccx",  None,            "ccx",          "ccx",  "ccx"),
+    "CSWAP": GateSpec(3, False, False, "cswap",None,            "cswap",        "cswap", "cswap"),
+    "CP":    GateSpec(2, True,  False, "cp",   "ctrl @ phase",  "cp",           "phase", "cp"),
+    "CRX":   GateSpec(2, True,  False, "crx",  "ctrl @ rx",     "crx",          "rx",   "crx"),
+    "CRY":   GateSpec(2, True,  False, "cry",  "ctrl @ ry",     "cry",          "ry",   "cry"),
+    "CRZ":   GateSpec(2, True,  False, "crz",  "ctrl @ rz",     "crz",          "rz",   "crz"),
+}
+
+
+def get_gate_spec(gate_name: str) -> _Opt[GateSpec]:
+    """Return the GateSpec for `gate_name` (case-insensitive) or None."""
+    if not gate_name:
+        return None
+    return _GATE_SPEC_TABLE.get(gate_name.upper())
+
+
+def all_registered_gates() -> list[str]:
+    """Return the list of all gate names registered with the shared
+    registry, sorted for deterministic iteration. Used by tests."""
+    return sorted(_GATE_SPEC_TABLE.keys())

@@ -1,0 +1,14 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+
+# Ry(arccos(1/sqrt(3))) on q0, splits population between |0> and |1>.
+RY q0, 1.9106332362490186
+# Now RY on q1 conditioned on q0=1: rotate q1 by arccos(1/sqrt(2)) when q0=1
+CRY q0, q1, 0.7853981633974483
+# Controlled CNOT q1 -> q2
+CNOT q1, q2
+CNOT q0, q1
+X q0

@@ -1,0 +1,33 @@
+\relax 
+\gdef \LT@i {\LT@entry 
+    {1}{115.81102pt}\LT@entry 
+    {5}{52.36958pt}\LT@entry 
+    {5}{11.33156pt}\LT@entry 
+    {5}{14.99733pt}\LT@entry 
+    {5}{14.99733pt}\LT@entry 
+    {1}{39.21913pt}\LT@entry 
+    {1}{42.83495pt}\LT@entry 
+    {1}{29.89363pt}\LT@entry 
+    {4}{31.771pt}\LT@entry 
+    {5}{33.32614pt}\LT@entry 
+    {1}{21.35081pt}}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Setup}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Results (long multi-page table)}{1}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{Hard-quantum head-to-head over all 80 test cases. $Q$ = qubits, $g$ = gates, $d$=depth. \texttt  {PASS} requires accuracy $\ge 99.9\%$. \textbf  {80 pass / 0 fail}.}}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Per-category aggregation}{3}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Per-category aggregation: each row summarises one category of tests. Categories sorted by descending mean gate count (largest circuits first).}}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Speed comparison (log scale)}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Accuracy per test}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Speedup histogram}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Quadrant (4-field matrix): log-scale gates $\times $ qubits}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Scaling: runtime vs gate count (log-log)}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Accuracy error magnitude vs gate count}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Aggregate summary}{3}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Best-of-3 execution time per test. Log scale so the 1-2-qubit Bell tests ($\sim $40 µs) coexist in the same axes with the longest Trotter / random-circuit tests.}}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Accuracy per test. Anything below the 99.9\,\% line fails the comparison. The bar is clamped to the 0-100.4\,\% window.}}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces How speedups distribute across all 80 tests. A speedup $<1$ means numpy was faster than Eigen on that test; $>1$ means Eigen's Rust backend won.}}{4}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Quadrant (4-field matrix) of test cases. Horizontal axis: $\log _{10}$ of the gate count, vertical axis: number of qubits. Each \emph  {filled circle} is one PASS test labelled with its speedup (numpy ms $\div $ Eigen ms). \emph  {Hollow triangles} mark FAIL tests. Dashed lines split the four canonical strategy quadrants: micro (low-q/low-g), long horizontal (low-q/many-g), tall (many-q/low-g), and extreme (many-q/many-g). The medians are at $\log _{10} g = 1.15$ and $q = 3.0$.}}{5}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Log-log scaling of runtime vs gate count. A clean slope is the expected power-law $t \sim g^{\alpha }$ with $\alpha \approx 1$ in the regime where Python overhead per gate dominates over state-vector size work; a knee above $\sim $ 4-5 qubits reveals the denser matrix-vs-vector cost.}}{5}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Accuracy error magnitude $1-\textrm  {accuracy}$ vs gate count. The dashed horizontal line at $10^{-3}$ is the PASS threshold (99.9\,\%). All tests below the line pass; tests above it are flagged FAIL in the long table. The numerical floor at $\sim 10^{-15} \to 10^{-14}$ is dictated by double-precision unitary propagation; tests that hit it are essentially bit-identical to numpy.}}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Aggregate summary across all 80 hard-quantum tests.}}{6}{}\protected@file@percent }
+\gdef \@abspage@last{6}

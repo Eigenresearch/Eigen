@@ -1,0 +1,116 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit q2
+qubit q3
+qubit anc  # ancilla for 4-controlled-Z cascade
+
+H q0
+H q1
+H q2
+H q3
+
+# Oracle for |1000>: X on q1,q2,q3 to map to |1111>, apply 4-controlled-Z, then X back.
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q1
+X q2
+X q3
+
+# Diffusion: H^⊗4 ; X^⊗4 ; multi-CZ(q0,q1,q2,q3) ; X^⊗4 ; H^⊗4.
+H q0
+H q1
+H q2
+H q3
+X q0
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q0
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3
+
+# Iteration 2 — repeat oracle+diffusion.
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3
+X q0
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q0
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3
+
+# Iteration 3 — repeat.
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3
+X q0
+X q1
+X q2
+X q3
+H q3
+CCX q0, q1, anc
+CCX anc, q2, q3
+CCX q0, q1, anc
+H q3
+X q0
+X q1
+X q2
+X q3
+H q0
+H q1
+H q2
+H q3

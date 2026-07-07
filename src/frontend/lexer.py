@@ -1,5 +1,6 @@
 import enum
 import re
+import bisect
 
 class TokensList(list):
     pass
@@ -47,6 +48,15 @@ class TokenType(enum.Enum):
     MATCH = "match"
     CASE = "case"
     DEFAULT = "default"
+    # §3.1 — Trait/Interface System (AST/parser surface). Used by the
+    # parser to recognize `trait Foo { ... }` and `impl Foo for Bar { ... }`
+    # blocks; the runtime still treats these as structural signatures,
+    # not type-system-enforced bounds at this stage.
+    TRAIT = "trait"
+    IMPL = "impl"
+    # §3.3 — Type aliases. `type Name = Target;` declares a substitution
+    # that the type-checker resolves lazily on every type-reference site.
+    TYPE = "type"
     
     # Built-ins / Utilities
     TRACE = "trace"
@@ -209,6 +219,11 @@ class Lexer:
         "match": TokenType.MATCH,
         "case": TokenType.CASE,
         "default": TokenType.DEFAULT,
+        # §3.1 — Trait/Interface system keywords.
+        "trait": TokenType.TRAIT,
+        "impl": TokenType.IMPL,
+        # §3.3 — Type alias declaration keyword.
+        "type": TokenType.TYPE,
         "trace": TokenType.TRACE,
         "print": TokenType.PRINT,
         "assert": TokenType.ASSERT,
@@ -269,7 +284,325 @@ class Lexer:
         '~': TokenType.TILDE,
     }
 
+    # === sol.md P0 §1.2 — regex-based fast lexer ============================
+    # Master regex compiled once at class-load time. Each named alternative
+    # maps to a Token type. ``finditer`` lets the re engine batch tokenization
+    # in C, avoiding the per-character Python loop of ``_tokenize_slow``.
+    #
+    # Order matters: longer/more-specific prefixes must come first (e.g.
+    # ``->`` before ``-``, ``<=`` before ``<``). The string alternative stops
+    # at the first ``"`` so interpolation ``${...}`` is handled separately by
+    # the per-token scan-string routine when the match value contains ``${``.
+    _MASTER_PATTERN = re.compile(
+        r"""
+          (?P<ws>[ \t\r\f\v]+)
+        | (?P<nl>\n)
+        | (?P<hash_comment>\#[^\n]*)
+        | (?P<slash_comment>//[^\n]*)
+        | (?P<float_e>\d+[eE][+-]?\d+)
+        | (?P<float_dot>\d+\.\d*(?:[eE][+-]?\d+)?)
+        | (?P<float_dot_lead>\.\d+(?:[eE][+-]?\d+)?)
+        | (?P<hex>0[xX][0-9a-fA-F]+)
+        | (?P<bin>0[bB][01]+)
+        | (?P<oct>0[oO][0-7]+)
+        | (?P<int_dec>\d+)
+        | (?P<string_special>")
+        | (?P<arrow>->)
+        | (?P<eq>==)
+        | (?P<ne>!=)
+        | (?P<le><=)
+        | (?P<ge>>=)
+        | (?P<lshift><<)
+        | (?P<rshift>>>)
+        | (?P<add_assign>\+=)
+        | (?P<sub_assign>-=)
+        | (?P<pow>\*\*)
+        | (?P<mul_assign>\*=)
+        | (?P<div_assign>/=)
+        | (?P<lparen>\()
+        | (?P<rparen>\))
+        | (?P<lbrace>\{)
+        | (?P<rbrace>\})
+        | (?P<lbrack>\[)
+        | (?P<rbrack>\])
+        | (?P<comma>,)
+        | (?P<colon>:)
+        | (?P<dot>\.)
+        | (?P<equals>=)
+        | (?P<lt><)
+        | (?P<gt>>)
+        | (?P<plus>\+)
+        | (?P<minus>-)
+        | (?P<mul>\*)
+        | (?P<div>/)
+        | (?P<mod>%)
+        | (?P<amp>&)
+        | (?P<pipe>\|)
+        | (?P<caret>\^)
+        | (?P<tilde>~)
+        | (?P<identifier>[A-Za-z_][A-Za-z0-9_]*)
+        """,
+        re.VERBOSE,
+    )
+
+    # Maps master-regex group name to a callable that returns a
+    # (TokenType, value_str) tuple, or None to skip the token.
+    # Built lazily from keyword mapping and single-char table.
+
+    # Maps master-regex group name to a callable that returns a
+    # (TokenType, value_str) tuple, or None to skip the token.
+    # Built lazily from keyword mapping and single-char table.
+
+    def _make_escape_value(self, raw: str) -> str:
+        """Backwards-compat helper retained for any external callers; new
+        lexer path uses ``_scan_string`` instead which performs brace
+        tracking directly on the source. Decodes escape sequences inside a
+        string literal body (without surrounding quotes)."""
+        out = []
+        i = 0
+        n = len(raw)
+        escape_map = {
+            'n': '\n', 't': '\t', 'r': '\r',
+            '0': '\0', '\\': '\\', '"': '"',
+            "'": "'", 'a': '\a', 'b': '\b',
+            'f': '\f', 'v': '\v',
+        }
+        while i < n:
+            ch = raw[i]
+            if ch == '\\':
+                i += 1
+                if i >= n:
+                    break
+                nxt = raw[i]
+                out.append(escape_map.get(nxt, nxt))
+                i += 1
+            elif ch == '$' and i + 1 < n and raw[i + 1] == '{':
+                i += 2
+                expr_start = i
+                depth = 1
+                while i < n and depth > 0:
+                    c = raw[i]
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                if depth != 0:
+                    raise SyntaxError(
+                        f"Lexer Error at line {self.line}, col {self.column}: "
+                        "Unterminated string interpolation: expected '}'"
+                    )
+                expr = raw[expr_start:i]
+                out.append(f"\x00{expr}\x00")
+                i += 1
+            else:
+                out.append(ch)
+                i += 1
+        return "".join(out)
+
+    # Direct group-name → TokenType map for cheap dispatch in the regex
+    # hot path (avoids the long if/elif chain). Filled lazily below from
+    # the inline alternatives of ``_MASTER_PATTERN``.
+    _GROUP_TO_TOKENTYPE = {
+        'arrow': TokenType.ARROW,
+        'eq': TokenType.EQ, 'ne': TokenType.NE,
+        'le': TokenType.LE, 'ge': TokenType.GE,
+        'lshift': TokenType.LSHIFT, 'rshift': TokenType.RSHIFT,
+        'add_assign': TokenType.ADD_ASSIGN, 'sub_assign': TokenType.SUB_ASSIGN,
+        'pow': TokenType.POW, 'mul_assign': TokenType.MUL_ASSIGN,
+        'div_assign': TokenType.DIV_ASSIGN,
+        'lparen': TokenType.LPAREN, 'rparen': TokenType.RPAREN,
+        'lbrace': TokenType.LBRACE, 'rbrace': TokenType.RBRACE,
+        'lbrack': TokenType.LBRACK, 'rbrack': TokenType.RBRACK,
+        'comma': TokenType.COMMA, 'colon': TokenType.COLON, 'dot': TokenType.DOT,
+        'equals': TokenType.EQUALS, 'lt': TokenType.LT, 'gt': TokenType.GT,
+        'plus': TokenType.PLUS, 'minus': TokenType.MINUS,
+        'mul': TokenType.MUL, 'div': TokenType.DIV, 'mod': TokenType.MOD,
+        'amp': TokenType.AMP, 'pipe': TokenType.PIPE, 'caret': TokenType.CARET,
+        'tilde': TokenType.TILDE,  # `;` intentionally omitted for parity with _tokenize_slow
+    }
+
+    def _tokenize_regex(self) -> list[Token]:
+        # Alternative regex-based tokenizer (sol.md §1.2). Public ``tokenize``
+        # currently delegates to ``_tokenize_slow`` because the legacy path's
+        # batched slicing beats Python's regex engine on real Eigen sources
+        # in microbenchmarks. This method is kept for parity validation
+        # (see ``tests/test_sol_p0_improvements.py``) and for future C/Rust
+        # native lexers where a single regex sweep can take over.
+        source = self.source
+        length = self.length
+        if length == 0:
+            tokens_list = TokensList([Token(TokenType.EOF, "", 1, 1)])
+            tokens_list.source = source
+            return tokens_list
+
+        KEYWORDS_MAP = self._KEYWORDS_MAP
+        GROUP_TO_TT = self._GROUP_TO_TOKENTYPE
+        match_pattern = self._MASTER_PATTERN
+        tokens: list[Token] = []
+        append_tok = tokens.append
+
+        pos = 0
+        cur_line = 1
+        cur_col = 1
+        while pos < length:
+            m = match_pattern.match(source, pos)
+            if m is None:
+                raise SyntaxError(
+                    f"Lexer Error at line {cur_line}, col {cur_col}: "
+                    f"Unexpected character: {repr(source[pos])}"
+                )
+            kind = m.lastgroup
+            end = m.end()
+            tok_line = cur_line
+            tok_col = cur_col
+            # Whitespace / comments produce nothing — skip ``m.group()``.
+            if kind == 'ws' or kind == 'nl' or kind == 'hash_comment' or kind == 'slash_comment':
+                ch_count = end - pos
+                # ``str.count`` is a C-level cursor, not a substring alloc.
+                nl_count = source.count('\n', pos, end)
+                if nl_count == 0:
+                    cur_col += ch_count
+                else:
+                    cur_line += nl_count
+                    last_nl_pos = source.rfind('\n', pos, end)
+                    cur_col = end - last_nl_pos
+                pos = end
+                continue
+
+            value = m.group()
+            ch_count = len(value)
+            nl_count = value.count('\n')
+            if nl_count == 0:
+                cur_col += ch_count
+            else:
+                cur_line += nl_count
+                last_nl = value.rfind('\n')
+                cur_col = ch_count - last_nl
+
+            if kind == 'identifier':
+                tt = KEYWORDS_MAP.get(value)
+                if tt is None:
+                    tt = TokenType.IDENTIFIER
+                append_tok(Token(tt, value, tok_line, tok_col))
+            elif kind == 'string_special':
+                new_pos, decoded, cur_line, cur_col = self._scan_string(
+                    source, pos, tok_line, tok_col
+                )
+                append_tok(Token(TokenType.STRING_LIT, decoded, tok_line, tok_col))
+                pos = new_pos
+                continue
+            elif kind == 'hex':
+                append_tok(Token(TokenType.INT_LIT, str(int(value, 16)), tok_line, tok_col))
+            elif kind == 'bin':
+                append_tok(Token(TokenType.INT_LIT, str(int(value, 2)), tok_line, tok_col))
+            elif kind == 'oct':
+                append_tok(Token(TokenType.INT_LIT, str(int(value, 8)), tok_line, tok_col))
+            elif kind == 'int_dec':
+                append_tok(Token(TokenType.INT_LIT, value, tok_line, tok_col))
+            elif kind == 'float_e' or kind == 'float_dot' or kind == 'float_dot_lead':
+                append_tok(Token(TokenType.FLOAT_LIT, value, tok_line, tok_col))
+            else:
+                append_tok(Token(GROUP_TO_TT[kind], value, tok_line, tok_col))
+            pos = end
+
+        append_tok(Token(TokenType.EOF, "", cur_line, cur_col))
+        tokens_list = TokensList(tokens)
+        tokens_list.source = source
+        return tokens_list
+
     def tokenize(self) -> list[Token]:
+        # Public entry point. We currently route to the original
+        # character-by-character path; the regex-based path
+        # (``_tokenize_regex``) is available as an alternative implementation
+        # for parity validation and as a building block for a future C-level
+        # lexer. See ``tests/test_sol_p0_improvements.py`` for the parity
+        # contract between the two paths.
+        return self._tokenize_slow()
+
+    @staticmethod
+    def _offset_to_line_col(line_starts: list[int], pos: int) -> tuple[int, int]:
+        line_idx = bisect.bisect_right(line_starts, pos)
+        return line_idx, pos - line_starts[line_idx - 1] + 1
+
+    def _scan_string(self, source: str, pos: int, start_line: int, start_col: int) -> tuple[int, str, int, int]:
+        """Scan a ``"..."`` string literal starting at ``pos`` (pointing at
+        the opening double-quote). Returns ``(end_pos, decoded_value, end_line,
+        end_col)`` where ``end_pos`` is one past the closing quote and
+        ``end_line``/``end_col`` are the position of the *closing* quote (the
+        next token starts at the position immediately after).
+
+        Faithfully mirrors the brace-tracking behaviour of ``_tokenize_slow``
+        — in particular, a ``"`` inside a ``${...}`` interpolation is treated
+        as a regular character (it does *not* close the string)."""
+        n = source.__len__()
+        i = pos + 1  # skip opening quote
+        out = []
+        escape_map = {
+            'n': '\n', 't': '\t', 'r': '\r',
+            '0': '\0', '\\': '\\', '"': '"',
+            "'": "'", 'a': '\a', 'b': '\b',
+            'f': '\f', 'v': '\v',
+        }
+        cur_line = start_line
+        cur_col = start_col + 1  # one past the opening `"`
+        while i < n:
+            ch = source[i]
+            if ch == '"':
+                # closing quote found
+                end_pos = i + 1
+                # End column = position of closing `"`. Caller advances its
+                # own (line, col) cursor from this point on the next iteration.
+                return end_pos, "".join(out), cur_line, cur_col
+            if ch == '\n':
+                raise SyntaxError(
+                    f"Lexer Error at line {start_line}, col {start_col}: "
+                    "Unterminated string literal"
+                )
+            if ch == '\\':
+                i += 1
+                cur_col += 2
+                if i >= n:
+                    break
+                nxt = source[i]
+                out.append(escape_map.get(nxt, nxt))
+                i += 1
+            elif ch == '$' and i + 1 < n and source[i + 1] == '{':
+                # String interpolation: ${expr}
+                i += 2  # skip ${
+                cur_col += 2
+                expr_start = i
+                depth = 1
+                while i < n and depth > 0:
+                    c = source[i]
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                if i >= n or depth != 0:
+                    raise SyntaxError(
+                        f"Lexer Error at line {start_line}, col {start_col}: "
+                        "Unterminated string interpolation: expected '}'"
+                    )
+                expr_str = source[expr_start:i]
+                out.append(f"\x00{expr_str}\x00")
+                i += 1  # skip closing }
+                cur_col += (len(expr_str) + 1) + 1
+            else:
+                out.append(ch)
+                i += 1
+                cur_col += 1
+        raise SyntaxError(
+            f"Lexer Error at line {start_line}, col {start_col}: "
+            "Unterminated string literal"
+        )
+
+    def _tokenize_slow(self) -> list[Token]:
         tokens = []
         
         KEYWORDS_MAP = self._KEYWORDS_MAP

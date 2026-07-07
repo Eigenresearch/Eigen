@@ -358,6 +358,57 @@ class TestMLIRDialect:
         block.add_operation(op)
         assert len(block.operations) == 1
 
+    def test_mlir_recursive_qfunc_no_crash(self):
+        """Self-recursive qfunc must not cause RecursionError in
+        MLIRToEQIRConverter (guarded by _inlining_stack)."""
+        from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
+
+        code = ("eigen 1.0\n"
+                "qubit q0\n"
+                "qubit q1\n"
+                "qfunc bell(qubit q0, qubit q1) {\n"
+                "    H q0\n"
+                "    CNOT q0, q1\n"
+                "    bell(q0, q1)\n"
+                "}\n"
+                "bell(q0, q1)\n")
+        tokens = Lexer(code).tokenize()
+        ast = Parser(tokens).parse()
+        mlir_module = ASTToMLIRConverter().convert(ast)
+        converter = MLIRToEQIRConverter()
+        eqir_graph = converter.convert(mlir_module)
+        assert eqir_graph is not None
+        assert len(eqir_graph.nodes) > 0
+        # The recursive call should have been detected and a
+        # RECURSIVE_CALL placeholder emitted instead of infinite
+        # recursion.
+        recursive_ops = [n for n in eqir_graph.nodes.values()
+                           if hasattr(n, 'gate_name')
+                           and n.gate_name == 'RECURSIVE_CALL']
+        assert len(recursive_ops) >= 1
+
+    def test_mlir_mutual_recursion_no_crash(self):
+        """Mutually recursive qfuncs must not cause RecursionError."""
+        from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
+
+        code = ("eigen 1.0\n"
+                "qubit q0\n"
+                "qfunc alpha(qubit q0) {\n"
+                "    H q0\n"
+                "    beta(q0)\n"
+                "}\n"
+                "qfunc beta(qubit q0) {\n"
+                "    X q0\n"
+                "    alpha(q0)\n"
+                "}\n"
+                "alpha(q0)\n")
+        tokens = Lexer(code).tokenize()
+        ast = Parser(tokens).parse()
+        mlir_module = ASTToMLIRConverter().convert(ast)
+        converter = MLIRToEQIRConverter()
+        eqir_graph = converter.convert(mlir_module)
+        assert eqir_graph is not None
+
 
 # ========== Verify Command Tests ==========
 

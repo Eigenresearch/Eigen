@@ -1,0 +1,31 @@
+eigen 1.0
+
+qubit q0
+qubit q1
+qubit qc
+
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc
+CRY qc, q0, 0.5
+CCX qc, q1, q0
+CNOT qc, q1
+H qc

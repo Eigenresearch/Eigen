@@ -253,17 +253,18 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         self.assertIn("StackOverflowError: Maximum recursion depth (1000) exceeded.", str(context.exception))
 
     def test_jit_global_caching_and_lru(self):
-        # 1. Clear JIT Cache to start clean
+        # Audit §1.1 BUG #5 / §2.3: the JIT cache is now per-instance, not class-
+        # level. This test verifies the per-instance cache still accumulates
+        # compiled blocks (after enough iterations to cross the hot threshold)
+        # and that LRU evicts oldest entries when the cache is full.
+
         from src.jit.jit_compiler import JITCompiler
-        JITCompiler.GLOBAL_CACHE.clear()
-        JITCompiler.GLOBAL_EXEC_COUNTS.clear()
-        
+
         # 2. Create a basic loop program to trigger JIT compilation
         # let i: int = 0
         # while i < 15 {
         #     let i: int = i + 1
         # }
-        # Note: hot_threshold is 10, so a loop of 15 iterations will trigger check_and_compile multiple times.
         let_i = LetNode("i", "int", LiteralNode(0, "int"))
         while_node = WhileNode(
             BinaryOpNode("<", VarRefNode("i"), LiteralNode(15, "int")),
@@ -271,8 +272,8 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         )
         program = ProgramNode(1.0, None, [], [let_i, while_node])
         instructions = self.compiler.compile_ast(program)
-        
-        # Verify execution and check cache contents
+
+        # Verify execution and check cache contents.
         import src.backend.vm as vm_module
         old_native = vm_module.native
         vm_module.native = None
@@ -280,24 +281,26 @@ class TestEigenVMAndCompiler(unittest.TestCase):
             vm1 = EigenVM()
             vm1.execute(instructions)
             self.assertEqual(vm1.lookup_var("i"), 15)
-            
-            # Check that we have something in the JIT compiler's global cache
-            self.assertGreater(len(JITCompiler.GLOBAL_CACHE.cache), 0)
-            
-            # Check that we have global execution counts
-            self.assertGreater(len(JITCompiler.GLOBAL_EXEC_COUNTS), 0)
-            
-            # 3. Create a second VM instance and run again - it should reuse the cached block (no clearing on run)
-            old_cache_len = len(JITCompiler.GLOBAL_CACHE.cache)
+
+            # The block containing the loop body should have crossed the JIT's
+            # hot_threshold and been compiled into the per-instance cache.
+            self.assertGreater(len(vm1.jit.cache.cache), 0)
+
+            # Per-instance exec counts must have grown during the run.
+            self.assertGreater(len(vm1.jit.exec_counts), 0)
+
+            # 3. Create a second VM instance and run again: its per-instance
+            # cache starts empty and is not contaminated by the first VM.
             vm2 = EigenVM()
             vm2.execute(instructions)
             self.assertEqual(vm2.lookup_var("i"), 15)
         finally:
             vm_module.native = old_native
-        
-        # Cache length should remain the same (or we lookup the cached block)
-        self.assertEqual(len(JITCompiler.GLOBAL_CACHE.cache), old_cache_len)
-        
+
+        # The two instances' caches are independent: vm2's first run had to
+        # warm up its own exec-counts, then compile its own block(s).
+        self.assertGreater(len(vm2.jit.cache.cache), 0)
+
         # 4. Test LRU eviction: set maxsize to 2 and add 3 elements
         from src.jit.jit_compiler import LRUCache
         lru = LRUCache(maxsize=2)
@@ -307,7 +310,7 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         lru.get("a")
         # Put "c" -> "b" should be evicted
         lru.put("c", 3)
-        
+
         self.assertEqual(lru.get("a"), 1)
         self.assertIsNone(lru.get("b"))
         self.assertEqual(lru.get("c"), 3)

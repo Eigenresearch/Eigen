@@ -1,0 +1,31 @@
+eigen 1.0
+
+qubit a0  # MSB ancilla
+qubit a1
+qubit a2  # LSB ancilla (gets the LEAST-significant bit of the phase)
+qubit e   # eigenvector: |1> is eigenvector of Z with eigenvalue -1, but
+         # we want a U with eigenvalue exp(2*pi*i*phase) where phase = 1/4
+
+X e
+H a0
+H a1
+H a2
+
+# Controlled-U on e with control = a2 (LSB)  — U = RZ(pi/2) -> phase 1/4
+CRZ a2, e, 1.5707963267948966
+# Controlled-U^2 on e with control = a1   — U^2 = RZ(pi)  -> phase 1/2 (still exp(i*pi) - 1/4 = 0)
+# WAIT — for phase estimation, U^j must produce eigenvalue exp(2*pi*i*j*phase).
+# phase = 1/4 implies U = exp(2*pi*i*1/4) on the eigenstate = RZ(pi/2) (modulo global phase).
+# U^2 = RZ(pi), so eigenvalue exp(2*pi*i/2) = exp(i*pi) = -1.
+# U^4 = RZ(2*pi) = identity, eigenvalue 1.
+CRZ a1, e, 3.141592653589793             # pi (U^2)
+# Controlled-U^4 on e with control = a0  — U^4 = RZ(2pi) = I, eigenvalue 1.
+# In a proper QPE we'd apply CU^4 but here it's identity so we omit.
+# Inverse QFT on the ancilla register to extract the phase bit-pattern.
+H a0
+CRZ a1, a0, -1.5707963267948966          # -pi/2 (inverse R2)
+CRZ a2, a0, -0.7853981633974483          # -pi/4 (inverse R3)
+H a1
+CRZ a2, a1, -1.5707963267948966          # -pi/2
+H a2
+SWAP a0, a2
