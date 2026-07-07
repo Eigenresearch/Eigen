@@ -4,8 +4,8 @@ import platform
 import subprocess
 import shutil
 
-EIGEN_VERSION = "2.6.0"
-EIGEN_CODENAME = "Misery"
+EIGEN_VERSION = "2.7.0"
+EIGEN_CODENAME = "Meridian"
 
 
 def run_cmd(cmd, shell=False):

@@ -15,7 +15,7 @@ def register_command(name):
 import src.commands
 
 def main():
-    parser = argparse.ArgumentParser(description="Eigen Language Command Line Interface (v2.6 — Misery)")
+    parser = argparse.ArgumentParser(description="Eigen Language Command Line Interface (v2.7 — Meridian)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Run command
