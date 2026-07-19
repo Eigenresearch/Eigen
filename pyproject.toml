@@ -35,7 +35,7 @@ dev = [
     "ruff>=0.6,<0.16",
     "mypy>=1.10",
     "pip-audit",
-    "cyclonedx-python",
+    "cyclonedx-bom",
 ]
 # LLVM/AOT compilation (audit §6): optional since most users don't need AOT.
 # When absent, the AOT path gracefully degrades to interpreter-only mode.
