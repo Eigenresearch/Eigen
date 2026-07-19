@@ -23,16 +23,16 @@
 
 **Eigen 2.8 «Mars»** is a **standalone, domain-specific, hybrid classical–quantum programming language** with its own compiler and runtime. One language, one execution model, one instruction stream — classical control flow and quantum operations run side by side inside a single stack-based virtual machine. Eigen combines:
 
-- ⚛️ **Native Rust-accelerated quantum simulation** — 3.3–5.2× faster than Python + NumPy on quantum workloads
-- 🧮 **Six simulator backends** — dense, sparse, MPS (tensor-network), stabilizer (1000+ qubits), density-matrix (exact noise), and GPU
-- 🛠️ **A complete compiler pipeline** — Rust lexer/parser → typed AST → MLIR → EQIR graph → 7-pass optimizer → EBC bytecode → VM (+ optional LLVM/QIR AOT)
-- 🔌 **FFI bindings** for Python, Rust, C, and WebAssembly
-- 📡 **Hardware-aware routing** (SABRE) and **exporters** (OpenQASM 3.0, IonQ, Braket, QIR)
-- 🔬 **Research tooling** — noise modeling, error mitigation (ZNE/PEC/M3), tomography, randomized benchmarking, quantum volume, pulse-level control
-- 🔒 **Security hardening** — HMAC-signed compiler cache, sandboxed JIT, deny-by-default native loading
-- ✅ **2410 passing tests**, deterministic execution, and full reproducibility tooling
+- **Native Rust-accelerated quantum simulation** — 3.3–5.2× faster than Python + NumPy on quantum workloads
+- **Six simulator backends** — dense, sparse, MPS (tensor-network), stabilizer (1000+ qubits), density-matrix (exact noise), and GPU
+- **A complete compiler pipeline** — Rust lexer/parser → typed AST → MLIR → EQIR graph → 7-pass optimizer → EBC bytecode → VM (+ optional LLVM/QIR AOT)
+- **FFI bindings** for Python, Rust, C, and WebAssembly
+- **Hardware-aware routing** (SABRE) and **exporters** (OpenQASM 3.0, IonQ, Braket, QIR)
+- **Research tooling** — noise modeling, error mitigation (ZNE/PEC/M3), tomography, randomized benchmarking, quantum volume, pulse-level control
+- **Security hardening** — HMAC-signed compiler cache, sandboxed JIT, deny-by-default native loading
+- **2410 passing tests**, deterministic execution, and full reproducibility tooling
 
-> 📄 **Research Paper (111 pages, PhD-level):** [**Eigen 2.8 «Mars»: A Repository-Grounded Reconstruction of a Hybrid Classical–Quantum Programming Language**](https://drive.google.com/file/d/1t1woF19vfMlQwmCulF45u__sl2cOxx4s/view?usp=sharing)
+> **Research Paper (111 pages):** [**Eigen 2.8 «Mars»: A Repository-Grounded Reconstruction of a Hybrid Classical–Quantum Programming Language**](https://drive.google.com/file/d/1t1woF19vfMlQwmCulF45u__sl2cOxx4s/view?usp=sharing)
 
 ---
 
@@ -67,7 +67,7 @@
 
 Eigen 2.8 is a **correctness-first, hardening, and documentation** release built on the 2.7 foundation. Rather than chasing new headline benchmarks, its engineering budget was spent eliminating entire *classes* of silent-wrong-answer bugs, closing exploitable security holes, and making execution deterministic and reproducible.
 
-### 🐛 Critical correctness fixes (stabilizer simulator)
+### Critical correctness fixes (stabilizer simulator)
 
 Four bugs that produced **wrong answers without raising an exception** were fixed:
 
@@ -76,31 +76,31 @@ Four bugs that produced **wrong answers without raising an exception** were fixe
 - **`allocate_qubit`** — now grows the tableau incrementally instead of resetting all stabilizer state (which silently wiped prior entanglement).
 - **CZ vs CNOT in ZX** — CZ now has a distinct ZX-graph (Hadamard-edge) representation, so equivalence checking no longer reports different circuits as equivalent.
 
-### ⚡ Performance
+### Performance
 
 - **113× VM arithmetic-loop speedup** (107 ms → 0.95 ms) via pre-extracted opcode/arg arrays, localized hot-path lookups, and **batched limit checks every 4096 ops**.
 - Constant folding in the compiler; JIT fast-loop recognizes peephole-optimized conditions; LRU eviction in all compiler caches.
 - In-place dense-simulator state updates; MPS adaptive bond dimension driven by entanglement entropy.
 
-### 🔒 Security hardening
+### Security hardening
 
 - **JSON + HMAC compiler cache** replaces the pickle-only cache (closes a remote-code-execution vector on tampered caches).
 - **Hardened JIT `exec()` sandbox** and subprocess isolation for `run`/`exec --sandbox`.
 - **Deny-by-default native module loading** — an allow-list plus a strict name regex closes a path-traversal RCE class.
 - Registry returns **frozen** dicts; frame pool clears stale data on recycling.
 
-### ✨ Language & tooling
+### Language & tooling
 
 - Unicode/hex escape sequences (`\uXXXX`, `\xNN`), block comments (`/* … */`), single-quoted strings, and `finally` blocks.
 - `UnaryOpNode` replaces the old `BinaryOpNode` hack.
 - **LSP** hover and go-to-definition with real symbol lookup; **28 CLI subcommands** (6 new in 2.8: `reproduce`, `verify`, `audit`, `lsp`, `doctor`, `profile`).
 - `ReadoutError` noise channel; `T2 ≤ 2·T1` physical validation.
 
-### 🧭 Determinism & reproducibility
+### Determinism & reproducibility
 
 - The EQIR optimizer, SABRE router, VM RNG, and per-component seed manager are all deterministic, so a run is a **pure function of its source and seed** and produces a reproducible `result_fingerprint`.
 
-### 📚 Documentation
+### Documentation
 
 New reference set: `ARCHITECTURE.md`, `STDLIB_API.md`, `NOISE_MODELS.md`, `BENCHMARKS.md`, plus new example programs for `match/case`, `try/catch/finally`, string interpolation, operator overloading, and noisy simulation.
 
@@ -163,9 +163,9 @@ Prebuilt, self-contained installers for all three platforms are attached to ever
 
 | Platform | Installer | Notes |
 |----------|-----------|-------|
-| 🪟 **Windows** | `Eigen-2.8.0-Windows-x64.exe` | Inno Setup wizard: PATH management, `.eig` file association, context-menu integration |
-| 🐧 **Linux** | `Eigen-2.8.0-Linux.AppImage` | Portable AppImage — `chmod +x` and run |
-| 🍎 **macOS** | `Eigen-2.8.0-macOS.pkg` | Standard `.pkg` installer |
+| **Windows** | `Eigen-2.8.0-Windows-x64.exe` | Inno Setup wizard: PATH management, `.eig` file association, context-menu integration |
+| **Linux** | `Eigen-2.8.0-Linux.AppImage` | Portable AppImage — `chmod +x` and run |
+| **macOS** | `Eigen-2.8.0-macOS.pkg` | Standard `.pkg` installer |
 
 ### Option 2 — pip (`eigen-lang` package)
 
@@ -729,9 +729,9 @@ MIT License — see [LICENSE](LICENSE).
 
 **Eigen 2.8 «Mars»: A Repository-Grounded Reconstruction of a Hybrid Classical–Quantum Programming Language**
 
-A 111-page, PhD-level reconstruction of the entire system: the compiler pipeline, VM state machine, all six simulator backends, noise/routing/ZX subsystems, formal semantics and proofs (VM boundedness, CHP stabilizer correctness, SABRE cost, MPS truncation bounds, determinism, cache tamper-evidence), honest benchmark results with 95% confidence intervals, and worked end-to-end examples — every claim anchored to a `file:line` in this repository.
+A 111-page reconstruction of the entire system: the compiler pipeline, VM state machine, all six simulator backends, noise/routing/ZX subsystems, formal semantics and proofs (VM boundedness, CHP stabilizer correctness, SABRE cost, MPS truncation bounds, determinism, cache tamper-evidence), honest benchmark results with 95% confidence intervals, and worked end-to-end examples — every claim anchored to a `file:line` in this repository.
 
-📄 [**Read the full 111-page paper (PDF)**](https://drive.google.com/file/d/1t1woF19vfMlQwmCulF45u__sl2cOxx4s/view?usp=sharing)
+[**Read the full 111-page paper (PDF)**](https://drive.google.com/file/d/1t1woF19vfMlQwmCulF45u__sl2cOxx4s/view?usp=sharing)
 
 **Authors:** Kenzhegali Nuras, Batyrbek Inabat, Sarsenbay Alikhan — Eigen Research / Eigen Labs
 
@@ -743,9 +743,9 @@ A 111-page, PhD-level reconstruction of the entire system: the compiler pipeline
 
 If you find this project useful, **please give it a star** — it genuinely helps other researchers and developers discover it, and it motivates continued open development.
 
-**[⭐ Star this repository](https://github.com/Eigenresearch/Eigen)** &nbsp;·&nbsp; **[🔀 Fork it](https://github.com/Eigenresearch/Eigen/fork)** &nbsp;·&nbsp; **[📢 Share it with your friends and colleagues](https://github.com/Eigenresearch/Eigen)**
+**[⭐ Star this repository](https://github.com/Eigenresearch/Eigen)** &nbsp;·&nbsp; **[Fork it](https://github.com/Eigenresearch/Eigen/fork)** &nbsp;·&nbsp; **[Share it with your friends and colleagues](https://github.com/Eigenresearch/Eigen)**
 
-*Every star and every share brings more people to open quantum-classical programming. Thank you! 🙏*
+*Every star and every share brings more people to open quantum-classical programming. Thank you!*
 
 </div>
 
