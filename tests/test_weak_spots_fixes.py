@@ -1,7 +1,6 @@
 import unittest
 import os
 import tempfile
-import shutil
 from src.backend.llvm_compiler import LLVMCompiler
 from src.backend.scheduler import TaskScheduler
 from src.ir.ssa.cfg import BasicBlock
@@ -72,26 +71,23 @@ class TestWeakSpotsFixes(unittest.TestCase):
         
         stack = [DummyFrame("foo", 10, {"a": 1}), DummyFrame("bar", 20, {"b": 2})]
         
-        # Write crash report and check that it creates the file
-        import datetime
-        now = datetime.datetime.now().strftime("%Y-%m-%d")
-        expected_filename = f"crash-{now}.log"
-        
-        if os.path.exists(expected_filename):
-            os.remove(expected_filename)
+        import glob
+        for f in glob.glob("crash-*.log"):
+            os.remove(f)
             
         try:
             write_crash_report(ValueError("Test error"), stack, 42, "ADD", {"global_var": 42})
-            self.assertTrue(os.path.exists(expected_filename))
-            with open(expected_filename, "r", encoding="utf-8") as f:
+            crash_files = glob.glob("crash-*.log")
+            self.assertTrue(len(crash_files) > 0)
+            with open(crash_files[0], "r", encoding="utf-8") as f:
                 content = f.read()
             self.assertIn("EIGEN VM CRASH REPORT", content)
             self.assertIn("Test error", content)
             self.assertIn("foo", content)
             self.assertIn("bar", content)
         finally:
-            if os.path.exists(expected_filename):
-                os.remove(expected_filename)
+            for f in glob.glob("crash-*.log"):
+                os.remove(f)
 
     def test_console_printing_no_directives(self):
         # Verify that BUG-002 fixes print formatting to not have directive prefixes

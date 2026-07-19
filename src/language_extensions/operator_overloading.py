@@ -126,7 +126,7 @@ class OperatorOverloadTable:
             return self._table[(operator, type_name)]
         except KeyError:
             raise OperatorOverloadError(
-                f"No overload for {operator!r} on type {type_name!r}")
+                f"No overload for {operator!r} on type {type_name!r}") from None
 
     def dispatch(self, operator: Operator, left, right=None):
         """Find and invoke an overload matching the operand types."""

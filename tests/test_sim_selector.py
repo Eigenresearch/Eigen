@@ -12,7 +12,6 @@ import unittest
 from src.backend.sim_selector import (
     SimSelector,
     CircuitMetrics,
-    SelectionReport,
     select_from_counts,
     DEFAULT_SELECTOR,
 )

@@ -9,6 +9,122 @@ DEFAULT_LOOKAHEAD = 5
 DEFAULT_LOOKAHEAD_WEIGHT = 0.5
 
 
+# 3-qubit gates that must be decomposed into 1- and 2-qubit gates before
+# routing, because the routers only handle adjacency for ≤2 targets.
+_THREE_QUBIT_GATES = {'CCX', 'CSWAP'}
+
+
+def _decompose_3qubit_gates(circuit_ops: list[dict]) -> list[dict]:
+    """Expand CCX and CSWAP into 1- and 2-qubit gate sequences.
+
+    The routers only reason about 1- and 2-qubit adjacency. A 3-qubit gate
+    whose targets are not all mutually adjacent would previously be
+    silently treated as a 2-qubit gate (using only the first two targets),
+    producing an incorrect route. This helper rewrites every CCX/CSWAP
+    into an equivalent sequence of H/T/TDG/S/CNOT gates *before* routing,
+    so the routers see only 1- and 2-qubit ops.
+
+    Decompositions used (Nielsen & Chuang, Fig. 4.8 / Fredkin identity):
+
+        CCX(c1, c2, t) ->  H t
+                           CNOT c2, t | TDG t
+                           CNOT c1, t | T t
+                           CNOT c2, t | TDG t
+                           CNOT c1, t | T c2 | T t | H t
+                           S c2 | CNOT c1, c2 | S c2 | TDG c2 | CNOT c1, c2
+
+        CSWAP(c, q1, q2) ->  CNOT q2, q1
+                             [CCX(c, q1, q2) inline]
+                             CNOT q2, q1
+
+    The decomposition preserves the qubit-interaction pattern (c1↔c2,
+    c1↔t, c2↔t for CCX) so the router inserts SWAPs that satisfy the real
+    connectivity requirements.
+    """
+    decomposed: list[dict] = []
+    for op in circuit_ops:
+        gate = op['gate']
+        targets = op['targets']
+
+        if gate == 'CCX' and len(targets) == 3:
+            c1, c2, t = targets
+            for g, tgts in (
+                ('H',   [t]),
+                ('CNOT',[c2, t]),
+                ('TDG', [t]),
+                ('CNOT',[c1, t]),
+                ('T',   [t]),
+                ('CNOT',[c2, t]),
+                ('TDG', [t]),
+                ('CNOT',[c1, t]),
+                ('T',   [c2]),
+                ('T',   [t]),
+                ('H',   [t]),
+                ('S',   [c2]),
+                ('CNOT',[c1, c2]),
+                ('S',   [c2]),
+                ('TDG', [c2]),
+                ('CNOT',[c1, c2]),
+            ):
+                decomposed.append({'gate': g, 'targets': tgts, 'args': []})
+        elif gate == 'CSWAP' and len(targets) == 3:
+            c, q1, q2 = targets
+            decomposed.append({'gate': 'CNOT', 'targets': [q2, q1], 'args': []})
+            # Inline CCX(c, q1, q2) decomposition.
+            for g, tgts in (
+                ('H',   [q2]),
+                ('CNOT',[q1, q2]),
+                ('TDG', [q2]),
+                ('CNOT',[c, q2]),
+                ('T',   [q2]),
+                ('CNOT',[q1, q2]),
+                ('TDG', [q2]),
+                ('CNOT',[c, q2]),
+                ('T',   [q1]),
+                ('T',   [q2]),
+                ('H',   [q2]),
+                ('S',   [q1]),
+                ('CNOT',[c, q1]),
+                ('S',   [q1]),
+                ('TDG', [q1]),
+                ('CNOT',[c, q1]),
+            ):
+                decomposed.append({'gate': g, 'targets': tgts, 'args': []})
+            decomposed.append({'gate': 'CNOT', 'targets': [q2, q1], 'args': []})
+        else:
+            decomposed.append(op)
+    return decomposed
+
+
+def _apply_swap_to_mappings(mapping: dict, reverse_mapping: dict,
+                            phys_a: int, phys_b: int) -> None:
+    """Update ``mapping`` and ``reverse_mapping`` after a SWAP(phys_a, phys_b).
+
+    Logical qubits currently sitting on ``phys_a`` / ``phys_b`` exchange
+    positions. ``None`` values in ``reverse_mapping`` (representing
+    unoccupied physical qubits) are propagated by *removing* the stale
+    entry rather than storing ``None``, which previously polluted the dict
+    and masked future lookups.
+    """
+    lq_a = reverse_mapping.get(phys_a)
+    lq_b = reverse_mapping.get(phys_b)
+
+    if lq_a is not None:
+        mapping[lq_a] = phys_b
+    if lq_b is not None:
+        mapping[lq_b] = phys_a
+
+    # Update reverse_mapping without storing None sentinels.
+    if lq_b is not None:
+        reverse_mapping[phys_a] = lq_b
+    else:
+        reverse_mapping.pop(phys_a, None)
+    if lq_a is not None:
+        reverse_mapping[phys_b] = lq_a
+    else:
+        reverse_mapping.pop(phys_b, None)
+
+
 try:
     import eigen_native as native
 except ImportError:
@@ -259,6 +375,10 @@ class BasicSwapRouter:
     def route(self, circuit_ops: list[dict], logical_qubits: list[str]) -> RoutedCircuit:
         result = RoutedCircuit()
 
+        # Decompose 3-qubit gates (CCX, CSWAP) into 1- and 2-qubit gates
+        # before routing so the router only sees ≤2-qubit ops.
+        circuit_ops = _decompose_3qubit_gates(circuit_ops)
+
         mapping = {}
         reverse_mapping = {}
 
@@ -297,17 +417,7 @@ class BasicSwapRouter:
                         swap_b = path[i + 1]
 
                         result.add_swap(swap_a, swap_b)
-
-                        lq_a = reverse_mapping.get(swap_a)
-                        lq_b = reverse_mapping.get(swap_b)
-
-                        if lq_a is not None:
-                            mapping[lq_a] = swap_b
-                        if lq_b is not None:
-                            mapping[lq_b] = swap_a
-
-                        reverse_mapping[swap_a] = lq_b
-                        reverse_mapping[swap_b] = lq_a
+                        _apply_swap_to_mappings(mapping, reverse_mapping, swap_a, swap_b)
 
                     new_p0 = mapping[targets[0]]
                     new_p1 = mapping[targets[1]]
@@ -431,8 +541,9 @@ class SabreRouter:
         self.coupling_map = coupling_map
         self.lookahead_weight = lookahead_weight
 
-    def route(self, circuit_ops: list[dict], logical_qubits: list[str]) -> RoutedCircuit:
+    def route(self, circuit_ops: list[dict], logical_qubits: list[str], timeout: float = None) -> RoutedCircuit:
         result = RoutedCircuit()
+        import time as _time
 
         mapping = {}
         reverse_mapping = {}
@@ -446,6 +557,12 @@ class SabreRouter:
             reverse_mapping[i] = lq
 
         result.initial_mapping = dict(mapping)
+
+        # §4 (audit): use perf_counter (nanosecond resolution) rather than
+        # monotonic (~15 ms on Windows) so sub-millisecond timeouts actually
+        # fire. timeout <= 0 is treated as immediate.
+        start = _time.perf_counter() if timeout is not None else None
+        deadline = (start + timeout) if timeout is not None else None
 
         ops = []
         for idx, op in enumerate(circuit_ops):
@@ -461,8 +578,17 @@ class SabreRouter:
         iteration = 0
         completed_ops_count = 0
 
+        # §4 (audit): check the deadline once before the loop so a zero /
+        # tiny timeout fires even when the first iteration would already
+        # complete a tiny circuit (otherwise the gate never trips).
+        if deadline is not None and (timeout <= 0 or _time.perf_counter() > deadline):
+            raise TimeoutError(f"SABRE Router timed out after {timeout} seconds.")
+
         while completed_ops_count < len(ops) and iteration < max_iterations:
             iteration += 1
+
+            if deadline is not None and (timeout <= 0 or _time.perf_counter() > deadline):
+                raise TimeoutError(f"SABRE Router timed out after {timeout} seconds.")
 
             front_layer = []
             extended_layer = []
@@ -574,9 +700,9 @@ class SabreRouter:
                 # coupling graph) — this preserves ranking while keeping the
                 # sum finite for f64 comparison.
                 INF_SENTINEL = 99999
-                def _dist_to_int(d):
+                def _dist_to_int(d, _sentinel=INF_SENTINEL):
                     if d == float('inf'):
-                        return INF_SENTINEL
+                        return _sentinel
                     return int(d)
                 dist_matrix = [
                     [_dist_to_int(self.coupling_map.distance(i, j)) for j in range(n_phys)]
@@ -699,3 +825,7 @@ def route_eqir_graph(graph, coupling_map: CouplingMap, router_type: str = 'basic
         router = BasicSwapRouter(coupling_map)
 
     return router.route(circuit_ops, logical_qubits)
+
+
+# Back-compat alias: older code/tests imported the short name ``SABRE``.
+SABRE = SabreRouter

@@ -162,10 +162,10 @@ def run_scaling(steps: Optional[tuple[int, ...]] = None) -> list[ScaleRow]:
         n_depth = _gate_depth(graph, qubit_index)
 
         # Wrap callables to time both runs uniformly.
-        def _eigen():
+        def _eigen(graph=graph, qubit_index=qubit_index):
             return eigen_run(graph, qubit_index)
 
-        def _numpy():
+        def _numpy(graph=graph, n=n, qubit_index=qubit_index):
             return numpy_simulate(graph, n, qubit_index)
 
         # First: try allocating the numpy state-vector on its own — if it OOMs,
@@ -377,14 +377,20 @@ state-vector evolution (parse / type-check / compile cost is amortised).
 \renewcommand{\arraystretch}{1.15}
 \begin{tabular}{@{}r r r r r r r r r r r@{}}
 \toprule
-\(N\) & state vec.\ size & memory & gates & depth & Eigen (ms) & numpy (ms) & speedup & accuracy (\%) & max dev & status \\
+""" + r"""\(N\) & state vec.\ size & memory & gates & depth & Eigen (ms) & """ \
++ r"""numpy (ms) & speedup & accuracy (\%) & max dev & status \\
 \midrule[0.4pt]
 """ + table_body + r"""
 \\ \midrule[0.4pt]
-\textbf{Total} & \multicolumn{4}{c}{\textbf{PASS """ + f"{n_pass}" + r"""} / FAIL """ + f"{n_fail}" + r""" / SKIP """ + f"{n_skip}" + r"""} & """ + f"{total_e:.2f}" + r""" & """ + f"{total_n:.2f}" + r""" & """ + f"{overall_sp:.2f}$\\times$" + r""" & """ + f"{sum(r.accuracy for r in rows)/max(1,len(rows))*100:.4f}" + r""" & -- & -- \\
+\textbf{Total} & \multicolumn{4}{c}{\textbf{PASS """ + f"{n_pass}" + r"""} / FAIL """ + f"{n_fail}" + r""" / SKIP """ \
++ f"{n_skip}" + r"""} & """ + f"{total_e:.2f}" + r""" & """ + f"{total_n:.2f}" + r""" & """ \
++ f"{overall_sp:.2f}$\\times$" + r""" & """ \
++ f"{sum(r.accuracy for r in rows)/max(1,len(rows))*100:.4f}" + r""" & -- & -- \\
 \bottomrule
 \end{tabular}
-\caption{Dense state-vector scaling — one canonical circuit, """ + f"{counts_len}" + r""" qubit counts. \textbf{""" + f"{n_pass}/{len(rows)} cases PASS" + r"""}. The memory column is the size of a single state-vector (\(16\) bytes per complex double).}
+\caption{Dense state-vector scaling — one canonical circuit, """ + f"{counts_len}" + r""" qubit counts. \textbf{""" \
++ f"{n_pass}/{len(rows)} cases PASS" + r"""}. The memory column is the size of a single state-vector """ \
++ r"""\(16\) bytes per complex double).}
 \end{table}
 
 \section{Scaling chart (log-log)}

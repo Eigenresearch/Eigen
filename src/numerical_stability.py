@@ -53,7 +53,6 @@ checkbox.
 """
 from __future__ import annotations
 
-import cmath
 import dataclasses
 import math
 import typing

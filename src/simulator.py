@@ -2,17 +2,31 @@ import math
 import cmath
 import random
 import numpy as np
+from collections import OrderedDict
+from typing import TYPE_CHECKING
 from src.sparse_simulator import SparseQuantumSimulator
 from src.tensor_network.mps import MPSSimulator
 from src.simulator_optimizations import GPUAccelerationSurface, optimize_measurement_order
+
+if TYPE_CHECKING:
+    from src.pulse_control import PulseSchedule
 
 try:
     import eigen_native as native
 except ImportError:
     native = None
 
-# §1.3 — Global GPU acceleration surface
-_gpu_accel = GPUAccelerationSurface()
+# §1.3 — Global GPU acceleration surface (lazy: only initialized on first
+# GPU-eligible gate so that ``import src.simulator`` stays side-effect free
+# on machines without a GPU stack — see _get_gpu_accel()).
+_gpu_accel: GPUAccelerationSurface | None = None
+
+
+def _get_gpu_accel() -> GPUAccelerationSurface:
+    global _gpu_accel
+    if _gpu_accel is None:
+        _gpu_accel = GPUAccelerationSurface()
+    return _gpu_accel
 
 
 class StateBackend:
@@ -172,45 +186,128 @@ class RustStatevectorWrapper(StateBackend):
         self.rust_sv.set_state(raw)
 
 
+_INDEX_CACHE_MAX_ENTRIES = 1024
+
+
 class PythonDenseStatevector(StateBackend):
     def __init__(self):
         self._state = np.array([1.0 + 0.0j], dtype=complex)
-        self._index_cache = {}
-        self._index_cache_2q = {}
-        self._index_cache_3q = {}
+        self._index_cache = OrderedDict()
+        self._index_cache_2q = OrderedDict()
+        self._index_cache_3q = OrderedDict()
+        self._buf0 = None
+        self._buf1 = None
+        self.rng = random.Random()
+        # §1.3 (perf) — GPU-resident state. When the CuPy path is active
+        # (see apply_1qubit_gate), the authoritative state lives on the GPU
+        # and ``self._state`` is stale until ``_sync_from_gpu()`` runs.
+        # This avoids the old CPU→list→GPU→CPU round-trip per gate.
+        self._gpu_state = None
+
+    def _sync_from_gpu(self):
+        """Download the GPU-resident state back to ``self._state`` once."""
+        if self._gpu_state is not None:
+            self._state = _get_gpu_accel().from_gpu(self._gpu_state)
+            self._gpu_state = None
+
+    def _sync_to_gpu(self):
+        """Upload ``self._state`` to the GPU (no-op if already resident)."""
+        if self._gpu_state is None:
+            self._gpu_state = _get_gpu_accel().to_gpu(self._state)
+        return self._gpu_state
+
+    def _cache_get(self, cache, key):
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        return None
+
+    def _cache_put(self, cache, key, value):
+        cache[key] = value
+        if len(cache) > _INDEX_CACHE_MAX_ENTRIES:
+            cache.popitem(last=False)
+
+    def _ensure_buffers(self, half: int):
+        if self._buf0 is None or self._buf0.shape[0] < half:
+            self._buf0 = np.empty(half, dtype=complex)
+            self._buf1 = np.empty(half, dtype=complex)
+        return self._buf0[:half], self._buf1[:half]
 
     def _get_indices(self, k: int):
         n = self._state.shape[0]
         cache_key = (n, k)
-        if cache_key not in self._index_cache:
-            i_low = np.arange(1 << k)
-            i_high = np.arange(n >> (k + 1))
-            idx0 = ((i_high[:, None] << (k + 1)) | i_low[None, :]).ravel()
-            self._index_cache[cache_key] = (idx0, idx0 + (1 << k))
-        return self._index_cache[cache_key]
+        cached = self._cache_get(self._index_cache, cache_key)
+        if cached is not None:
+            return cached
+        
+        # O(2^(n-1)) construction
+        num_qubits = int(math.log2(n))
+        i_low = np.arange(1 << k)
+        i_high = np.arange(1 << (num_qubits - k - 1))
+        idx0 = ((i_high[:, None] << (k + 1)) | i_low[None, :]).ravel()
+        value = (idx0, idx0 + (1 << k))
+        self._cache_put(self._index_cache, cache_key, value)
+        return value
 
     def _get_indices_2q(self, q1: int, q2: int, val1: int, val2: int):
         n = self._state.shape[0]
         cache_key = (n, q1, q2, val1, val2)
-        if cache_key not in self._index_cache_2q:
-            idx = np.arange(n)
-            idx = idx[((idx & (1 << q1)) != 0) if val1 else ((idx & (1 << q1)) == 0)]
-            idx = idx[((idx & (1 << q2)) != 0) if val2 else ((idx & (1 << q2)) == 0)]
-            self._index_cache_2q[cache_key] = idx
-        return self._index_cache_2q[cache_key]
+        cached = self._cache_get(self._index_cache_2q, cache_key)
+        if cached is not None:
+            return cached
+        
+        # O(2^(n-2)) construction
+        num_qubits = int(math.log2(n))
+        qubits = sorted([q1, q2])
+        q_low, q_high = qubits
+        
+        i_low = np.arange(1 << q_low)
+        i_mid = np.arange(1 << (q_high - q_low - 1))
+        i_high = np.arange(1 << (num_qubits - q_high - 1))
+        
+        idx = (i_high[:, None, None] << (q_high + 1)) | \
+              (i_mid[None, :, None] << (q_low + 1)) | \
+              i_low[None, None, :]
+        
+        idx = idx.ravel()
+        if val1: idx |= (1 << q1)
+        if val2: idx |= (1 << q2)
+        
+        self._cache_put(self._index_cache_2q, cache_key, idx)
+        return idx
 
     def _get_indices_3q(self, q1: int, q2: int, q3: int, val1: int, val2: int, val3: int):
         n = self._state.shape[0]
         cache_key = (n, q1, q2, q3, val1, val2, val3)
-        if cache_key not in self._index_cache_3q:
-            idx = np.arange(n)
-            idx = idx[((idx & (1 << q1)) != 0) if val1 else ((idx & (1 << q1)) == 0)]
-            idx = idx[((idx & (1 << q2)) != 0) if val2 else ((idx & (1 << q2)) == 0)]
-            idx = idx[((idx & (1 << q3)) != 0) if val3 else ((idx & (1 << q3)) == 0)]
-            self._index_cache_3q[cache_key] = idx
-        return self._index_cache_3q[cache_key]
+        cached = self._cache_get(self._index_cache_3q, cache_key)
+        if cached is not None:
+            return cached
+            
+        # O(2^(n-3)) construction
+        num_qubits = int(math.log2(n))
+        qubits = sorted([q1, q2, q3])
+        q_low, q_mid, q_high = qubits
+        
+        i0 = np.arange(1 << q_low)
+        i1 = np.arange(1 << (q_mid - q_low - 1))
+        i2 = np.arange(1 << (q_high - q_mid - 1))
+        i3 = np.arange(1 << (num_qubits - q_high - 1))
+        
+        idx = (i3[:, None, None, None] << (q_high + 1)) | \
+              (i2[None, :, None, None] << (q_mid + 1)) | \
+              (i1[None, None, :, None] << (q_low + 1)) | \
+              i0[None, None, None, :]
+              
+        idx = idx.ravel()
+        if val1: idx |= (1 << q1)
+        if val2: idx |= (1 << q2)
+        if val3: idx |= (1 << q3)
+        
+        self._cache_put(self._index_cache_3q, cache_key, idx)
+        return idx
 
     def allocate_qubit(self):
+        self._sync_from_gpu()
         n = self._state.shape[0]
         if n >= (1 << 25):
             raise MemoryError("Dense simulation is limited to 25 qubits to prevent memory exhaustion.")
@@ -218,20 +315,34 @@ class PythonDenseStatevector(StateBackend):
         self._index_cache.clear()
         self._index_cache_2q.clear()
         self._index_cache_3q.clear()
+        self._buf0 = None
+        self._buf1 = None
 
     def H(self, k: int):
+        self._sync_from_gpu()
         inv_sqrt2 = 0.7071067811865475
         idx0, idx1 = self._get_indices(k)
         a0 = self._state[idx0]
         a1 = self._state[idx1]
-        self._state[idx0] = (a0 + a1) * inv_sqrt2
-        self._state[idx1] = (a0 - a1) * inv_sqrt2
+        b0, b1 = self._ensure_buffers(a0.shape[0])
+        np.add(a0, a1, out=b0)
+        np.subtract(a0, a1, out=b1)
+        b0 *= inv_sqrt2
+        b1 *= inv_sqrt2
+        self._state[idx0] = b0
+        self._state[idx1] = b1
 
     def X(self, k: int):
+        self._sync_from_gpu()
         idx0, idx1 = self._get_indices(k)
-        self._state[idx0], self._state[idx1] = self._state[idx1].copy(), self._state[idx0].copy()
+        # Optimized swap using pre-allocated buffers to avoid large temp copies
+        buf0, _ = self._ensure_buffers(idx0.shape[0])
+        np.copyto(buf0, self._state[idx0])
+        self._state[idx0] = self._state[idx1]
+        self._state[idx1] = buf0
 
     def Y(self, k: int):
+        self._sync_from_gpu()
         idx0, idx1 = self._get_indices(k)
         a0 = self._state[idx0]
         a1 = self._state[idx1]
@@ -239,14 +350,17 @@ class PythonDenseStatevector(StateBackend):
         self._state[idx1] = 1j * a0
 
     def Z(self, k: int):
+        self._sync_from_gpu()
         _, idx1 = self._get_indices(k)
         self._state[idx1] *= -1
 
     def S(self, k: int):
+        self._sync_from_gpu()
         _, idx1 = self._get_indices(k)
         self._state[idx1] *= 1j
 
     def T(self, k: int):
+        self._sync_from_gpu()
         _, idx1 = self._get_indices(k)
         self._state[idx1] *= (0.7071067811865475 + 0.7071067811865475j)
 
@@ -273,51 +387,69 @@ class PythonDenseStatevector(StateBackend):
         ])
 
     def apply_1qubit_gate(self, k: int, gate_matrix: list[list[complex]]):
-        # §1.3 — GPU acceleration: when CuPy/JAX is available,
-        # delegate to GPU-accelerated tensor contraction.
-        if _gpu_accel.available and self.num_qubits > 8:
-            sv = self.get_state_vector()
-            result = _gpu_accel.apply_gate_gpu(
-                sv, gate_matrix, k, self.num_qubits)
-            self.set_state_vector(np.array(result, dtype=complex))
+        # §1.3 — GPU acceleration: keep the state resident on the GPU and
+        # contract there; no host round-trip per gate. The state is only
+        # downloaded when a CPU-side path (2q gates, measure, inspection)
+        # needs it — see _sync_from_gpu().
+        gpu = _get_gpu_accel()
+        n = int(np.log2(self._state.shape[0])) if self._gpu_state is None \
+            else int(np.log2(self._gpu_state.shape[0]))
+        if gpu.available and gpu.backend == "cupy" and n > 8:
+            gstate = self._sync_to_gpu()
+            self._gpu_state = gpu.apply_gate_resident(
+                gstate, gate_matrix, k, n)
             return
+        self._sync_from_gpu()
         u00, u01 = gate_matrix[0][0], gate_matrix[0][1]
         u10, u11 = gate_matrix[1][0], gate_matrix[1][1]
         idx0, idx1 = self._get_indices(k)
         a0 = self._state[idx0]
         a1 = self._state[idx1]
-        self._state[idx0] = u00 * a0 + u01 * a1
-        self._state[idx1] = u10 * a0 + u11 * a1
+        b0, b1 = self._ensure_buffers(a0.shape[0])
+        np.multiply(u00, a0, out=b0)
+        np.multiply(u01, a1, out=b1)
+        b0 += b1
+        np.multiply(u10, a0, out=b1)
+        b1 += u11 * a1
+        self._state[idx0] = b0
+        self._state[idx1] = b1
 
     def CNOT(self, control: int, target: int):
+        self._sync_from_gpu()
         idx0 = self._get_indices_2q(control, target, 1, 0)
         idx1 = idx0 + (1 << target)
-        self._state[idx0], self._state[idx1] = self._state[idx1].copy(), self._state[idx0].copy()
+        self._state[idx0], self._state[idx1] = self._state[idx1], self._state[idx0]
 
     def CZ(self, control: int, target: int):
+        self._sync_from_gpu()
         idx = self._get_indices_2q(control, target, 1, 1)
         self._state[idx] *= -1
 
     def SWAP(self, q1: int, q2: int):
+        self._sync_from_gpu()
         idx0 = self._get_indices_2q(q1, q2, 1, 0)
         idx1 = (idx0 & ~(1 << q1)) | (1 << q2)
-        self._state[idx0], self._state[idx1] = self._state[idx1].copy(), self._state[idx0].copy()
+        self._state[idx0], self._state[idx1] = self._state[idx1], self._state[idx0]
 
     def CCX(self, control1: int, control2: int, target: int):
+        self._sync_from_gpu()
         idx0 = self._get_indices_3q(control1, control2, target, 1, 1, 0)
         idx1 = idx0 + (1 << target)
-        self._state[idx0], self._state[idx1] = self._state[idx1].copy(), self._state[idx0].copy()
+        self._state[idx0], self._state[idx1] = self._state[idx1], self._state[idx0]
 
     def CSWAP(self, control: int, q1: int, q2: int):
+        self._sync_from_gpu()
         idx0 = self._get_indices_3q(control, q1, q2, 1, 1, 0)
         idx1 = (idx0 & ~(1 << q1)) | (1 << q2)
-        self._state[idx0], self._state[idx1] = self._state[idx1].copy(), self._state[idx0].copy()
+        self._state[idx0], self._state[idx1] = self._state[idx1], self._state[idx0]
 
     def CP(self, control: int, target: int, theta: float):
+        self._sync_from_gpu()
         idx = self._get_indices_2q(control, target, 1, 1)
         self._state[idx] *= cmath.exp(1j * theta)
 
     def CRX(self, control: int, target: int, theta: float):
+        self._sync_from_gpu()
         cos_val = math.cos(theta / 2)
         sin_val = math.sin(theta / 2)
         idx0 = self._get_indices_2q(control, target, 1, 0)
@@ -328,6 +460,7 @@ class PythonDenseStatevector(StateBackend):
         self._state[idx1] = -1j * sin_val * a0 + cos_val * a1
 
     def CRY(self, control: int, target: int, theta: float):
+        self._sync_from_gpu()
         cos_val = math.cos(theta / 2)
         sin_val = math.sin(theta / 2)
         idx0 = self._get_indices_2q(control, target, 1, 0)
@@ -338,6 +471,7 @@ class PythonDenseStatevector(StateBackend):
         self._state[idx1] = sin_val * a0 + cos_val * a1
 
     def CRZ(self, control: int, target: int, theta: float):
+        self._sync_from_gpu()
         val_0 = cmath.exp(-1j * theta / 2)
         val_1 = cmath.exp(1j * theta / 2)
         idx0 = self._get_indices_2q(control, target, 1, 0)
@@ -348,6 +482,7 @@ class PythonDenseStatevector(StateBackend):
     def measure(self, k: int, r: float) -> int:
         # §1.3 — Optimized measurement: uses cached indices for
         # efficient probability computation and in-place collapse.
+        self._sync_from_gpu()
         idx0, idx1 = self._get_indices(k)
         p0 = np.sum(np.abs(self._state[idx0])**2)
         if r < p0:
@@ -383,24 +518,70 @@ class PythonDenseStatevector(StateBackend):
         return results
 
     def get_state_vector(self) -> list[complex]:
+        self._sync_from_gpu()
         return list(self._state)
 
     def set_state_vector(self, value: list[complex]):
+        self._gpu_state = None
         self._state = np.array(value, dtype=complex)
 
 
-class StateVectorList(list):
-    def __init__(self, iterable, on_update):
-        super().__init__(iterable)
-        self.on_update = on_update
+# Gates the stabilizer backend can execute natively (Clifford group).
+# Everything else triggers the auto-fallback to the dense backend.
+_CLIFFORD_GATES = frozenset({'H', 'X', 'Y', 'Z', 'S', 'CNOT', 'CZ', 'SWAP'})
 
-    def __setitem__(self, index, value):
-        super().__setitem__(index, value)
-        self.on_update(self)
 
-    def __delitem__(self, index):
-        super().__delitem__(index)
-        self.on_update(self)
+def _validate_angle(theta: float, gate: str):
+    """§6 (correctness): NaN/Inf rotation angles silently corrupt the whole
+    state vector (cos(nan) = nan propagates everywhere). Reject early."""
+    if not math.isfinite(theta):
+        raise ValueError(f"{gate} angle must be finite, got {theta!r}")
+
+
+# --- Parametrized gate matrices (GPU engine path) ------------------------
+def _rx_matrix(theta):
+    c, s = math.cos(theta / 2), math.sin(theta / 2)
+    return [[c, -1j * s], [-1j * s, c]]
+
+
+def _ry_matrix(theta):
+    c, s = math.cos(theta / 2), math.sin(theta / 2)
+    return [[c, -s], [s, c]]
+
+
+def _rz_matrix(theta):
+    return [[cmath.exp(-1j * theta / 2), 0.0j],
+            [0.0j, cmath.exp(1j * theta / 2)]]
+
+
+def _cp_matrix(theta):
+    return [[1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, cmath.exp(1j * theta)]]
+
+
+def _crx_matrix(theta):
+    c, s = math.cos(theta / 2), math.sin(theta / 2)
+    return [[1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, c, -1j * s],
+            [0.0, 0.0, -1j * s, c]]
+
+
+def _cry_matrix(theta):
+    c, s = math.cos(theta / 2), math.sin(theta / 2)
+    return [[1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, c, -s],
+            [0.0, 0.0, s, c]]
+
+
+def _crz_matrix(theta):
+    return [[1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, cmath.exp(-1j * theta / 2), 0.0],
+            [0.0, 0.0, 0.0, cmath.exp(1j * theta / 2)]]
 
 
 class QuantumSimulator:
@@ -428,13 +609,9 @@ class QuantumSimulator:
         self.mps_auto_bond_dim = mps_auto_bond_dim
         self.mps_max_truncation_error = mps_max_truncation_error
         
-        if self.gpu_platform != 'none' and self.sim_type == 'dense':
-            from src.backend.gpu.gpu_engine import GPUEngine
-            self.gpu_engine = GPUEngine(self.gpu_platform)
-            if self.gpu_engine.platform == 'none':
-                self.gpu_platform = 'none'
-                self.gpu_engine = None
-                
+        # §1.3: Lazy GPU initialization — only load backend if needed
+        self._gpu_engine_lazy = None
+
         if self.sim_type == 'sparse':
             self.is_sparse = True
             self.sparse_sim = SparseQuantumSimulator()
@@ -459,13 +636,32 @@ class QuantumSimulator:
                 self.dense_backend = RustStatevectorWrapper()
             else:
                 self.dense_backend = PythonDenseStatevector()
+            if hasattr(self.dense_backend, 'rng'):
+                self.dense_backend.rng = self.rng
         elif self.sim_type == 'auto':
             if native is not None and hasattr(native, 'RustStatevector'):
                 self.dense_backend = RustStatevectorWrapper()
             else:
                 self.dense_backend = PythonDenseStatevector()
+            if hasattr(self.dense_backend, 'rng'):
+                self.dense_backend.rng = self.rng
 
-        # Precomputed gate matrices cache for dense path
+    @property
+    def gpu_engine(self):
+        if self._gpu_engine_lazy is None and self.gpu_platform != 'none':
+            from src.backend.gpu.gpu_engine import GPUEngine
+            engine = GPUEngine(self.gpu_platform)
+            if engine.platform == 'none':
+                self.gpu_platform = 'none'
+            else:
+                self._gpu_engine_lazy = engine
+        return self._gpu_engine_lazy
+
+    @gpu_engine.setter
+    def gpu_engine(self, value):
+        self._gpu_engine_lazy = value
+
+    # Precomputed gate matrices cache for dense path
         inv_sqrt2 = 0.7071067811865475
         self.gate_cache = {
             'H': [[inv_sqrt2, inv_sqrt2], [inv_sqrt2, -inv_sqrt2]],
@@ -485,18 +681,38 @@ class QuantumSimulator:
             'SWAP': [[1.0, 0.0, 0.0, 0.0],
                      [0.0, 0.0, 1.0, 0.0],
                      [0.0, 1.0, 0.0, 0.0],
-                     [0.0, 0.0, 0.0, 1.0]]
+                     [0.0, 0.0, 0.0, 1.0]],
+            'CCX': [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]],
+            # CSWAP(c, q1, q2): control is the MSB of the 3-qubit block in
+            # GPUEngine's convention; swaps |101> <-> |110>. (The pre-2.8
+            # inline GPU matrix duplicated CCX — a latent GPU-path bug.)
+            'CSWAP': [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                      [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                      [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                      [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+                      [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+                      [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                      [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                      [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]
         }
 
     @property
     def state_vector(self) -> list[complex]:
+        # §2 (perf): returns a plain copy. The old StateVectorList wrapper
+        # re-uploaded the whole 2^n vector to the backend on EVERY element
+        # assignment — an O(2^n) trap. Mutate via the property setter or
+        # set_state_vector() instead.
         if self.is_sparse or self.sim_type in ('sparse', 'mps'):
             return None
         if self.dense_backend:
-            raw_state = self.dense_backend.get_state_vector()
-            def update_cb(new_list):
-                self.dense_backend.set_state_vector(new_list)
-            return StateVectorList(raw_state, update_cb)
+            return list(self.dense_backend.get_state_vector())
         if hasattr(self, '_state_vector'):
             return self._state_vector
         return [1.0 + 0.0j]
@@ -563,6 +779,8 @@ class QuantumSimulator:
             f"{{H, S, X, Y, Z, CNOT, CZ, SWAP}}.",
             stacklevel=3,
         )
+        # §1.3: Correct fallback — preserves the quantum state
+        old_state = self.stabilizer_sim.get_state_vector()
         self.stabilizer_sim = None
         self.sim_type = 'dense'
         if native is not None and hasattr(native, 'RustStatevector'):
@@ -571,6 +789,7 @@ class QuantumSimulator:
             self.dense_backend = PythonDenseStatevector()
         for _ in range(self.num_qubits):
             self.dense_backend.allocate_qubit()
+        self.dense_backend.set_state_vector(old_state)
 
     def allocate_qubit(self, name: str):
         if name in self.qubit_map:
@@ -633,9 +852,44 @@ class QuantumSimulator:
             raise KeyError(f"Qubit '{name}' is not allocated in the simulator")
         return self.qubit_map[name]
 
+    def _dispatch_gate(self, gate: str, names: tuple, angles: tuple = (),
+                       gpu_matrix=None):
+        """Unified gate dispatch — the single source of truth for backend
+        priority (audit §2 god-class fix: replaces ~114 hand-copied branch
+        ladders whose per-gate ordering was inconsistent).
+
+        Priority: stabilizer (Clifford only; anything else auto-falls back
+        to dense) → mps → density → sparse → gpu → dense. At most one
+        backend is active at any moment; the chain exists because *which*
+        one is active changes at runtime (auto sparse switch at >20
+        qubits, stabilizer fallback, configure_backend).
+        """
+        if self.stabilizer_sim:
+            if gate in _CLIFFORD_GATES:
+                return getattr(self.stabilizer_sim, gate)(*names, *angles)
+            self._fallback_from_stabilizer(gate)
+            # fall through: stabilizer_sim is now None, dense is active.
+        if self.mps_sim:
+            return getattr(self.mps_sim, gate)(*names, *angles)
+        if self.density_sim:
+            return getattr(self.density_sim, gate)(*names, *angles)
+        if self.is_sparse:
+            return getattr(self.sparse_sim, gate)(*names, *angles)
+        if self.gpu_engine:
+            indices = [self.get_qubit_index(n) for n in names]
+            return self.gpu_engine.apply_gate(indices, gpu_matrix)
+        return getattr(self.dense_backend, gate)(
+            *(self.get_qubit_index(n) for n in names), *angles)
+
     def apply_1qubit_gate(self, name: str, gate_matrix: list[list[complex]]):
+        if self.stabilizer_sim:
+            # An arbitrary 2x2 unitary is generally non-Clifford.
+            self._fallback_from_stabilizer('U')
         if self.mps_sim:
             self.mps_sim.apply_1qubit_gate(name, gate_matrix)
+            return
+        if self.density_sim:
+            self.density_sim.apply_1qubit_gate(name, gate_matrix)
             return
         if self.is_sparse:
             self.sparse_sim.apply_1qubit_gate(name, gate_matrix)
@@ -646,389 +900,74 @@ class QuantumSimulator:
         self.dense_backend.apply_1qubit_gate(self.get_qubit_index(name), gate_matrix)
 
     def H(self, q: str):
-        if self.stabilizer_sim:
-            self.stabilizer_sim.H(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.H(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['H'])
-            return
-        if self.mps_sim:
-            self.mps_sim.H(q)
-            return
-        if self.density_sim:
-            self.density_sim.H(q)
-            return
-        self.dense_backend.H(self.get_qubit_index(q))
+        self._dispatch_gate('H', (q,), gpu_matrix=self.gate_cache['H'])
 
     def X(self, q: str):
-        if self.stabilizer_sim:
-            self.stabilizer_sim.X(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.X(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['X'])
-            return
-        if self.mps_sim:
-            self.mps_sim.X(q)
-            return
-        if self.density_sim:
-            self.density_sim.X(q)
-            return
-        self.dense_backend.X(self.get_qubit_index(q))
+        self._dispatch_gate('X', (q,), gpu_matrix=self.gate_cache['X'])
 
     def Y(self, q: str):
-        if self.mps_sim:
-            self.mps_sim.Y(q)
-            return
-        if self.density_sim:
-            self.density_sim.Y(q)
-            return
-        if self.stabilizer_sim:
-            self.stabilizer_sim.Y(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.Y(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['Y'])
-            return
-        self.dense_backend.Y(self.get_qubit_index(q))
+        self._dispatch_gate('Y', (q,), gpu_matrix=self.gate_cache['Y'])
 
     def Z(self, q: str):
-        if self.mps_sim:
-            self.mps_sim.Z(q)
-            return
-        if self.density_sim:
-            self.density_sim.Z(q)
-            return
-        if self.stabilizer_sim:
-            self.stabilizer_sim.Z(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.Z(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['Z'])
-            return
-        self.dense_backend.Z(self.get_qubit_index(q))
+        self._dispatch_gate('Z', (q,), gpu_matrix=self.gate_cache['Z'])
 
     def S(self, q: str):
-        if self.mps_sim:
-            self.mps_sim.S(q)
-            return
-        if self.density_sim:
-            self.density_sim.S(q)
-            return
-        if self.stabilizer_sim:
-            self.stabilizer_sim.S(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.S(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['S'])
-            return
-        self.dense_backend.S(self.get_qubit_index(q))
+        self._dispatch_gate('S', (q,), gpu_matrix=self.gate_cache['S'])
 
     def T(self, q: str):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('T')
-        if self.mps_sim:
-            self.mps_sim.T(q)
-            return
-        if self.density_sim:
-            self.density_sim.T(q)
-            return
-        if self.is_sparse:
-            self.sparse_sim.T(q)
-            return
-        if self.gpu_engine:
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], self.gate_cache['T'])
-            return
-        self.dense_backend.T(self.get_qubit_index(q))
+        self._dispatch_gate('T', (q,), gpu_matrix=self.gate_cache['T'])
 
     def RX(self, q: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('RX')
-        if self.mps_sim:
-            self.mps_sim.RX(q, theta)
-            return
-        if self.density_sim:
-            self.density_sim.RX(q, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.RX(q, theta)
-            return
-        if self.gpu_engine:
-            cos_val = math.cos(theta / 2)
-            sin_val = math.sin(theta / 2)
-            u = [[cos_val, -1j * sin_val], [-1j * sin_val, cos_val]]
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], u)
-            return
-        self.dense_backend.RX(self.get_qubit_index(q), theta)
+        _validate_angle(theta, 'RX')
+        self._dispatch_gate('RX', (q,), (theta,), _rx_matrix(theta))
 
     def RY(self, q: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('RY')
-        if self.mps_sim:
-            self.mps_sim.RY(q, theta)
-            return
-        if self.density_sim:
-            self.density_sim.RY(q, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.RY(q, theta)
-            return
-        if self.gpu_engine:
-            cos_val = math.cos(theta / 2)
-            sin_val = math.sin(theta / 2)
-            u = [[cos_val, -sin_val], [sin_val, cos_val]]
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], u)
-            return
-        self.dense_backend.RY(self.get_qubit_index(q), theta)
+        _validate_angle(theta, 'RY')
+        self._dispatch_gate('RY', (q,), (theta,), _ry_matrix(theta))
 
     def RZ(self, q: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('RZ')
-        if self.mps_sim:
-            self.mps_sim.RZ(q, theta)
-            return
-        if self.density_sim:
-            self.density_sim.RZ(q, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.RZ(q, theta)
-            return
-        if self.gpu_engine:
-            u = [[cmath.exp(-1j * theta / 2), 0.0j], [0.0j, cmath.exp(1j * theta / 2)]]
-            self.gpu_engine.apply_gate([self.get_qubit_index(q)], u)
-            return
-        self.dense_backend.RZ(self.get_qubit_index(q), theta)
+        _validate_angle(theta, 'RZ')
+        self._dispatch_gate('RZ', (q,), (theta,), _rz_matrix(theta))
 
     def CNOT(self, control: str, target: str):
-        if self.stabilizer_sim:
-            self.stabilizer_sim.CNOT(control, target)
-            return
-        if self.mps_sim:
-            self.mps_sim.CNOT(control, target)
-            return
-        if self.density_sim:
-            self.density_sim.CNOT(control, target)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CNOT(control, target)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            self.gpu_engine.apply_gate([c, t], self.gate_cache['CNOT'])
-            return
-        self.dense_backend.CNOT(self.get_qubit_index(control), self.get_qubit_index(target))
+        self._dispatch_gate('CNOT', (control, target),
+                            gpu_matrix=self.gate_cache['CNOT'])
 
     def CZ(self, control: str, target: str):
-        if self.mps_sim:
-            self.mps_sim.CZ(control, target)
-            return
-        if self.density_sim:
-            self.density_sim.CZ(control, target)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CZ(control, target)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            self.gpu_engine.apply_gate([c, t], self.gate_cache['CZ'])
-            return
-        self.dense_backend.CZ(self.get_qubit_index(control), self.get_qubit_index(target))
+        self._dispatch_gate('CZ', (control, target),
+                            gpu_matrix=self.gate_cache['CZ'])
 
     def SWAP(self, q1: str, q2: str):
-        if self.mps_sim:
-            self.mps_sim.SWAP(q1, q2)
-            return
-        if self.density_sim:
-            self.density_sim.SWAP(q1, q2)
-            return
-        if self.is_sparse:
-            self.sparse_sim.SWAP(q1, q2)
-            return
-        if self.gpu_engine:
-            idx1 = self.get_qubit_index(q1)
-            idx2 = self.get_qubit_index(q2)
-            self.gpu_engine.apply_gate([idx1, idx2], self.gate_cache['SWAP'])
-            return
-        self.dense_backend.SWAP(self.get_qubit_index(q1), self.get_qubit_index(q2))
+        self._dispatch_gate('SWAP', (q1, q2),
+                            gpu_matrix=self.gate_cache['SWAP'])
 
     def CCX(self, control1: str, control2: str, target: str):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CCX')
-        if self.mps_sim:
-            self.mps_sim.CCX(control1, control2, target)
-            return
-        if self.density_sim:
-            self.density_sim.CCX(control1, control2, target)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CCX(control1, control2, target)
-            return
-        if self.gpu_engine:
-            c1 = self.get_qubit_index(control1)
-            c2 = self.get_qubit_index(control2)
-            t = self.get_qubit_index(target)
-            u = [
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
-            ]
-            self.gpu_engine.apply_gate([c1, c2, t], u)
-            return
-        self.dense_backend.CCX(self.get_qubit_index(control1), self.get_qubit_index(control2), self.get_qubit_index(target))
+        self._dispatch_gate('CCX', (control1, control2, target),
+                            gpu_matrix=self.gate_cache['CCX'])
 
     def CSWAP(self, control: str, q1: str, q2: str):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CSWAP')
-        if self.mps_sim:
-            self.mps_sim.CSWAP(control, q1, q2)
-            return
-        if self.density_sim:
-            self.density_sim.CSWAP(control, q1, q2)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CSWAP(control, q1, q2)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            q1_idx = self.get_qubit_index(q1)
-            q2_idx = self.get_qubit_index(q2)
-            u = [
-                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
-            ]
-            self.gpu_engine.apply_gate([c, q1_idx, q2_idx], u)
-            return
-        self.dense_backend.CSWAP(self.get_qubit_index(control), self.get_qubit_index(q1), self.get_qubit_index(q2))
+        self._dispatch_gate('CSWAP', (control, q1, q2),
+                            gpu_matrix=self.gate_cache['CSWAP'])
 
     def CP(self, control: str, target: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CP')
-        if self.mps_sim:
-            self.mps_sim.CP(control, target, theta)
-            return
-        if self.density_sim:
-            self.density_sim.CP(control, target, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CP(control, target, theta)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            u = [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, 1.0, 0.0],
-                [0.0, 0.0, 0.0, cmath.exp(1j * theta)]
-            ]
-            self.gpu_engine.apply_gate([c, t], u)
-            return
-        self.dense_backend.CP(self.get_qubit_index(control), self.get_qubit_index(target), theta)
+        _validate_angle(theta, 'CP')
+        self._dispatch_gate('CP', (control, target), (theta,),
+                            _cp_matrix(theta))
 
     def CRX(self, control: str, target: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CRX')
-        if self.mps_sim:
-            self.mps_sim.CRX(control, target, theta)
-            return
-        if self.density_sim:
-            self.density_sim.CRX(control, target, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CRX(control, target, theta)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            cos_val = math.cos(theta / 2)
-            sin_val = math.sin(theta / 2)
-            u = [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, cos_val, -1j * sin_val],
-                [0.0, 0.0, -1j * sin_val, cos_val]
-            ]
-            self.gpu_engine.apply_gate([c, t], u)
-            return
-        self.dense_backend.CRX(self.get_qubit_index(control), self.get_qubit_index(target), theta)
+        _validate_angle(theta, 'CRX')
+        self._dispatch_gate('CRX', (control, target), (theta,),
+                            _crx_matrix(theta))
 
     def CRY(self, control: str, target: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CRY')
-        if self.mps_sim:
-            self.mps_sim.CRY(control, target, theta)
-            return
-        if self.density_sim:
-            self.density_sim.CRY(control, target, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CRY(control, target, theta)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            cos_val = math.cos(theta / 2)
-            sin_val = math.sin(theta / 2)
-            u = [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, cos_val, -sin_val],
-                [0.0, 0.0, sin_val, cos_val]
-            ]
-            self.gpu_engine.apply_gate([c, t], u)
-            return
-        self.dense_backend.CRY(self.get_qubit_index(control), self.get_qubit_index(target), theta)
+        _validate_angle(theta, 'CRY')
+        self._dispatch_gate('CRY', (control, target), (theta,),
+                            _cry_matrix(theta))
 
     def CRZ(self, control: str, target: str, theta: float):
-        if self.stabilizer_sim:
-            self._fallback_from_stabilizer('CRZ')
-        if self.mps_sim:
-            self.mps_sim.CRZ(control, target, theta)
-            return
-        if self.density_sim:
-            self.density_sim.CRZ(control, target, theta)
-            return
-        if self.is_sparse:
-            self.sparse_sim.CRZ(control, target, theta)
-            return
-        if self.gpu_engine:
-            c = self.get_qubit_index(control)
-            t = self.get_qubit_index(target)
-            val_0 = cmath.exp(-1j * theta / 2)
-            val_1 = cmath.exp(1j * theta / 2)
-            u = [
-                [1.0, 0.0, 0.0, 0.0],
-                [0.0, 1.0, 0.0, 0.0],
-                [0.0, 0.0, val_0, 0.0],
-                [0.0, 0.0, 0.0, val_1]
-            ]
-            self.gpu_engine.apply_gate([c, t], u)
-            return
-        self.dense_backend.CRZ(self.get_qubit_index(control), self.get_qubit_index(target), theta)
+        _validate_angle(theta, 'CRZ')
+        self._dispatch_gate('CRZ', (control, target), (theta,),
+                            _crz_matrix(theta))
 
     def measure(self, q: str) -> int:
         if self.stabilizer_sim:
@@ -1040,34 +979,11 @@ class QuantumSimulator:
         if self.is_sparse:
             return self.sparse_sim.measure(q)
         if self.gpu_engine:
-            state = self.gpu_engine.get_state()
+            # §1.3: GPU-resident measurement (vectorized, no CPU round-trip)
             k = self.get_qubit_index(q)
-            n = len(state)
-            k_mask = 1 << k
-            p0 = sum(abs(amp)**2 for i, amp in enumerate(state) if not (i & k_mask))
             r = self.rng.random()
-            if r < p0:
-                norm = math.sqrt(p0) if p0 > 1e-15 else 1.0
-                for i in range(n):
-                    if i & k_mask:
-                        state[i] = 0.0j
-                    else:
-                        state[i] /= norm
-                self.gpu_engine.set_state(state)
-                self._state_vector = state
-                return 0
-            else:
-                p1 = 1.0 - p0
-                norm = math.sqrt(p1) if p1 > 1e-15 else 1.0
-                for i in range(n):
-                    if not (i & k_mask):
-                        state[i] = 0.0j
-                    else:
-                        state[i] /= norm
-                self.gpu_engine.set_state(state)
-                self._state_vector = state
-                return 1
-            
+            return self.gpu_engine.measure(k, r)
+
         k = self.get_qubit_index(q)
         r = self.rng.random()
         return self.dense_backend.measure(k, r)

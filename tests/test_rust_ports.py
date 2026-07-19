@@ -22,7 +22,6 @@ physical sanity (boundary cases like empty inputs, fully-disconnected
 graphs, and self-loops in trial mappings).
 """
 
-import math
 import unittest
 
 try:
@@ -391,7 +390,7 @@ class TestFastSabreSwapScore(unittest.TestCase):
         # to None on the imported native symbol so the router falls
         # back to the in-Python loop.
         import src.routing.router as router_mod
-        original_native = getattr(router_mod, 'eigen_native', None) \
+        getattr(router_mod, 'eigen_native', None) \
             if False else None
         # Reach into the function call inside SabreRouter.route by
         # setting `eigen_native.fast_sabre_swap_score` to None — but

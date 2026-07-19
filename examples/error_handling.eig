@@ -1,0 +1,53 @@
+eigen 1.0
+
+# Error handling with try / catch / finally.
+#
+# Eigen's try block parses as TryCatchNode(try_body, catch_var,
+# catch_body, finally_body, catch_type). The VM maintains a try_stack
+# of (catch_target, finally_target) addresses; a `throw` instruction
+# unwinds to the nearest handler.
+
+# 1. A function that throws on invalid input.
+func safe_div(x: int, y: int) -> int {
+    if y == 0 {
+        throw "division by zero"
+    }
+    return x / y
+}
+
+# 2. Catch the throw and recover.
+let result: int = 0
+try {
+    let r: int = safe_div(10, 0)
+    result = r
+} catch (err) {
+    print "caught:"
+    print err
+    result = -1
+} finally {
+    print "always runs"
+}
+
+assert result == -1
+
+# 3. The happy path: no throw, finally still runs.
+let ok: int = 0
+try {
+    let r: int = safe_div(10, 2)
+    ok = r
+} catch (err) {
+    print "unexpected:"
+    print err
+    ok = -2
+} finally {
+    print "done"
+}
+
+assert ok == 5
+
+# 4. catch can omit the variable name and type annotation.
+try {
+    throw 42
+} catch {
+    print "caught anonymous throw"
+}

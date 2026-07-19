@@ -1,7 +1,6 @@
 ﻿import sys
 import unittest
 import math
-import cmath
 from src.simulator import QuantumSimulator
 
 class TestDensityMatrix(unittest.TestCase):

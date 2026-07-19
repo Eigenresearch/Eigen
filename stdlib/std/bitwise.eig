@@ -1,0 +1,61 @@
+eigen 1.0
+module std.bitwise
+
+# Bitwise AND of two integers
+func and(a: int, b: int) -> int {
+    return a & b
+}
+
+# Bitwise OR of two integers
+func or(a: int, b: int) -> int {
+    return a | b
+}
+
+# Bitwise XOR of two integers
+func xor(a: int, b: int) -> int {
+    return a ^ b
+}
+
+# Bitwise NOT of an integer
+func not(a: int) -> int {
+    return ~a
+}
+
+# Logical left shift of `a` by `n` bits
+func shift_left(a: int, n: int) -> int {
+    return a << n
+}
+
+# Logical right shift of `a` by `n` bits
+func shift_right(a: int, n: int) -> int {
+    return a >> n
+}
+
+# Counts the number of set bits (population count) in an integer
+func popcount(a: int) -> int {
+    let count: int = 0
+    let x: int = a
+    while x != 0 {
+        x = x & (x - 1)
+        count = count + 1
+    }
+    return count
+}
+
+# Returns 1 if bit `i` of `a` is set, 0 otherwise
+func get_bit(a: int, i: int) -> int {
+    if (a & (1 << i)) != 0 {
+        return 1
+    }
+    return 0
+}
+
+# Sets bit `i` of `a` to 1
+func set_bit(a: int, i: int) -> int {
+    return a | (1 << i)
+}
+
+# Clears bit `i` of `a` (sets it to 0)
+func clear_bit(a: int, i: int) -> int {
+    return a & ~(1 << i)
+}

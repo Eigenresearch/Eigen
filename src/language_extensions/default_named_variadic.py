@@ -127,7 +127,7 @@ def _is_keyword_only(sig: FunctionSignature, name: str) -> bool:
         return False
     var_idx = next(i for i, p in enumerate(sig.params)
                    if p.kind == ParameterKind.VARIADIC)
-    for i, p in enumerate(sig.params[var_idx + 1:], start=var_idx + 1):
+    for _i, p in enumerate(sig.params[var_idx + 1:], start=var_idx + 1):
         if p.name == name:
             return True
     return False

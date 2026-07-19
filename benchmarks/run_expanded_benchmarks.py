@@ -45,8 +45,10 @@ def make_sum_program(N):
     lc = len(instrs)
     instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, N), Instruction(Opcode.GT)]
     instrs += [Instruction(Opcode.JMP_IF_TRUE, lc + 13)]
-    instrs += [Instruction(Opcode.LOAD_VAR, "sum"), Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "sum")]
-    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "sum"), Instruction(Opcode.LOAD_VAR, "i"),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "sum")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
     instrs += [Instruction(Opcode.JMP, lc)]
     instrs += [Instruction(Opcode.LOAD_VAR, "sum"), Instruction(Opcode.PRINT), Instruction(Opcode.HALT)]
     return instrs
@@ -60,10 +62,12 @@ def make_fib_program(N):
     instrs += [Instruction(Opcode.LOAD_VAR, "count"), Instruction(Opcode.LOAD_CONST, N), Instruction(Opcode.GTE)]
     exit_target = len(instrs) + 1 + 13
     instrs += [Instruction(Opcode.JMP_IF_TRUE, exit_target)]
-    instrs += [Instruction(Opcode.LOAD_VAR, "a"), Instruction(Opcode.LOAD_VAR, "b"), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "temp")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "a"), Instruction(Opcode.LOAD_VAR, "b"),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "temp")]
     instrs += [Instruction(Opcode.LOAD_VAR, "b"), Instruction(Opcode.STORE_VAR, "a")]
     instrs += [Instruction(Opcode.LOAD_VAR, "temp"), Instruction(Opcode.STORE_VAR, "b")]
-    instrs += [Instruction(Opcode.LOAD_VAR, "count"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "count")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "count"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "count")]
     instrs += [Instruction(Opcode.JMP, lc)]
     instrs += [Instruction(Opcode.LOAD_VAR, "a"), Instruction(Opcode.PRINT), Instruction(Opcode.HALT)]
     return instrs
@@ -76,8 +80,10 @@ def make_factorial_program(N):
     instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, N), Instruction(Opcode.GT)]
     exit_target = len(instrs) + 1 + 9
     instrs += [Instruction(Opcode.JMP_IF_TRUE, exit_target)]
-    instrs += [Instruction(Opcode.LOAD_VAR, "result"), Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.MUL), Instruction(Opcode.STORE_VAR, "result")]
-    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "result"), Instruction(Opcode.LOAD_VAR, "i"),
+               Instruction(Opcode.MUL), Instruction(Opcode.STORE_VAR, "result")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
     instrs += [Instruction(Opcode.JMP, lc)]
     instrs += [Instruction(Opcode.LOAD_VAR, "result"), Instruction(Opcode.PRINT), Instruction(Opcode.HALT)]
     return instrs
@@ -93,13 +99,17 @@ def make_nested_loop_program(N):
     lc2 = len(instrs)
     instrs += [Instruction(Opcode.LOAD_VAR, "j"), Instruction(Opcode.LOAD_CONST, N), Instruction(Opcode.GTE)]
     instrs += [Instruction(Opcode.JMP_IF_TRUE, -1)]  # placeholder
-    instrs += [Instruction(Opcode.LOAD_VAR, "total"), Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_VAR, "j"), Instruction(Opcode.MUL), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "total")]
-    instrs += [Instruction(Opcode.LOAD_VAR, "j"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "j")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "total"), Instruction(Opcode.LOAD_VAR, "i"),
+               Instruction(Opcode.LOAD_VAR, "j"), Instruction(Opcode.MUL),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "total")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "j"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "j")]
     instrs += [Instruction(Opcode.JMP, lc2)]
     # Fix inner exit target
     inner_exit = len(instrs)
     instrs[lc2 + 3] = Instruction(Opcode.JMP_IF_TRUE, inner_exit)
-    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
     instrs += [Instruction(Opcode.JMP, lc1)]
     outer_exit = len(instrs)
     instrs[lc1 + 3] = Instruction(Opcode.JMP_IF_TRUE, outer_exit)
@@ -158,8 +168,10 @@ def run_eigen_str_concat(N):
     instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, N), Instruction(Opcode.GT)]
     exit_target = len(instrs) + 1 + 8
     instrs += [Instruction(Opcode.JMP_IF_TRUE, exit_target)]
-    instrs += [Instruction(Opcode.LOAD_VAR, "s"), Instruction(Opcode.LOAD_CONST, "x"), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "s")]
-    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1), Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "s"), Instruction(Opcode.LOAD_CONST, "x"),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "s")]
+    instrs += [Instruction(Opcode.LOAD_VAR, "i"), Instruction(Opcode.LOAD_CONST, 1),
+               Instruction(Opcode.ADD), Instruction(Opcode.STORE_VAR, "i")]
     instrs += [Instruction(Opcode.JMP, lc)]
     instrs += [Instruction(Opcode.HALT)]
     vm = EigenVM(opt_level=3)
@@ -504,7 +516,9 @@ def run_benchmarks():
 
     summary_path = os.path.join("results", "benchmark_summary.csv")
     with open(summary_path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["workload","size","implementation","mean_s","std_s","min_s","max_s","ci95_s","trials"])
+        w = csv.DictWriter(f, fieldnames=[
+            "workload","size","implementation","mean_s","std_s",
+            "min_s","max_s","ci95_s","trials"])
         w.writeheader(); w.writerows(summary_rows)
     print(f"Summary: {summary_path} ({len(summary_rows)} rows)")
 

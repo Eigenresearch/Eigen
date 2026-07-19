@@ -45,7 +45,8 @@ class BackendCapabilities:
         }
 
 def get_backend_capabilities(backend_name: str) -> BackendCapabilities:
-    if backend_name == "runtime":
+    if backend_name in ("runtime", "simulator", "local", "aer", "dense",
+                        "sparse", "mps", "stabilizer", "density_matrix"):
         return BackendCapabilities(
             supports_quantum_gates=CapabilityLevel.SUPPORTED,
             supports_measurements=CapabilityLevel.SUPPORTED,

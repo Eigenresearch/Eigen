@@ -1,10 +1,17 @@
 from enum import Enum
 from dataclasses import dataclass
+from typing import Optional
 
 class DiagnosticSeverity(Enum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
+    HINT = "hint"
+
+class DiagnosticCode:
+    E001 = "E001"
+    E002 = "E002"
+    W001 = "W001"
 
 @dataclass
 class SourceLocation:
@@ -26,18 +33,24 @@ class Diagnostic:
     message: str
     location: SourceLocation | None = None
     code: str | None = None
+    fix_suggestion: Optional[str] = None
 
     def __str__(self) -> str:
         loc_part = f"[{self.location}] " if self.location else ""
         code_part = f" ({self.code})" if self.code else ""
-        return f"{loc_part}{self.severity.value.upper()}: {self.message}{code_part}"
+        fix_part = f" [fix: {self.fix_suggestion}]" if self.fix_suggestion else ""
+        return f"{loc_part}{self.severity.value.upper()}: {self.message}{code_part}{fix_part}"
 
 class DiagnosticEngine:
     def __init__(self):
         self.diagnostics = []
 
-    def emit(self, severity: DiagnosticSeverity, message: str, location: SourceLocation | None = None, code: str | None = None) -> Diagnostic:
-        diag = Diagnostic(severity, message, location, code)
+    def emit(
+        self, severity: DiagnosticSeverity, message: str,
+        location: SourceLocation | None = None, code: str | None = None,
+        fix_suggestion: Optional[str] = None
+    ) -> Diagnostic:
+        diag = Diagnostic(severity, message, location, code, fix_suggestion)
         self.diagnostics.append(diag)
         return diag
 
@@ -49,6 +62,9 @@ class DiagnosticEngine:
 
     def get_infos(self) -> list[Diagnostic]:
         return [d for d in self.diagnostics if d.severity == DiagnosticSeverity.INFO]
+
+    def get_hints(self) -> list[Diagnostic]:
+        return [d for d in self.diagnostics if d.severity == DiagnosticSeverity.HINT]
 
     def has_errors(self) -> bool:
         return any(d.severity == DiagnosticSeverity.ERROR for d in self.diagnostics)

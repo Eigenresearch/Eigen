@@ -3,35 +3,50 @@ module std.math
 
 # Returns the sine of a float angle
 func sin(x: float) -> float {
-    return 0.0
+    throw "math.eig::sin requires native math support (transcendental function not implemented in pure Eigen)"
 }
 
 # Returns the cosine of a float angle
 func cos(x: float) -> float {
-    return 0.0
+    throw "math.eig::cos requires native math support (transcendental function not implemented in pure Eigen)"
 }
 
 # Returns the tangent of a float angle
 func tan(x: float) -> float {
-    return 0.0
+    throw "math.eig::tan requires native math support (transcendental function not implemented in pure Eigen)"
 }
 
 # Returns the square root of a float value
 func sqrt(x: float) -> float {
-    return 0.0
+    if x < 0.0 {
+        throw "math.eig::sqrt: cannot take square root of negative number"
+    }
+    if x == 0.0 {
+        return 0.0
+    }
+    let guess: float = x
+    let i: int = 0
+    while i < 30 {
+        guess = (guess + x / guess) / 2.0
+        i = i + 1
+    }
+    return guess
 }
 
 # Returns the natural log of a float value
 func log(x: float) -> float {
-    return 0.0
+    throw "math.eig::log requires native math support (transcendental function not implemented in pure Eigen)"
 }
 
 # Returns the exponent of a float value
 func exp(x: float) -> float {
-    return 0.0
+    throw "math.eig::exp requires native math support (transcendental function not implemented in pure Eigen)"
 }
 
 # Returns absolute value
 func abs(x: float) -> float {
-    return 0.0
+    if x < 0.0 {
+        return -x
+    }
+    return x
 }

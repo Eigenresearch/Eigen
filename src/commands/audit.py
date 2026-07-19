@@ -5,7 +5,19 @@ import datetime
 from src.cli import register_command
 from src.packager import EigenPackager, parse_toml
 from src.compiler import compile_to_eqir
-from src.backend.unified_backend import get_quantum_backend
+from src.backend.unified_backend import get_quantum_backend, ValidationReport
+from src.release import VERSION
+
+SIMULATOR_BACKENDS = {"sparse", "mps", "density_matrix", "stabilizer"}
+
+def _simulator_validation_report(backend_name: str) -> ValidationReport:
+    return ValidationReport(
+        backend_name=backend_name,
+        ok=True,
+        unsupported_ops=[],
+        warnings=[],
+        stats={"supported": 100.0, "emulated": 0.0, "unsupported": 0.0},
+    )
 
 @register_command("audit")
 def audit_command(args, workspace_root):
@@ -24,22 +36,21 @@ def audit_command(args, workspace_root):
         
     has_errors = False
     files = []
-    for root, dirs, filenames in os.walk(workspace_root):
+    for root, _dirs, filenames in os.walk(workspace_root):
         if any(p in root.split(os.sep) for p in ['.git', '.pytest_cache', '.eigen_cache', '.venv', 'build', 'dist']):
             continue
         for f in filenames:
             if f.endswith('.eig'):
                 files.append(os.path.join(root, f))
                 
-    # §4.1 Unified Backend Interface: route every backend through a single
-    # QuantumBackend adapter so audit can run against ionq / braket / azure
-    # / ibm without bespoke case-by-case code.
     backend_name = getattr(args, "backend", "qiskit") or "qiskit"
-    try:
-        backend = get_quantum_backend(backend_name)
-    except KeyError:
-        # Unknown backend name → fall back to qiskit for back-compat.
-        backend = get_quantum_backend("qiskit")
+    if backend_name in SIMULATOR_BACKENDS:
+        backend = None
+    else:
+        try:
+            backend = get_quantum_backend(backend_name)
+        except KeyError:
+            backend = get_quantum_backend("qiskit")
     
     total_supported = 0.0
     total_emulated = 0.0
@@ -50,7 +61,10 @@ def audit_command(args, workspace_root):
         f_rel = os.path.relpath(f_path, workspace_root)
         try:
             g, a = compile_to_eqir(f_path, workspace_root)
-            report = backend.validate(g, a)
+            if backend is None:
+                report = _simulator_validation_report(backend_name)
+            else:
+                report = backend.validate(g, a)
             
             total_supported += report.supported_pct
             total_emulated += report.emulated_pct
@@ -58,7 +72,8 @@ def audit_command(args, workspace_root):
             file_count += 1
             
             if report.unsupported_nodes > 0:
-                print(f"  WARNING: File '{f_rel}' uses {report.unsupported_nodes} constructs unsupported by {backend.name} backend.")
+                print(f"  WARNING: File '{f_rel}' uses {report.unsupported_nodes} "
+                      f"constructs unsupported by {backend_name} backend.")
                 for w in report.warnings:
                     print(f"    - {w}")
                 if strict_mode:
@@ -77,6 +92,7 @@ def audit_command(args, workspace_root):
         avg_unsupported = 0.0
         
     print("\nCompatibility Summary:")
+    print(f"  Backend:     {backend_name}")
     print(f"  Supported:   {avg_supported:.1f}%")
     print(f"  Emulated:    {avg_emulated:.1f}%")
     print(f"  Unsupported: {avg_unsupported:.1f}%")
@@ -90,9 +106,10 @@ def audit_command(args, workspace_root):
     if args.research:
         repro_path = os.path.join(workspace_root, "reproducibility_report.json")
         report_data = {
-            "eigen_version": "2.3.0",
-            "backend": "runtime",
-            "optimizer_passes": ["dead_gate_elimination", "cancel_self_inverse", "merge_rotations", "peephole", "commutation_cancellation"],
+            "eigen_version": VERSION,
+            "backend": backend_name,
+            "optimizer_passes": ["dead_gate_elimination", "cancel_self_inverse",
+                                 "merge_rotations", "peephole", "commutation_cancellation"],
             "simulator": "sparse",
             "seed": 12345,
             "platform": sys.platform,

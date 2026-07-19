@@ -74,5 +74,25 @@ class TestImportsConformance(unittest.TestCase):
             
             self.assertIn("Cyclic import detected", str(ctx.exception))
 
+    def test_clear_import_caches_resets_process_state(self):
+        import src.semantic.import_resolver as resolver_module
+
+        resolver_module._PARSED_AST_CACHE["module.eig"] = ("hash", object())
+        resolver_module._IMPORT_CACHE.put("module", "module.eig")
+        resolver_module._LAZY_LOADER.register("module", lambda: object())
+        resolver_module._LAZY_LOADER.load("module")
+
+        resolver_module.clear_import_caches()
+
+        self.assertEqual(resolver_module._PARSED_AST_CACHE, {})
+        self.assertEqual(
+            resolver_module._IMPORT_CACHE.stats(),
+            {"cached_modules": 0, "tracked_files": 0},
+        )
+        self.assertEqual(
+            resolver_module._LAZY_LOADER.stats(),
+            {"registered": 0, "loaded": 0},
+        )
+
 if __name__ == "__main__":
     unittest.main()

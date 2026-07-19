@@ -73,7 +73,7 @@ class TestContextualHint(unittest.TestCase):
         tok = _token(TokenType.IDENTIFIER, "flaot")
         # When the message already contains "did you mean" we must
         # not augment again -- check the guard in the builder.
-        hint = build_contextual_hint("Expected float, did you mean 'float'?", tok)
+        build_contextual_hint("Expected float, did you mean 'float'?", tok)
         # Guard is in Parser.error, not the builder; builder can still
         # return a did-you-mean string. The deduplication is the
         # caller's responsibility (see ErrorCollectingParser.error).
@@ -97,6 +97,24 @@ class TestErrorCollectingParser(unittest.TestCase):
         tokens = Lexer(src).tokenize()
         program, errors = parse_with_recovery(tokens)
         self.assertEqual(errors, [])
+        self.assertIsNotNone(program)
+
+    def test_qfunc_with_gate_statements_no_spurious_errors(self):
+        src = ("eigen 1.0\n"
+                "qfunc prepare(qubit q) {\n"
+                "  H q\n"
+                "  X q\n"
+                "  Z q\n"
+                "  S q\n"
+                "  CNOT q, q\n"
+                "  return\n"
+                "}\n"
+                "qubit q0\n"
+                "qubit q1\n"
+                "prepare(q0)\n")
+        tokens = Lexer(src).tokenize()
+        program, errors = parse_with_recovery(tokens)
+        self.assertEqual(errors, [], f"Expected no errors, got: {errors}")
         self.assertIsNotNone(program)
 
     def test_single_error_is_collected(self):

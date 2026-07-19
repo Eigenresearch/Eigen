@@ -22,12 +22,10 @@ table and the unsupported-gate fallback.
 
 import unittest
 
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.backend.qiskit_backend import QiskitBackend
 from src.frontend.ast import (
-    ProgramNode, ImportNode, FuncDeclNode, StructDeclNode,
-    ForNode, WhileNode, TryCatchNode, ThrowNode,
-    ArrayLiteralNode, IndexAccessNode, DotAccessNode,
+    ProgramNode, ImportNode,
 )
 
 

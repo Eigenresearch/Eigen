@@ -1,4 +1,3 @@
-import os
 import logging
 import platform
 from dataclasses import dataclass, field
@@ -16,6 +15,7 @@ if not logger.handlers:
 # warning that the host has no accelerated backend). Tests reset this to
 # exercise the once-only behaviour.
 _warned_no_gpu = False
+BATCH_THRESHOLD = 5
 
 
 @dataclass
@@ -103,18 +103,30 @@ def detect_gpu_capabilities() -> GPUCapabilities:
     return caps
 
 
+def _detect_rocm():
+    try:
+        import torch
+        if hasattr(torch.version, 'hip') and torch.version.hip:
+            return True
+        if hasattr(torch.backends, 'hip') and torch.backends.hip.is_available():
+            return True
+    except (ImportError, AttributeError):
+        pass
+    return False
+
+
 def detect_gpu_platform() -> str:
     try:
-        import cupy
+        import cupy  # noqa: F401  (availability check)
         return "cuda"
     except ImportError:
         pass
 
     try:
         import torch
+        if _detect_rocm():
+            return "rocm"
         if torch.cuda.is_available():
-            if "rocm" in torch.__version__.lower():
-                return "rocm"
             return "cuda"
         if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             return "metal"
@@ -135,6 +147,7 @@ class GPUEngine:
 
         self.xp = None
         self.device_state = None
+        self._gate_batch = []
 
         if self.platform == 'cuda':
             try:
@@ -185,6 +198,23 @@ class GPUEngine:
         matches the engine's configured (possibly 'none') platform."""
         return detect_gpu_capabilities()
 
+    def get_capabilities(self) -> dict:
+        caps = detect_gpu_capabilities()
+        return {
+            'platform': self.platform,
+            'available': caps.available,
+            'device_count': caps.device_count,
+            'device_name': caps.device_name,
+            'memory_total': caps.memory_total,
+            'compute_capability': caps.compute_capability,
+            'batching_enabled': True,
+            'batch_threshold': BATCH_THRESHOLD,
+            'stacked_matrix_application': True,
+            'true_parallelism': False,
+            'kernel_fusion': False,
+            'multi_gpu': False,
+        }
+
     def batch_execute(self, circuits: list) -> list:
         """Apply a queue of circuits sequentially to the device state and
         return the resulting state vectors.
@@ -214,16 +244,74 @@ class GPUEngine:
         return results
 
     def initialize_state(self, num_qubits: int):
+        self._gate_batch = []
         size = 1 << num_qubits
         if self.platform in ('cuda', 'none'):
             self.device_state = self.xp.zeros(size, dtype=complex)
             self.device_state[0] = 1.0 + 0.0j
-        else:
+        elif self.platform in ('rocm', 'metal'):
             import torch
-            self.device_state = torch.zeros(size, dtype=torch.complex128, device=self.device)
+            _dtype = torch.complex128
+            if self.device == 'mps':
+                _dtype = torch.complex64
+            try:
+                self.device_state = torch.zeros(size, dtype=_dtype, device=self.device)
+            except (RuntimeError, TypeError):
+                self.device = 'cpu'
+                _dtype = torch.complex128
+                self.device_state = torch.zeros(size, dtype=_dtype, device=self.device)
             self.device_state[0] = 1.0 + 0.0j
 
     def apply_gate(self, targets: list[int], gate_matrix: list[list[complex]]):
+        self._gate_batch.append((list(targets), gate_matrix))
+        if len(self._gate_batch) > BATCH_THRESHOLD:
+            self.flush_batch()
+
+    def flush_batch(self):
+        if not self._gate_batch:
+            return
+        if self.device_state is None:
+            self._gate_batch = []
+            return
+        batch = self._gate_batch
+        self._gate_batch = []
+        i = 0
+        n = len(batch)
+        while i < n:
+            targets_i, matrix_i = batch[i]
+            key = tuple(targets_i)
+            group = [matrix_i]
+            j = i + 1
+            while j < n and tuple(batch[j][0]) == key:
+                group.append(batch[j][1])
+                j += 1
+            if len(group) > 1:
+                composed = self._to_array(group[0])
+                for m in group[1:]:
+                    composed = self._compose(self._to_array(m), composed)
+                self._apply_single(targets_i, composed)
+            else:
+                self._apply_single(targets_i, matrix_i)
+            i = j
+
+    def _torch_dtype(self):
+        import torch
+        return torch.complex64 if self.device == 'mps' else torch.complex128
+
+    def _to_array(self, m):
+        if self.platform in ('cuda', 'none'):
+            return self.xp.array(m, dtype=complex)
+        import torch
+        if hasattr(m, 'shape'):
+            return m.to(self.device)
+        return torch.tensor(m, dtype=self._torch_dtype(), device=self.device)
+
+    def _compose(self, a, b):
+        if self.platform in ('cuda', 'none'):
+            return self.xp.tensordot(a, b, axes=([1], [0]))
+        return self.xp.tensordot(a, b, dims=([1], [0]))
+
+    def _apply_single(self, targets: list[int], gate_matrix):
         """
         Apply a multi-target gate in place on the device state.
 
@@ -241,11 +329,7 @@ class GPUEngine:
         if self.device_state is None:
             return
 
-        # Sort targets ascending so we can fuse the permute with the contraction
-        # by giving ``tensordot`` axes already in the natural order whenever
-        # possible. This is what Qiskit Aer / qsim do.
-        sorted_targets = sorted(targets)
-
+        # Targets are used in their natural order for the tensordot contraction.
         if self.platform in ('cuda', 'none'):
             xp = self.xp
             num_qubits = int(xp.log2(len(self.device_state)))
@@ -273,10 +357,10 @@ class GPUEngine:
             # cost but a much larger peak-RSS pressure.
             self.device_state = xp.ascontiguousarray(new_tensor).reshape(-1)
         else:
-            import torch
-            num_qubits = int(self.xp.log2(self.device_state.numel()))
+            import torch, math
+            num_qubits = int(math.log2(self.device_state.numel()))
             tensor = self.device_state.view([2] * num_qubits)
-            U = torch.tensor(gate_matrix, dtype=torch.complex128, device=self.device).view([2] * (2 * len(targets)))
+            U = torch.tensor(gate_matrix, dtype=self._torch_dtype(), device=self.device).view([2] * (2 * len(targets)))
 
             dims = (list(range(len(targets), 2 * len(targets))), list(targets))
             new_tensor = torch.tensordot(U, tensor, dims=dims)
@@ -288,6 +372,7 @@ class GPUEngine:
             self.device_state = tensor.reshape(-1)
 
     def get_state(self) -> list[complex]:
+        self.flush_batch()
         if self.platform == 'cuda':
             return self.device_state.get().tolist()
         elif self.platform in ('rocm', 'metal'):
@@ -295,9 +380,72 @@ class GPUEngine:
         else:
             return self.device_state.tolist()
 
+    def measure(self, k: int, r: float) -> int:
+        """
+        Measure qubit k in place on the GPU.
+        §1.3: "Оптимизировать пути измерения" — avoids CPU round-trip.
+        """
+        self.flush_batch()
+        if self.device_state is None:
+            return 0
+            
+        if self.platform in ('cuda', 'none'):
+            xp = self.xp
+            n = int(xp.log2(len(self.device_state)))
+            state = self.device_state.reshape([2] * n)
+            
+            # Compute probability p0 = sum(|state[..., 0, ...]|²)
+            # Qubit k is axis n-1-k in MSB order, but here we use targets as axis indices directly.
+            # Wait, apply_single uses targets as axes.
+            # So qubit k is axis k.
+            
+            # Create a slice for axis k = 0
+            idx0 = [slice(None)] * n
+            idx0[k] = 0
+            p0 = xp.sum(xp.abs(state[tuple(idx0)])**2).item()
+            
+            outcome = 0 if r < p0 else 1
+            p = p0 if outcome == 0 else 1.0 - p0
+            norm = xp.sqrt(p) if p > 1e-15 else 1.0
+            
+            idx_to_zero = [slice(None)] * n
+            idx_to_zero[k] = 1 - outcome
+            state[tuple(idx_to_zero)] = 0.0
+            
+            idx_to_norm = [slice(None)] * n
+            idx_to_norm[k] = outcome
+            state[tuple(idx_to_norm)] /= norm
+            
+            self.device_state = state.reshape(-1)
+            return outcome
+        else:
+            import torch, math
+            n = int(math.log2(self.device_state.numel()))
+            state = self.device_state.view([2] * n)
+            
+            idx0 = [slice(None)] * n
+            idx0[k] = 0
+            p0 = torch.sum(torch.abs(state[idx0])**2).item()
+            
+            outcome = 0 if r < p0 else 1
+            p = p0 if outcome == 0 else 1.0 - p0
+            norm = math.sqrt(p) if p > 1e-15 else 1.0
+            
+            idx_to_zero = [slice(None)] * n
+            idx_to_zero[k] = 1 - outcome
+            state[idx_to_zero] = 0.0
+            
+            idx_to_norm = [slice(None)] * n
+            idx_to_norm[k] = outcome
+            state[idx_to_norm] /= norm
+            
+            self.device_state = state.reshape(-1)
+            return outcome
+
     def set_state(self, state: list[complex]):
+        self._gate_batch = []
         if self.platform in ('cuda', 'none'):
             self.device_state = self.xp.array(state, dtype=complex)
         else:
             import torch
-            self.device_state = torch.tensor(state, dtype=torch.complex128, device=self.device)
+            self.device_state = torch.tensor(state, dtype=self._torch_dtype(), device=self.device)

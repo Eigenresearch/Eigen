@@ -24,6 +24,9 @@ class Opcode:
 
     # Scoping and function execution
     CALL = "CALL"
+    ASYNC_CALL = "ASYNC_CALL"
+    AWAIT = "AWAIT"
+    YIELD_TASK = "YIELD_TASK"
     RET = "RET"
     ENTER_FRAME = "ENTER_FRAME"
     EXIT_FRAME = "EXIT_FRAME"
@@ -91,7 +94,8 @@ OPCODE_LIST = [
     Opcode.EQ, Opcode.NEQ, Opcode.LT, Opcode.GT, Opcode.LTE, Opcode.GTE,
     Opcode.AND, Opcode.OR, Opcode.NOT,
     Opcode.LOAD_CONST, Opcode.LOAD_VAR, Opcode.STORE_VAR,
-    Opcode.CALL, Opcode.RET, Opcode.ENTER_FRAME, Opcode.EXIT_FRAME,
+    Opcode.CALL, Opcode.ASYNC_CALL, Opcode.AWAIT, Opcode.YIELD_TASK,
+    Opcode.RET, Opcode.ENTER_FRAME, Opcode.EXIT_FRAME,
     Opcode.ALLOC_STRUCT, Opcode.GET_FIELD, Opcode.SET_FIELD,
     Opcode.ALLOC_MAP, Opcode.ALLOC_ARRAY, Opcode.LEN, Opcode.GET_INDEX, Opcode.SET_INDEX,
     Opcode.THROW, Opcode.PUSH_TRY, Opcode.POP_TRY,
@@ -121,7 +125,7 @@ INT_TO_OPCODE = list(OPCODE_LIST)
 # "unsupported opcode" rather than rejected up-front.
 
 BYTECODE_VERSION_MAJOR = 1
-BYTECODE_VERSION_MINOR = 0
+BYTECODE_VERSION_MINOR = 1
 # Scalar fallback retained for legacy code paths and existing tests that
 # compare `version > BYTECODE_VERSION`.
 BYTECODE_VERSION = BYTECODE_VERSION_MAJOR

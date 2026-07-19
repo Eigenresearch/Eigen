@@ -17,7 +17,6 @@ rewriting (for larger circuits).
 """
 from src.ir.ir_graph import EQIRGraph
 from src.simulator import QuantumSimulator
-from src.zx.exceptions import IndeterminateEquivalenceError
 
 class EquivalenceChecker:
     def __init__(self):
@@ -50,8 +49,9 @@ class EquivalenceChecker:
         
         for col in range(dim):
             # Reset simulator state vector to basis state |col>
-            sim.state_vector = [0.0j] * dim
-            sim.state_vector[col] = 1.0 + 0.0j
+            basis = [0.0j] * dim
+            basis[col] = 1.0 + 0.0j
+            sim.state_vector = basis
             
             # Apply only the gate operations from the graph
             for node in nodes:

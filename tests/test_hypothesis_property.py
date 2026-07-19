@@ -6,13 +6,12 @@ These tests exercise invariants over randomized inputs using
 import math
 import unittest
 
-from hypothesis import given, strategies as st, assume, settings, HealthCheck
+from hypothesis import given, strategies as st, settings, HealthCheck
 
 from src.frontend.lexer import Lexer, TokenType
 from src.frontend.parser import Parser
 from src.frontend.ast import LetNode, LiteralNode
 from src.sparse_simulator import SparseQuantumSimulator
-from src.tensor_network.mps import MPSSimulator
 from src.backend.bytecode import (
     BytecodeVersion,
     parse_bytecode_version,

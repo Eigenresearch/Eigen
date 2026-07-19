@@ -4,19 +4,14 @@ import unittest
 
 from src.lsp_extensions import (
     SemanticTokenType,
-    SemanticToken,
     SemanticTokensBuilder,
     CodeAction,
     CodeActionsProvider,
     RenameEdits,
     RenameSymbol,
-    ReferenceLocation,
     FindReferences,
-    CodeLensEntry,
     CodeLensProvider,
-    InlineErrorEntry,
     InlineErrorReporter,
-    DebugBreakpoint,
     DebugIntegrationAdapter,
 )
 

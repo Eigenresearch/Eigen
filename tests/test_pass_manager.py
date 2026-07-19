@@ -17,12 +17,11 @@ from __future__ import annotations
 import time
 import unittest
 
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.ir.pass_manager import (
     OptimizationPass,
     PassManager,
     PassReport,
-    PassStats,
     default_quantum_pipeline,
     run_optimization_pipeline,
 )
@@ -177,7 +176,7 @@ class TestPassManagerPipelineIntegration(unittest.TestCase):
         # After first optimization, second run should not produce
         # additional optimizations — the graph is normalized.
         g = _build_hh_graph("q0")
-        report1 = run_optimization_pipeline(g)
+        run_optimization_pipeline(g)
         report2 = run_optimization_pipeline(g)  # re-run on already-opt graph
         self.assertEqual(report2.total_optimizations, 0)
         self.assertEqual(report2.total_gates_after, 0)

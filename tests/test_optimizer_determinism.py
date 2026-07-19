@@ -176,7 +176,7 @@ class TestToDictDeterministicSerialization(unittest.TestCase):
     def _to_dict_bytes(self):
         g = _build_optimizable_graph()
         import io
-        buf = io.StringIO()
+        io.StringIO()
         # Stable key ordering in the dicts + sorted children_ids already
         # guarantees this; we additionally assert by comparing the raw
         # repr in two independent builds.

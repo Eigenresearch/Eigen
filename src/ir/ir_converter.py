@@ -1,12 +1,12 @@
 from src.frontend.ast import (
     ProgramNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode,
     FuncDeclNode, ForNode, WhileNode, StructDeclNode, AssignmentNode, CallNode,
     BreakNode, ContinueNode, ThrowNode, TryCatchNode,
     MatchNode, StringInterpolationNode
 )
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 
 class EQIRConverter:
     def __init__(self):
@@ -66,6 +66,21 @@ class EQIRConverter:
                 import sys
                 print(f"DiagnosticWarning: evaluate_expr failed for BinaryOpNode({node.op}): {e}", file=sys.stderr)
                 return f"__expr_error__"
+        elif isinstance(node, UnaryOpNode):
+            try:
+                val = self.evaluate_expr(node.operand)
+                if node.op == 'not':
+                    return not bool(val)
+                elif node.op == '~':
+                    return ~val
+                elif node.op == '-':
+                    return -val
+                else:
+                    return f"({node.op}{val})"
+            except Exception as e:
+                import sys
+                print(f"DiagnosticWarning: evaluate_expr failed for UnaryOpNode({node.op}): {e}", file=sys.stderr)
+                return f"__expr_error__"
         else:
             return f"__unsupported_{type(node).__name__}__"
 
@@ -103,7 +118,8 @@ class EQIRConverter:
                     targets=[resolve_qubit(node.name)],
                     condition=self.current_condition
                 )
-            # Classical bits and other variables are handled dynamically, no compile-time DAG node needed for cbit alloc.
+            # Classical bits and other variables are handled dynamically,
+            # no compile-time DAG node needed for cbit alloc.
             # But let's add it if we want explicit classical bits tracking.
             return
 
@@ -150,7 +166,7 @@ class EQIRConverter:
             # Map parameters to arguments
             # node.args contains caller argument names, qfunc.params contains (name, type)
             local_map = {}
-            for caller_arg, (param_name, param_type) in zip(node.args, qfunc.params):
+            for caller_arg, (param_name, _param_type) in zip(node.args, qfunc.params, strict=False):
                 # If caller_arg is already mapped, resolve it
                 resolved_arg = param_map.get(caller_arg, caller_arg)
                 local_map[param_name] = resolved_arg
@@ -173,7 +189,9 @@ class EQIRConverter:
             # Combine condition if nested
             if prev_cond is not None:
                 prev_cbit, prev_op, prev_val = prev_cond
-                cond1 = f"({prev_cbit} {prev_op} {repr(prev_val)})" if ' ' in prev_cbit or prev_op != '==' else f"{prev_cbit} {prev_op} {repr(prev_val)}"
+                cond1 = (f"({prev_cbit} {prev_op} {repr(prev_val)})"
+                         if ' ' in prev_cbit or prev_op != '=='
+                         else f"{prev_cbit} {prev_op} {repr(prev_val)}")
                 cond2 = f"{cbit_name} {node.op} {repr(right_val)}"
                 combined_expr = f"({cond1}) and ({cond2})"
                 self.current_condition = (combined_expr, '==', True)
@@ -195,7 +213,9 @@ class EQIRConverter:
                 opp_op = opp_map.get(node.op, "!=")
                 if prev_cond is not None:
                     prev_cbit, prev_op, prev_val = prev_cond
-                    cond1 = f"({prev_cbit} {prev_op} {repr(prev_val)})" if ' ' in prev_cbit or prev_op != '==' else f"{prev_cbit} {prev_op} {repr(prev_val)}"
+                    cond1 = (f"({prev_cbit} {prev_op} {repr(prev_val)})"
+                             if ' ' in prev_cbit or prev_op != '=='
+                             else f"{prev_cbit} {prev_op} {repr(prev_val)}")
                     cond2 = f"{cbit_name} {opp_op} {repr(right_val)}"
                     combined_expr = f"({cond1}) and ({cond2})"
                     self.current_condition = (combined_expr, '==', True)
@@ -257,6 +277,10 @@ class EQIRConverter:
                 self.convert_node(stmt, param_map)
             for stmt in node.catch_body:
                 self.convert_node(stmt, param_map)
+            if getattr(node, 'finally_body', None):
+                self.graph.add_operation('FINALLY')
+                for stmt in node.finally_body:
+                    self.convert_node(stmt, param_map)
             return
 
         elif isinstance(node, StructDeclNode):
@@ -288,7 +312,7 @@ class EQIRConverter:
 
         elif isinstance(node, MatchNode):
             self.graph.add_operation('MATCH')
-            for pattern, body in node.cases:
+            for _pattern, body in node.cases:
                 for stmt in body:
                     self.convert_node(stmt, param_map)
             if hasattr(node, 'default_body') and node.default_body:
@@ -302,6 +326,7 @@ class EQIRConverter:
 
         else:
             import sys
-            print(f"DiagnosticWarning: AST node type '{type(node).__name__}' is not natively supported by EQIR converter.", file=sys.stderr)
+            print(f"DiagnosticWarning: AST node type '{type(node).__name__}' "
+                  f"is not natively supported by EQIR converter.", file=sys.stderr)
             self.graph.add_operation('UNSUPPORTED', node_class=type(node).__name__)
             return

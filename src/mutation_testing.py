@@ -11,8 +11,6 @@ by failing tests). Survivors indicate gaps in test coverage.
 from __future__ import annotations
 
 import dataclasses
-import typing
-import os
 
 MUTMUT_CONFIG = {
     "paths_to_mutate": [
@@ -82,7 +80,7 @@ def parse_mutmut_results(output: str) -> MutationTestResult:
     skipped = 0
 
     # Try to parse "label: N" format
-    for label, var in [("killed", "killed"), ("survived", "survived"),
+    for label, _var in [("killed", "killed"), ("survived", "survived"),
                          ("timeout", "timeout"), ("skipped", "skipped")]:
         m = re.search(rf'{label}[:\s]+(\d+)', output, re.IGNORECASE)
         if m:

@@ -11,7 +11,6 @@ Exercises `src.tensor_network.mps.MPSSimulator`:
 import math
 import unittest
 
-import numpy as np
 
 from src.tensor_network.mps import (
     MPSSimulator,
@@ -26,7 +25,7 @@ def _approx(a, b, tol=1e-7):
 def _vec_approx_eq(v1, v2, tol=1e-7):
     if len(v1) != len(v2):
         return False
-    for x, y in zip(v1, v2):
+    for x, y in zip(v1, v2, strict=False):
         if abs(x - y) > tol:
             return False
     return True
@@ -346,7 +345,7 @@ class TestMPSMetrics(unittest.TestCase):
         sim = MPSSimulator()
         sim.allocate_qubit("q0")
         sim.H("q0")
-        sim.CNOT  # ensure method exists
+        sim.CNOT  # noqa: B018  ensure method exists (attribute presence check)
         # All operations on small states don't truncate
         # at default max_bond_dim=64.
         # Discarded weight should be 0 after Bell state prep.

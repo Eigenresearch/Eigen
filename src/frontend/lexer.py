@@ -28,6 +28,7 @@ class TokenType(enum.Enum):
     ENUM = "enum"
     TRY = "try"
     CATCH = "catch"
+    FINALLY = "finally"
     THROW = "throw"
     NOISE = "noise"
     DEPOLARIZING = "depolarizing"
@@ -45,6 +46,9 @@ class TokenType(enum.Enum):
     RETURN = "return"
     PARALLEL = "parallel"
     TASK = "task"
+    ASYNC = "async"
+    AWAIT = "await"
+    OPERATOR = "operator"
     MATCH = "match"
     CASE = "case"
     DEFAULT = "default"
@@ -199,6 +203,7 @@ class Lexer:
         "enum": TokenType.ENUM,
         "try": TokenType.TRY,
         "catch": TokenType.CATCH,
+        "finally": TokenType.FINALLY,
         "throw": TokenType.THROW,
         "noise": TokenType.NOISE,
         "depolarizing": TokenType.DEPOLARIZING,
@@ -216,6 +221,9 @@ class Lexer:
         "return": TokenType.RETURN,
         "parallel": TokenType.PARALLEL,
         "task": TokenType.TASK,
+        "async": TokenType.ASYNC,
+        "await": TokenType.AWAIT,
+        "operator": TokenType.OPERATOR,
         "match": TokenType.MATCH,
         "case": TokenType.CASE,
         "default": TokenType.DEFAULT,
@@ -282,6 +290,7 @@ class Lexer:
         '|': TokenType.PIPE,
         '^': TokenType.CARET,
         '~': TokenType.TILDE,
+        ';': TokenType.SEMICOLON,
     }
 
     # === sol.md P0 §1.2 — regex-based fast lexer ============================
@@ -298,6 +307,7 @@ class Lexer:
           (?P<ws>[ \t\r\f\v]+)
         | (?P<nl>\n)
         | (?P<hash_comment>\#[^\n]*)
+        | (?P<block_comment>/\*[\s\S]*?\*/)
         | (?P<slash_comment>//[^\n]*)
         | (?P<float_e>\d+[eE][+-]?\d+)
         | (?P<float_dot>\d+\.\d*(?:[eE][+-]?\d+)?)
@@ -306,7 +316,7 @@ class Lexer:
         | (?P<bin>0[bB][01]+)
         | (?P<oct>0[oO][0-7]+)
         | (?P<int_dec>\d+)
-        | (?P<string_special>")
+        | (?P<string_special>["'])
         | (?P<arrow>->)
         | (?P<eq>==)
         | (?P<ne>!=)
@@ -340,6 +350,7 @@ class Lexer:
         | (?P<pipe>\|)
         | (?P<caret>\^)
         | (?P<tilde>~)
+        | (?P<semicolon>;)
         | (?P<identifier>[A-Za-z_][A-Za-z0-9_]*)
         """,
         re.VERBOSE,
@@ -374,8 +385,29 @@ class Lexer:
                 if i >= n:
                     break
                 nxt = raw[i]
-                out.append(escape_map.get(nxt, nxt))
-                i += 1
+                if nxt == 'u':
+                    # \uXXXX — Unicode escape (4 hex digits)
+                    hex_str = raw[i + 1:i + 5]
+                    if len(hex_str) < 4 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                        raise SyntaxError(
+                            f"Lexer Error at line {self.line}, col {self.column}: "
+                            "Invalid unicode escape: expected 4 hex digits after '\\u'"
+                        )
+                    out.append(chr(int(hex_str, 16)))
+                    i += 5
+                elif nxt == 'x':
+                    # \xNN — Hex escape (2 hex digits)
+                    hex_str = raw[i + 1:i + 3]
+                    if len(hex_str) < 2 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                        raise SyntaxError(
+                            f"Lexer Error at line {self.line}, col {self.column}: "
+                            "Invalid hex escape: expected 2 hex digits after '\\x'"
+                        )
+                    out.append(chr(int(hex_str, 16)))
+                    i += 3
+                else:
+                    out.append(escape_map.get(nxt, nxt))
+                    i += 1
             elif ch == '$' and i + 1 < n and raw[i + 1] == '{':
                 i += 2
                 expr_start = i
@@ -421,7 +453,7 @@ class Lexer:
         'plus': TokenType.PLUS, 'minus': TokenType.MINUS,
         'mul': TokenType.MUL, 'div': TokenType.DIV, 'mod': TokenType.MOD,
         'amp': TokenType.AMP, 'pipe': TokenType.PIPE, 'caret': TokenType.CARET,
-        'tilde': TokenType.TILDE,  # `;` intentionally omitted for parity with _tokenize_slow
+        'tilde': TokenType.TILDE, 'semicolon': TokenType.SEMICOLON,
     }
 
     def _tokenize_regex(self) -> list[Token]:
@@ -459,7 +491,8 @@ class Lexer:
             tok_line = cur_line
             tok_col = cur_col
             # Whitespace / comments produce nothing — skip ``m.group()``.
-            if kind == 'ws' or kind == 'nl' or kind == 'hash_comment' or kind == 'slash_comment':
+            if (kind == 'ws' or kind == 'nl' or kind == 'hash_comment'
+                    or kind == 'slash_comment' or kind == 'block_comment'):
                 ch_count = end - pos
                 # ``str.count`` is a C-level cursor, not a substring alloc.
                 nl_count = source.count('\n', pos, end)
@@ -488,8 +521,9 @@ class Lexer:
                     tt = TokenType.IDENTIFIER
                 append_tok(Token(tt, value, tok_line, tok_col))
             elif kind == 'string_special':
+                quote_char = source[pos]
                 new_pos, decoded, cur_line, cur_col = self._scan_string(
-                    source, pos, tok_line, tok_col
+                    source, pos, tok_line, tok_col, quote_char
                 )
                 append_tok(Token(TokenType.STRING_LIT, decoded, tok_line, tok_col))
                 pos = new_pos
@@ -527,16 +561,17 @@ class Lexer:
         line_idx = bisect.bisect_right(line_starts, pos)
         return line_idx, pos - line_starts[line_idx - 1] + 1
 
-    def _scan_string(self, source: str, pos: int, start_line: int, start_col: int) -> tuple[int, str, int, int]:
-        """Scan a ``"..."`` string literal starting at ``pos`` (pointing at
-        the opening double-quote). Returns ``(end_pos, decoded_value, end_line,
-        end_col)`` where ``end_pos`` is one past the closing quote and
-        ``end_line``/``end_col`` are the position of the *closing* quote (the
-        next token starts at the position immediately after).
+    def _scan_string(self, source: str, pos: int, start_line: int, start_col: int,
+                     quote_char: str = '"') -> tuple[int, str, int, int]:
+        """Scan a ``"..."`` (or ``'...'``) string literal starting at ``pos``
+        (pointing at the opening quote). Returns ``(end_pos, decoded_value,
+        end_line, end_col)`` where ``end_pos`` is one past the closing quote
+        and ``end_line``/``end_col`` are the position immediately *after* the
+        closing quote (i.e. where the next token begins).
 
         Faithfully mirrors the brace-tracking behaviour of ``_tokenize_slow``
-        — in particular, a ``"`` inside a ``${...}`` interpolation is treated
-        as a regular character (it does *not* close the string)."""
+        — in particular, a quote char inside a ``${...}`` interpolation is
+        treated as a regular character (it does *not* close the string)."""
         n = source.__len__()
         i = pos + 1  # skip opening quote
         out = []
@@ -547,15 +582,15 @@ class Lexer:
             'f': '\f', 'v': '\v',
         }
         cur_line = start_line
-        cur_col = start_col + 1  # one past the opening `"`
+        cur_col = start_col + 1  # one past the opening quote char
         while i < n:
             ch = source[i]
-            if ch == '"':
+            if ch == quote_char:
                 # closing quote found
                 end_pos = i + 1
-                # End column = position of closing `"`. Caller advances its
-                # own (line, col) cursor from this point on the next iteration.
-                return end_pos, "".join(out), cur_line, cur_col
+                # Return col one past the closing quote so the caller's
+                # cursor sits at the next token's starting position.
+                return end_pos, "".join(out), cur_line, cur_col + 1
             if ch == '\n':
                 raise SyntaxError(
                     f"Lexer Error at line {start_line}, col {start_col}: "
@@ -563,12 +598,35 @@ class Lexer:
                 )
             if ch == '\\':
                 i += 1
-                cur_col += 2
                 if i >= n:
                     break
                 nxt = source[i]
-                out.append(escape_map.get(nxt, nxt))
-                i += 1
+                if nxt == 'u':
+                    # \uXXXX — Unicode escape (4 hex digits)
+                    hex_str = source[i + 1:i + 5]
+                    if len(hex_str) < 4 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                        raise SyntaxError(
+                            f"Lexer Error at line {start_line}, col {start_col}: "
+                            "Invalid unicode escape: expected 4 hex digits after '\\u'"
+                        )
+                    out.append(chr(int(hex_str, 16)))
+                    i += 5
+                    cur_col += 6
+                elif nxt == 'x':
+                    # \xNN — Hex escape (2 hex digits)
+                    hex_str = source[i + 1:i + 3]
+                    if len(hex_str) < 2 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                        raise SyntaxError(
+                            f"Lexer Error at line {start_line}, col {start_col}: "
+                            "Invalid hex escape: expected 2 hex digits after '\\x'"
+                        )
+                    out.append(chr(int(hex_str, 16)))
+                    i += 3
+                    cur_col += 4
+                else:
+                    out.append(escape_map.get(nxt, nxt))
+                    i += 1
+                    cur_col += 2
             elif ch == '$' and i + 1 < n and source[i + 1] == '{':
                 # String interpolation: ${expr}
                 i += 2  # skip ${
@@ -624,34 +682,75 @@ class Lexer:
                     self.column += (self.pos - start_pos)
                 continue
 
+            # Skip block comments: /* ... */ (may span multiple lines)
+            if char == '/' and self.pos + 1 < self.length and self.source[self.pos + 1] == '*':
+                start_line = self.line
+                start_col = self.column
+                self.pos += 2
+                self.column += 2
+                closed = False
+                while self.pos < self.length:
+                    if self.source[self.pos] == '*' and self.pos + 1 < self.length and self.source[self.pos + 1] == '/':
+                        self.pos += 2
+                        self.column += 2
+                        closed = True
+                        break
+                    if self.source[self.pos] == '\n':
+                        self.line += 1
+                        self.column = 1
+                        self.pos += 1
+                    else:
+                        self.pos += 1
+                        self.column += 1
+                if not closed:
+                    self.error(f"Unterminated block comment starting at line {start_line}, col {start_col}")
+                continue
+
             # Skip comments (both # and //)
             if char == '#' or (char == '/' and self.pos + 1 < self.length and self.source[self.pos + 1] == '/'):
                 while self.pos < self.length and self.source[self.pos] != '\n':
                     self.pos += 1
                 continue
 
-            # Double-quoted string literals
-            if char == '"':
+            # String literals (double- or single-quoted)
+            if char == '"' or char == "'":
+                quote_char = char
                 start_col = self.column
                 self.pos += 1  # consume open quote
                 start_pos = self.pos
                 string_val = []
-                while self.pos < self.length and self.source[self.pos] != '"':
+                while self.pos < self.length and self.source[self.pos] != quote_char:
                     if self.source[self.pos] == '\n':
                         self.error("Unterminated string literal")
                     if self.source[self.pos] == '\\':
                         self.pos += 1
                         if self.pos < self.length:
                             esc_char = self.source[self.pos]
-                            escape_map = {
-                                'n': '\n', 't': '\t', 'r': '\r',
-                                '0': '\0', '\\': '\\', '"': '"',
-                                "'": "'", 'a': '\a', 'b': '\b',
-                                'f': '\f', 'v': '\v',
-                            }
-                            string_val.append(escape_map.get(esc_char, esc_char))
-                            self.pos += 1
-                    elif self.source[self.pos] == '$' and self.pos + 1 < self.length and self.source[self.pos + 1] == '{':
+                            if esc_char == 'u':
+                                # \uXXXX — Unicode escape (4 hex digits)
+                                hex_str = self.source[self.pos + 1:self.pos + 5]
+                                if len(hex_str) < 4 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                                    self.error("Invalid unicode escape: expected 4 hex digits after '\\u'")
+                                string_val.append(chr(int(hex_str, 16)))
+                                self.pos += 5
+                            elif esc_char == 'x':
+                                # \xNN — Hex escape (2 hex digits)
+                                hex_str = self.source[self.pos + 1:self.pos + 3]
+                                if len(hex_str) < 2 or not all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                                    self.error("Invalid hex escape: expected 2 hex digits after '\\x'")
+                                string_val.append(chr(int(hex_str, 16)))
+                                self.pos += 3
+                            else:
+                                escape_map = {
+                                    'n': '\n', 't': '\t', 'r': '\r',
+                                    '0': '\0', '\\': '\\', '"': '"',
+                                    "'": "'", 'a': '\a', 'b': '\b',
+                                    'f': '\f', 'v': '\v',
+                                }
+                                string_val.append(escape_map.get(esc_char, esc_char))
+                                self.pos += 1
+                    elif (self.source[self.pos] == '$' and self.pos + 1 < self.length
+                          and self.source[self.pos + 1] == '{'):
                         # String interpolation: ${expr}
                         self.pos += 2  # skip ${
                         expr_start = self.pos
@@ -672,7 +771,7 @@ class Lexer:
                     else:
                         string_val.append(self.source[self.pos])
                         self.pos += 1
-                if self.pos >= self.length or self.source[self.pos] != '"':
+                if self.pos >= self.length or self.source[self.pos] != quote_char:
                     self.error("Unterminated string literal")
                 self.pos += 1  # consume close quote
                 self.column += (self.pos - start_pos + 1)
@@ -818,7 +917,9 @@ class Lexer:
                     self.pos += 1
 
                 # Check for decimal point
-                if self.pos < self.length and self.source[self.pos] == '.' and (self.pos + 1 < self.length and self.source[self.pos + 1].isdigit()):
+                if (self.pos < self.length and self.source[self.pos] == '.'
+                        and (self.pos + 1 < self.length
+                             and self.source[self.pos + 1].isdigit())):
                     self.pos += 2
                     while self.pos < self.length and self.source[self.pos].isdigit():
                         self.pos += 1
@@ -832,7 +933,12 @@ class Lexer:
                     num_str = self.source[start_pos:self.pos]
                     self.column += (self.pos - start_pos)
                     tokens.append(Token(TokenType.FLOAT_LIT, num_str, self.line, start_col))
-                elif self.pos < self.length and self.source[self.pos] in ('e', 'E') and self.pos + 1 < self.length and (self.source[self.pos+1].isdigit() or (self.source[self.pos+1] in ('+','-') and self.pos+2 < self.length and self.source[self.pos+2].isdigit())):
+                elif (self.pos < self.length and self.source[self.pos] in ('e', 'E')
+                      and self.pos + 1 < self.length
+                      and (self.source[self.pos+1].isdigit()
+                           or (self.source[self.pos+1] in ('+','-')
+                               and self.pos+2 < self.length
+                               and self.source[self.pos+2].isdigit()))):
                     # Integer with exponent: 1e5, 2e-3
                     self.pos += 1
                     if self.pos < self.length and self.source[self.pos] in ('+', '-'):

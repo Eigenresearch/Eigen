@@ -1,0 +1,45 @@
+eigen 1.0
+
+# Noisy simulation example.
+#
+# This program prepares a Bell pair, applies a depolarizing noise channel
+# after each gate, and measures both qubits. Re-running the program with
+# different seeds will produce different trajectories (stochastic noise);
+# the noise probability can be tuned by changing `noise_prob` below.
+#
+# To run with a real NoiseModel attached, use the Python API:
+#
+#     from src.backend.vm import EigenVM
+#     from src.noise.noise_model import NoiseModel
+#     vm = EigenVM(noise_model=NoiseModel(
+#         noise_type='depolarizing', noise_prob=0.05, seed=42))
+#
+# In pure-Eigen source the noise probability is symbolic — the program
+# below uses the `noise` statement form accepted by the parser, which the
+# VM translates into NoiseModel.apply_gate_noise calls.
+
+qubit q0
+qubit q1
+
+# 1. Prepare a Bell pair.
+H q0
+CNOT q0, q1
+
+# 2. Apply depolarizing noise to each qubit after entanglement.
+#    The parser accepts: noise depolarizing(<prob>) <qubit>, <qubit>, ...
+noise depolarizing(0.05) q0, q1
+
+# 3. Measure both qubits into classical bits.
+cbit c0
+cbit c1
+measure q0 -> c0
+measure q1 -> c1
+
+print c0
+print c1
+
+# 4. Without noise the outcomes are perfectly correlated (c0 == c1).
+#    With 5% depolarizing noise per qubit, expect ~10% of shots to be
+#    anti-correlated. The assertion below therefore checks the *no-noise*
+#    case; comment it out when running under a noisy NoiseModel.
+assert c0 == c1

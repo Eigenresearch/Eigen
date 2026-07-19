@@ -4,28 +4,33 @@ from src.zx.zx_graph import ZXGraph
 class SpiderFuser:
     def fuse_spiders(self, graph: ZXGraph) -> bool:
         changed = False
+        boundary_ids = set(graph.inputs) | set(graph.outputs)
         for v_id in list(graph.vertices.keys()):
             if v_id not in graph.vertices:
                 continue
             v = graph.vertices[v_id]
             if v.type not in ('Z', 'X'):
                 continue
-                
+            if v_id in boundary_ids:
+                continue
+
             for neighbor_id in list(v.neighbors):
                 if neighbor_id not in graph.vertices:
                     continue
                 neighbor = graph.vertices[neighbor_id]
-                
+
                 # Fuse if same color
                 if neighbor.type == v.type:
+                    if neighbor_id in boundary_ids:
+                        continue
                     # Update phase
                     v.phase = (v.phase + neighbor.phase) % 2.0
-                    
+
                     # Connect neighbor's neighbors to v
                     for n_n_id in neighbor.neighbors:
                         if n_n_id != v.id:
                             graph.add_edge(v.id, n_n_id)
-                            
+
                     # Remove neighbor
                     graph.remove_vertex(neighbor_id)
                     changed = True

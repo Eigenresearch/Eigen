@@ -56,7 +56,6 @@ import typing
 from src.distributed.circuit_slicer import (
     CircuitSlicer,
     GateStep,
-    PartitionResult,
 )
 
 

@@ -1,7 +1,5 @@
 # ZX-Calculus based Equivalence Checker using Z-spiders and H-boxes
 import math
-import cmath
-import sys
 import random
 from src.zx.zx_graph import ZXGraph
 from src.ir.ir_graph import EQIRGraph
@@ -259,6 +257,19 @@ class ZXEquivalenceChecker:
                         zx.add_edge(z.id, h2.id)
                         zx.add_edge(h2.id, next_z.id)
                         qubit_wires[q] = next_z.id
+                    elif g_name == 'Y':
+                        z_y = zx.add_vertex('Z', 1.0)
+                        h1 = zx.add_vertex('H')
+                        z_x = zx.add_vertex('Z', 1.0)
+                        h2 = zx.add_vertex('H')
+                        next_z = zx.add_vertex('Z')
+                        
+                        zx.add_edge(prev_z_id, z_y.id)
+                        zx.add_edge(z_y.id, h1.id)
+                        zx.add_edge(h1.id, z_x.id)
+                        zx.add_edge(z_x.id, h2.id)
+                        zx.add_edge(h2.id, next_z.id)
+                        qubit_wires[q] = next_z.id
                     elif g_name == 'Z':
                         z = zx.add_vertex('Z', 1.0)
                         next_z = zx.add_vertex('Z')
@@ -288,6 +299,22 @@ class ZXEquivalenceChecker:
                         zx.add_edge(h1.id, z.id)
                         zx.add_edge(z.id, h2.id)
                         zx.add_edge(h2.id, next_z.id)
+                        qubit_wires[q] = next_z.id
+                    elif g_name == 'RY':
+                        phase = args[0] / math.pi if args else 0.0
+                        z_pre = zx.add_vertex('Z', 0.5)
+                        h1 = zx.add_vertex('H')
+                        z_mid = zx.add_vertex('Z', phase)
+                        h2 = zx.add_vertex('H')
+                        z_post = zx.add_vertex('Z', -0.5)
+                        next_z = zx.add_vertex('Z')
+
+                        zx.add_edge(prev_z_id, z_pre.id)
+                        zx.add_edge(z_pre.id, h1.id)
+                        zx.add_edge(h1.id, z_mid.id)
+                        zx.add_edge(z_mid.id, h2.id)
+                        zx.add_edge(h2.id, z_post.id)
+                        zx.add_edge(z_post.id, next_z.id)
                         qubit_wires[q] = next_z.id
                     elif g_name == 'RZ':
                         phase = args[0] / math.pi if args else 0.0
@@ -326,12 +353,10 @@ class ZXEquivalenceChecker:
                     
                     z_c = zx.add_vertex('Z')
                     z_t = zx.add_vertex('Z')
-                    h = zx.add_vertex('H')
                     
                     zx.add_edge(c_prev, z_c.id)
                     zx.add_edge(t_prev, z_t.id)
-                    zx.add_edge(z_c.id, h.id)
-                    zx.add_edge(h.id, z_t.id)
+                    zx.add_edge(z_c.id, z_t.id)
                     
                     next_c = zx.add_vertex('Z')
                     next_t = zx.add_vertex('Z')
@@ -387,17 +412,22 @@ class ZXEquivalenceChecker:
             changed = False
             
             # 1. Z-spider fusion
+            boundary_ids = set(zx.inputs) | set(zx.outputs)
             for v_id in list(zx.vertices.keys()):
                 if v_id not in zx.vertices:
                     continue
                 v = zx.vertices[v_id]
                 if v.type != 'Z':
                     continue
+                if v_id in boundary_ids:
+                    continue
                 for neighbor_id in list(v.neighbors):
                     if neighbor_id not in zx.vertices:
                         continue
                     neighbor = zx.vertices[neighbor_id]
                     if neighbor.type == 'Z':
+                        if neighbor_id in boundary_ids:
+                            continue
                         v.phase = (v.phase + neighbor.phase) % 2.0
                         for nn_id in neighbor.neighbors:
                             if nn_id != v.id:
@@ -481,7 +511,7 @@ class ZXEquivalenceChecker:
                         other = list(h_box.neighbors - {u_id})[0]
                         if other in zx.vertices and zx.vertices[other].type == 'Z':
                             targets.setdefault(other, []).append(h_id)
-                for other, h_ids in targets.items():
+                for _other, h_ids in targets.items():
                     if len(h_ids) >= 2:
                         to_remove = h_ids if len(h_ids) % 2 == 0 else h_ids[1:]
                         for r_id in to_remove:
@@ -510,7 +540,7 @@ class ZXEquivalenceChecker:
                                 base = zx.vertices[base_id]
                                 if base.type == 'Z' and base.phase == 0.0:
                                     gadgets_by_base.setdefault(base_id, []).append((g_id, h_id))
-            for base_id, gadgets in gadgets_by_base.items():
+            for _base_id, gadgets in gadgets_by_base.items():
                 if len(gadgets) >= 2:
                     first_g_id, first_h_id = gadgets[0]
                     for g_id, h_id in gadgets[1:]:
@@ -632,7 +662,10 @@ class ZXEquivalenceChecker:
                         
         # 3. Fallback checks (simulation/state-propagation)
         if N > 16:
-            raise IndeterminateEquivalenceError(f"Circuit has {N} > 16 qubits. ZX equivalence checker cannot verify it without hanging.")
+            raise IndeterminateEquivalenceError(
+                f"Circuit has {N} > 16 qubits. "
+                "ZX equivalence checker cannot verify it without hanging."
+            )
             
         if N <= 12:
             return self.check_via_unitary_simulation(graph1, graph2, all_qubits)
@@ -679,8 +712,9 @@ class ZXEquivalenceChecker:
             sim = QuantumSimulator()
             for qubit in qubit_order:
                 sim.allocate_qubit(qubit)
-            sim.state_vector = [0.0j] * dim
-            sim.state_vector[col] = 1.0 + 0.0j
+            basis = [0.0j] * dim
+            basis[col] = 1.0 + 0.0j
+            sim.state_vector = basis
             
             for node in nodes:
                 if node.type == 'GATE':
@@ -762,8 +796,8 @@ class ZXEquivalenceChecker:
                     
             final_state = sim.get_state_vector()
             
-            overlap = sum(i.conjugate() * f for i, f in zip(initial_state, final_state))
-            if abs(abs(overlap) - 1.0) > 1e-4:
+            overlap = sum(i.conjugate() * f for i, f in zip(initial_state, final_state, strict=False))
+            if abs(abs(overlap) - 1.0) > 1e-9:
                 return False
                 
         return True

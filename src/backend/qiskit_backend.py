@@ -1,6 +1,6 @@
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.semantic.backend_capabilities import get_backend_capabilities, CapabilityLevel, UnsupportedOp
-from src.diagnostics import DiagnosticEngine, Diagnostic, DiagnosticSeverity, SourceLocation
+from src.diagnostics import DiagnosticEngine, DiagnosticSeverity, SourceLocation
 from src.frontend.ast import (
     ProgramNode, ASTNode, FuncDeclNode, StructDeclNode, ForNode, WhileNode,
     TryCatchNode, ThrowNode, StructLiteralNode, ArrayLiteralNode, DotAccessNode,
@@ -8,7 +8,8 @@ from src.frontend.ast import (
 )
 
 class BackendReport:
-    def __init__(self, backend_name: str, warnings: list[str], unsupported_nodes: int, generated_lines: int, stats: dict = None):
+    def __init__(self, backend_name: str, warnings: list[str], unsupported_nodes: int,
+                 generated_lines: int, stats: dict = None):
         self.backend_name = backend_name
         self.warnings = warnings
         self.unsupported_nodes = unsupported_nodes
@@ -59,7 +60,7 @@ class QiskitBackend:
             for imp in ast.imports:
                 unsupported_ops.append(UnsupportedOp("ImportNode", None, imp.module_path, "Imports not supported"))
 
-        for imp in ast.imports:
+        for _imp in ast.imports:
             node_stats[self.capabilities.supports_imports] += 1
 
         def visit(node: ASTNode):
@@ -102,7 +103,9 @@ class QiskitBackend:
                         f"Struct declaration '{node.name}' is not supported by Qiskit backend.",
                         SourceLocation("ast")
                     )
-                    unsupported_ops.append(UnsupportedOp("StructDeclNode", None, f"struct {node.name}", "Structs not supported"))
+                    unsupported_ops.append(UnsupportedOp(
+                        "StructDeclNode", None, f"struct {node.name}",
+                        "Structs not supported"))
             elif isinstance(node, (ForNode, WhileNode)):
                 if self.capabilities.supports_loops == CapabilityLevel.UNSUPPORTED:
                     diag_engine.emit(
@@ -160,7 +163,9 @@ class QiskitBackend:
                         "Struct member field access is not supported by Qiskit backend.",
                         SourceLocation("ast")
                     )
-                    unsupported_ops.append(UnsupportedOp("DotAccessNode", None, f".{node.member}", "Field access not supported"))
+                    unsupported_ops.append(UnsupportedOp(
+                        "DotAccessNode", None, f".{node.member}",
+                        "Field access not supported"))
             elif isinstance(node, IndexAccessNode):
                 if self.capabilities.supports_index_access == CapabilityLevel.UNSUPPORTED:
                     diag_engine.emit(
@@ -278,7 +283,9 @@ class QiskitBackend:
                         lines.append(f"# Skipped classical condition on non-integer value {c_name} {op} {val}")
                         continue
                 else:
-                    lines.append(f"# Skipped classical condition {c_name} {op} {val} (Qiskit only supports == comparison in c_if)")
+                    lines.append(
+                        f"# Skipped classical condition {c_name} {op} {val} "
+                        f"(Qiskit only supports == comparison in c_if)")
                     continue
 
             if node.type == 'GATE':
@@ -311,7 +318,9 @@ class QiskitBackend:
                     angle = node.args[0] if node.args else 0.0
                     # Check if angle is unsupported placeholder
                     if isinstance(angle, str) and angle.startswith("__") and angle.endswith("__"):
-                        lines.append(f"# Skipped gate {node.gate_name} due to unsupported classical angle expression: {angle}")
+                        lines.append(
+                        f"# Skipped gate {node.gate_name} due to unsupported "
+                        f"classical angle expression: {angle}")
                     else:
                         lines.append(f"qc.{g_name}({angle}, {q_indices[0]}){cond_suffix}")
                 # Audit §2.4: previously CRX/CRY/CRZ/CP fell through to the
@@ -325,7 +334,9 @@ class QiskitBackend:
                 elif g_name in ('crx', 'cry', 'crz', 'cp'):
                     angle = node.args[0] if node.args else 0.0
                     if isinstance(angle, str) and angle.startswith("__") and angle.endswith("__"):
-                        lines.append(f"# Skipped gate {node.gate_name} due to unsupported classical angle expression: {angle}")
+                        lines.append(
+                        f"# Skipped gate {node.gate_name} due to unsupported "
+                        f"classical angle expression: {angle}")
                     else:
                         lines.append(f"qc.{g_name}({angle}, {q_indices[0]}, {q_indices[1]}){cond_suffix}")
                 else:

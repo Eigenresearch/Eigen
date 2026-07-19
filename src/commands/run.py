@@ -8,10 +8,28 @@ from src.backend.vm import EigenVM
 from src.runtime import EigenRuntime
 from src.profiler import EQIRProfiler
 from src.crash_report import write_crash_report
-from src.backend.ebc_compiler import EBCCompiler
 
 @register_command("run")
 def run_command(args, workspace_root):
+    # §6.2 (Security): Subprocess isolation for untrusted code.
+    # If --sandbox is passed and we're not already in a sandbox, respawn
+    # ourselves in a subprocess.
+    import os
+    if getattr(args, "sandbox", False) and os.environ.get("EIGEN_SANDBOX") != "1":
+        import subprocess
+        new_env = os.environ.copy()
+        new_env["EIGEN_SANDBOX"] = "1"
+        cmd = [sys.executable] + sys.argv
+        # Remove --sandbox from the args to avoid recursion, although the env
+        # var also guards against it.
+        if "--sandbox" in cmd:
+            cmd.remove("--sandbox")
+        try:
+            return subprocess.call(cmd, env=new_env)
+        except Exception as e:
+            print(f"Error launching sandbox subprocess: {e}", file=sys.stderr)
+            sys.exit(1)
+
     opt_level = 0
     if getattr(args, "O", None) is not None:
         opt_level = args.O
@@ -50,7 +68,12 @@ def run_command(args, workspace_root):
         timeout_val = getattr(args, 'instruction_timeout', None)
         if deterministic_val and seed_val is None:
             seed_val = 0
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model,
+                     gpu_platform=gpu_platform, seed=seed_val,
+                     verbose=verbose_val, opt_level=opt_level,
+                     deterministic=deterministic_val,
+                     max_instruction_count=max_instr_val,
+                     instruction_timeout_s=timeout_val)
         vm.execute(instructions)
         return
 
@@ -151,7 +174,12 @@ def run_command(args, workspace_root):
         if deterministic_val and seed_val is None:
             seed_val = 0
 
-        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val, verbose=verbose_val, opt_level=opt_level, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
+        vm = EigenVM(trace_mode=args.trace, noise_model=noise_model,
+                     sim_type=sim_backend_type, gpu_platform=gpu_platform,
+                     seed=seed_val, verbose=verbose_val,
+                     opt_level=opt_level, deterministic=deterministic_val,
+                     max_instruction_count=max_instr_val,
+                     instruction_timeout_s=timeout_val)
         # Native-Python recursion fast path: pre-compile qualifying pure
         # recursive functions to Python callables that bypass VM dispatch.
         try:
@@ -165,7 +193,9 @@ def run_command(args, workspace_root):
             print(f"Assertion Error: {ae}", file=sys.stderr)
             sys.exit(1)
         except Exception as e:
-            write_crash_report(e, vm.call_stack, vm.ip, instructions[vm.ip].opcode if vm.ip < len(instructions) else "HALT", vm.globals)
+            write_crash_report(e, vm.call_stack, vm.ip,
+                               instructions[vm.ip].opcode if vm.ip < len(instructions) else "HALT",
+                               vm.globals)
             sys.exit(1)
     else:
         save_to_cache(args.file, workspace_root, "eqir", graph)
@@ -174,7 +204,9 @@ def run_command(args, workspace_root):
         gpu_platform = getattr(args, 'gpu', 'none')
         seed_val = getattr(args, 'seed', None)
         
-        runtime = EigenRuntime(trace_mode=args.trace, noise_model=noise_model, sim_type=sim_backend_type, gpu_platform=gpu_platform, seed=seed_val)
+        runtime = EigenRuntime(trace_mode=args.trace, noise_model=noise_model,
+                               sim_type=sim_backend_type, gpu_platform=gpu_platform,
+                               seed=seed_val)
         try:
             runtime.execute(graph)
         except AssertionError as ae:

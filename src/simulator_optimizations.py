@@ -8,8 +8,6 @@ simulators.
 """
 from __future__ import annotations
 
-import math
-import typing
 
 try:
     import numpy as np
@@ -79,7 +77,7 @@ def tensor_contract_gate(state_vector: list, gate_2x2: list,
     sv = np.array(state_vector, dtype=complex)
     # Reshape: (2^k, 2, 2^(n-k-1)) where k = qubit_index
     shape = []
-    for i in range(num_qubits):
+    for _i in range(num_qubits):
         shape.append(2)
     sv = sv.reshape(shape)
     # Move target axis to position 0
@@ -152,21 +150,57 @@ class GPUAccelerationSurface:
     def backend(self) -> str | None:
         return self._backend
 
+    def to_gpu(self, state_vector):
+        """Upload a state vector to GPU memory (CuPy backend only)."""
+        import cupy as cp
+        return cp.asarray(state_vector, dtype=complex)
+
+    def from_gpu(self, gpu_state):
+        """Download a GPU-resident state vector back to a NumPy array."""
+        import cupy as cp
+        return cp.asnumpy(gpu_state)
+
+    def apply_gate_resident(self, gpu_state, gate_matrix, qubit_index,
+                            num_qubits):
+        """Apply a 1-qubit gate to a *GPU-resident* state vector.
+
+        §1.3 (perf): the whole tensor contraction runs on the GPU with no
+        host round-trip; callers keep the returned CuPy array and reuse it
+        for subsequent gates instead of copying CPU↔GPU per gate.
+        """
+        import cupy as cp
+        U = cp.asarray(gate_matrix, dtype=complex)
+        shape = [2] * num_qubits
+        sv = gpu_state.reshape(shape)
+        sv = cp.moveaxis(sv, qubit_index, 0)
+        rest = 1 << (num_qubits - 1)
+        sv = sv.reshape(2, rest)
+        sv = U @ sv
+        sv = sv.reshape(shape)
+        sv = cp.moveaxis(sv, 0, qubit_index)
+        return cp.ascontiguousarray(sv.reshape(-1))
+
     def apply_gate_gpu(self, state_vector, gate_matrix, qubit_index,
                         num_qubits):
-        """Apply a gate on GPU if available, else CPU fallback."""
+        """Apply a gate on GPU if available, else CPU fallback.
+
+        One-shot convenience wrapper: uploads, applies, downloads. Prefer
+        the resident API (``to_gpu``/``apply_gate_resident``/``from_gpu``)
+        when applying more than one gate in a row.
+        """
         if not self._available or not HAS_NUMPY:
             return apply_gate_inplace(state_vector, gate_matrix,
                                          qubit_index, num_qubits)
         if self._backend == "cupy":
-            import cupy as cp
-            sv = cp.array(state_vector, dtype=complex)
-            # Use the tensor contraction approach on GPU
-            result = tensor_contract_gate(
-                cp.asnumpy(sv), gate_matrix, qubit_index, num_qubits)
-            return result
+            n = 1 << num_qubits
+            gpu_state = self.to_gpu(state_vector)
+            result = self.apply_gate_resident(
+                gpu_state, gate_matrix, qubit_index, num_qubits)
+            out = self.from_gpu(result)
+            assert out.shape[0] == n
+            return out
         return tensor_contract_gate(state_vector, gate_matrix,
-                                       qubit_index, num_qubits)
+                                        qubit_index, num_qubits)
 
     def stats(self) -> dict:
         return {"backend": self._backend, "available": self._available}

@@ -38,7 +38,6 @@ from src.backend.vm import EigenVM
 def _compile(src: str, *, optimize: bool = False):
     """Compile a small Eigen source fragment to EBC instructions,
     returning the list of Instruction objects."""
-    import os
     import hashlib
     workspace = tempfile.mkdtemp(prefix="eigen_vm_test_")
     rel = f"vm_{hashlib.sha1(src.encode('utf-8')).hexdigest()[:12]}.eig"
@@ -130,7 +129,6 @@ class TestVMDispatchMode(unittest.TestCase):
         vm_fast = EigenVM(sim_type='dense', deterministic=True, seed=0,
                           dispatch_mode='fast')
         import io
-        import contextlib
         buf_fast = io.StringIO()
         vm_fast.output_stream = buf_fast
         # Don't reset the VM between modes — fresh VM each time.
@@ -340,7 +338,7 @@ print r
     def test_table_mode_handles_halt(self):
         """HALT should terminate the table-mode loop cleanly via
         `op_halt` returning truthy."""
-        from src.backend.bytecode import Instruction, Opcode
+        from src.backend.bytecode import Instruction
         insts = [
             Instruction.from_dict({"opcode": "HALT", "arg": None, "line": 1}),
         ]

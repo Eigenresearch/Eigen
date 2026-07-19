@@ -36,7 +36,7 @@ class TestTypeRef(unittest.TestCase):
         a = TypeRef("int", [], kind=TypeKind.PRIMITIVE)
         b = TypeRef("int", [], kind=TypeKind.PRIMITIVE)
         self.assertEqual(hash(a), hash(b))
-        self.assertIn(a, {a, b, str("int")})
+        self.assertIn(a, {a, b, "int"})
 
 
 class TestProtocol(unittest.TestCase):

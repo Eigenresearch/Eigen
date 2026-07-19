@@ -12,11 +12,21 @@ class SparseQuantumSimulator:
         self._state = {"": 1.0 + 0.0j}  # maps bitstrings (e.g. "01") -> complex amplitude
         self.qubit_map = {}            # qubit_name -> index (0-based)
         self.num_qubits = 0
+        self._gate_count = 0
+        self._prune_interval = 100
         self.rng = random.Random(seed)
         if native is not None and hasattr(native, 'RustSparseSimulator'):
             self._rust_sparse = native.RustSparseSimulator()
         else:
             self._rust_sparse = None
+
+    def _prune(self):
+        self._state = {k: v for k, v in self._state.items() if abs(v) >= 1e-12}
+
+    def _maybe_prune(self):
+        self._gate_count += 1
+        if self._gate_count % self._prune_interval == 0:
+            self._prune()
 
     @property
     def state(self):
@@ -103,6 +113,7 @@ class SparseQuantumSimulator:
             if abs(v1) > 1e-12:
                 new_state[key1] = v1
         self._state = new_state
+        self._maybe_prune()
 
     def H(self, q: str):
         if self._rust_sparse is not None:
@@ -138,6 +149,7 @@ class SparseQuantumSimulator:
             if abs(v1) > 1e-12:
                 new_state[key1] = v1
         self._state = new_state
+        self._maybe_prune()
 
     def X(self, q: str):
         if self._rust_sparse is not None:
@@ -153,6 +165,7 @@ class SparseQuantumSimulator:
             new_bit = '1' if key[k] == '0' else '0'
             new_state[prefix + new_bit + suffix] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def Y(self, q: str):
         if self._rust_sparse is not None:
@@ -170,6 +183,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[prefix + '0' + suffix] = -1j * amp
         self._state = new_state
+        self._maybe_prune()
 
     def Z(self, q: str):
         if self._rust_sparse is not None:
@@ -185,6 +199,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def S(self, q: str):
         if self._rust_sparse is not None:
@@ -200,6 +215,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def T(self, q: str):
         if self._rust_sparse is not None:
@@ -216,6 +232,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def RX(self, q: str, theta: float):
         cos_val = math.cos(theta / 2)
@@ -257,6 +274,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def CZ(self, control: str, target: str):
         if self._rust_sparse is not None:
@@ -274,6 +292,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def SWAP(self, q1: str, q2: str):
         if self._rust_sparse is not None:
@@ -291,6 +310,7 @@ class SparseQuantumSimulator:
             new_key = "".join(chars)
             new_state[new_key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def CCX(self, control1: str, control2: str, target: str):
         if self._rust_sparse is not None:
@@ -311,6 +331,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def CSWAP(self, control: str, q1: str, q2: str):
         if self._rust_sparse is not None:
@@ -331,6 +352,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def CP(self, control: str, target: str, theta: float):
         if self._rust_sparse is not None:
@@ -348,6 +370,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def CRX(self, control: str, target: str, theta: float):
         if self._rust_sparse is not None:
@@ -385,6 +408,7 @@ class SparseQuantumSimulator:
             if abs(v1) > 1e-12:
                 new_state[key1] = v1
         self._state = new_state
+        self._maybe_prune()
 
     def CRY(self, control: str, target: str, theta: float):
         if self._rust_sparse is not None:
@@ -422,6 +446,7 @@ class SparseQuantumSimulator:
             if abs(v1) > 1e-12:
                 new_state[key1] = v1
         self._state = new_state
+        self._maybe_prune()
 
     def CRZ(self, control: str, target: str, theta: float):
         if self._rust_sparse is not None:
@@ -443,6 +468,7 @@ class SparseQuantumSimulator:
             else:
                 new_state[key] = amp
         self._state = new_state
+        self._maybe_prune()
 
     def measure(self, q: str) -> int:
         if self._rust_sparse is not None:
@@ -485,7 +511,7 @@ class SparseQuantumSimulator:
         sorted_qubits = sorted(self.qubit_map.keys(), key=lambda name: self.qubit_map[name])
         for key, amp in self._state.items():
             idx = 0
-            for i, q in enumerate(sorted_qubits):
+            for _i, q in enumerate(sorted_qubits):
                 q_idx = self.qubit_map[q]
                 if key[q_idx] == '1':
                     idx |= (1 << q_idx)

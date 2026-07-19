@@ -16,10 +16,16 @@ class EigenFormatter:
         i = 0
         while i < len(line):
             char = line[i]
-            if char == '"':
-                in_string = not in_string
-            elif not in_string:
-                if char == '#' or (char == '/' and i + 1 < len(line) and line[i+1] == '/'):
+            if in_string:
+                if char == '\\' and i + 1 < len(line):
+                    i += 2
+                    continue
+                if char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char == '#' or (char == '/' and i + 1 < len(line) and line[i+1] == '/'):
                     comment_start = i
                     break
             i += 1
@@ -45,32 +51,38 @@ class EigenFormatter:
         i = 0
         while i < len(code):
             char = code[i]
-            if char == '"':
-                if in_string:
-                    string_buf += char
+            if in_string:
+                string_buf += char
+                if char == '\\' and i + 1 < len(code):
+                    string_buf += code[i+1]
+                    i += 2
+                    continue
+                if char == '"':
                     parts.append((True, string_buf))
                     string_buf = ""
                     in_string = False
-                else:
-                    if other_buf:
-                        parts.append((False, other_buf))
-                        other_buf = ""
-                    string_buf = char
-                    in_string = True
-            elif in_string:
-                string_buf += char
+                i += 1
+                continue
+            if char == '"':
+                if other_buf:
+                    parts.append((False, other_buf))
+                    other_buf = ""
+                string_buf = char
+                in_string = True
             else:
                 other_buf += char
             i += 1
             
         if other_buf:
             parts.append((False, other_buf))
+        if string_buf:
+            parts.append((True, string_buf))
             
         # Format the non-string parts
         formatted_parts = []
         for is_str, val in parts:
             if is_str:
-                formatted_parts.append(val)
+                formatted_parts.append((True, val))
             else:
                 # Add spaces around operators
                 # Operators: ->, ==, =, +, -, *, /, :, ,
@@ -94,25 +106,24 @@ class EigenFormatter:
                 v = re.sub(r'\s*\*\s*(?!=)', ' * ', v)
                 v = re.sub(r'\s*/\s*(?!=)', ' / ', v)
                 v = re.sub(r'\s*<\s*(?![=])', ' < ', v)
-                v = re.sub(r'(?<![-=])\s*>\s*', ' > ', v)
+                v = re.sub(r'(?<![-=])\s*>\s*(?![=])', ' > ', v)
                 v = re.sub(r'\s*,\s*', ', ', v)
                 v = re.sub(r'\s*:\s*', ': ', v)
                 
                 # Delimiters
                 v = re.sub(r'\s*\(\s*', '(', v)
-                v = re.sub(r'\s*\)\s*', ') ', v)  # add space after closing paren
+                v = re.sub(r'\s*\)\s*', ') ', v)
                 v = re.sub(r'\s*\{\s*', ' {', v)
                 
                 # Cleanup double spaces
                 v = re.sub(r'\s+', ' ', v)
                 v = v.strip()
-                formatted_parts.append(v)
+                formatted_parts.append((is_str, v))
 
-        final_code = "".join(formatted_parts).strip()
-        # Fix spacing issues e.g. ") {" or "func name()"
-        final_code = re.sub(r'\s*\(', '(', final_code)
-        final_code = re.sub(r'\)\s+\{', ') {', final_code)
-        final_code = re.sub(r'\)\s*,', '),', final_code)
+        final_code = "".join(v for _, v in formatted_parts).strip()
+        # Apply paren/curl cleanup only on non-string segments so string
+        # contents (which may contain ')', ',', '{', etc.) are preserved.
+        final_code = self._rejoin_formatted_parts(formatted_parts)
         
         if comment:
             if final_code:
@@ -120,6 +131,28 @@ class EigenFormatter:
             else:
                 return comment.strip()
         return final_code
+
+    def _rejoin_formatted_parts(self, formatted_parts) -> str:
+        """Join formatted string/non-string parts and apply cross-boundary
+        paren cleanup only to non-string segments so string contents are
+        never modified."""
+        if not formatted_parts:
+            return ""
+        result = ""
+        for is_str, val in formatted_parts:
+            if is_str:
+                if result and not result.endswith((' ', '\t', '(')):
+                    result += " "
+                result += val
+            else:
+                seg = val
+                if result and not result.endswith((' ', '\t', '(')):
+                    if seg.startswith(('(', ')', '{', '}', ',', ':', '+', '-', '*', '/')):
+                        seg = seg
+                    else:
+                        result += " "
+                result += seg
+        return result.strip()
 
     def format_code(self, source: str) -> str:
         lines = source.splitlines()

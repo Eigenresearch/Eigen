@@ -147,7 +147,7 @@ class ConstructorPattern(Pattern):
             if len(fields) != len(self.sub_patterns):
                 return None
             bindings = {}
-            for sub, val in zip(self.sub_patterns, fields):
+            for sub, val in zip(self.sub_patterns, fields, strict=False):
                 sub_b = sub.try_match(val, type_resolver=type_resolver)
                 if sub_b is None:
                     return None
@@ -160,7 +160,7 @@ class ConstructorPattern(Pattern):
             if len(subject.fields) != len(self.sub_patterns):
                 return None
             bindings = {}
-            for sub, val in zip(self.sub_patterns, subject.fields):
+            for sub, val in zip(self.sub_patterns, subject.fields, strict=False):
                 sub_b = sub.try_match(val, type_resolver=type_resolver)
                 if sub_b is None:
                     return None

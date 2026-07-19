@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import dataclasses
 import typing
-import json
 
 
 @dataclasses.dataclass

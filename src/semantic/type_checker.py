@@ -1,6 +1,6 @@
 from src.frontend.ast import (
-    ProgramNode, ImportNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    ProgramNode, QFuncDeclNode, LetNode, VarDeclNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode,
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode, StructDeclNode,
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
@@ -8,7 +8,7 @@ from src.frontend.ast import (
     IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
     MatchNode, StringInterpolationNode,
     TraitDeclNode, TraitMethodSignatureNode, ImplBlockNode,
-    TypeAliasDeclNode,
+    TypeAliasDeclNode, AsyncFuncDeclNode, AwaitExprNode, OperatorDeclNode,
 )
 
 class TypeErrorException(Exception):
@@ -33,6 +33,7 @@ class TypeChecker:
         self.global_impls = []      # list of ImplBlockNode (for trait
                                     # conformance auditing; not enforced
                                     # at call sites in this P2 cut).
+        self.global_type_aliases = {}  # name -> target_type (§3.3)
         # Scope stack: list of dicts of name -> type_name
         self.scopes = [{}]
         self.current_function = None
@@ -146,7 +147,12 @@ class TypeChecker:
 
     def check(self, program: ProgramNode):
         from src.frontend.ast import NATIVE_AVAILABLE
-        if NATIVE_AVAILABLE and hasattr(program, "source") and program.source is not None:
+        promoted_syntax = any(
+            isinstance(node, (AsyncFuncDeclNode, OperatorDeclNode))
+            for node in program.body
+        )
+        if (NATIVE_AVAILABLE and not promoted_syntax
+                and hasattr(program, "source") and program.source is not None):
             import eigen_native
             try:
                 from src.compiler import get_workspace_root
@@ -154,7 +160,7 @@ class TypeChecker:
                 eigen_native.type_check_source(program.source, workspace_root)
                 return
             except TypeError as e:
-                raise TypeErrorException(f"Type Error: {str(e)}")
+                raise TypeErrorException(f"Type Error: {str(e)}") from e
 
         self.global_qfuncs = {}
         self.global_funcs = {}
@@ -258,7 +264,7 @@ class TypeChecker:
             # Trait method signatures don't have a body, so we just
             # walk the parameter list to register types. No scope is
             # entered — these don't end up in the user-visible namespace.
-            for p_name, p_type in node.params:
+            for _p_name, _p_type in node.params:
                 # We don't declare; we only validate the type strings.
                 # Empty bodies mean there's nothing further to check here.
                 pass
@@ -326,7 +332,8 @@ class TypeChecker:
             val_type = self.check_node(node.value)
             expected = self._resolve_type_alias(node.type_name)
             if not self.types_compatible(expected, val_type):
-                self.error(f"Cannot assign expression of type '{val_type}' to variable '{node.name}' of type '{node.type_name}'", node)
+                self.error(f"Cannot assign expression of type '{val_type}' to variable '{node.name}' "
+                           f"of type '{node.type_name}'", node)
             self.declare_var(node.name, node.type_name, node)
             return None
 
@@ -351,11 +358,20 @@ class TypeChecker:
         elif isinstance(node, VarRefNode):
             return self.lookup_var(node.name, node)
 
+        elif isinstance(node, AwaitExprNode):
+            if not isinstance(self.current_function, AsyncFuncDeclNode):
+                self.error("'await' is only valid inside an async function", node)
+            task_type = self.check_node(node.expr)
+            if not task_type or not task_type.startswith("task<") or not task_type.endswith(">"):
+                self.error(f"'await' expects task<T>, got '{task_type}'", node)
+            return task_type[5:-1]
+
         elif isinstance(node, BinaryOpNode):
             left_type = self.check_node(node.left)
             right_type = self.check_node(node.right)
             if node.op in ("==", "!=", "<", ">", "<=", ">="):
-                if not self.types_compatible(left_type, right_type) and not self.types_compatible(right_type, left_type):
+                if (not self.types_compatible(left_type, right_type)
+                        and not self.types_compatible(right_type, left_type)):
                     self.error(f"Comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
                 return "bool"
             elif node.op in ("and", "or", "not"):
@@ -365,17 +381,39 @@ class TypeChecker:
             elif node.op in ("%", "&", "|", "^", "~", "<<", ">>"):
                 integer_types = {"int", "cbit"}
                 if left_type not in integer_types or (right_type and right_type not in integer_types):
-                    self.error(f"Operator '{node.op}' is only supported on integer types, got '{left_type}' and '{right_type}'", node)
+                    self.error(f"Operator '{node.op}' is only supported on integer types, "
+                               f"got '{left_type}' and '{right_type}'", node)
                 return "int"
             else:
                 numeric_types = {"int", "float", "cbit"}
                 if left_type not in numeric_types or right_type not in numeric_types:
-                    self.error(f"Binary operation '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                    self.error(f"Binary operation '{node.op}' not supported between "
+                               f"'{left_type}' and '{right_type}'", node)
                 if node.op == "**" and right_type == "int":
                     return "int" if left_type == "int" else "float"
                 if left_type == "float" or right_type == "float":
                     return "float"
                 return "int"
+
+        elif isinstance(node, UnaryOpNode):
+            operand_type = self.check_node(node.operand)
+            if node.op == "not":
+                if operand_type != "bool":
+                    self.error(f"Operator 'not' expects bool, got '{operand_type}'", node)
+                return "bool"
+            elif node.op == "~":
+                integer_types = {"int", "cbit"}
+                if operand_type not in integer_types:
+                    self.error(f"Operator '~' is only supported on integer types, got '{operand_type}'", node)
+                return "int"
+            elif node.op == "-":
+                numeric_types = {"int", "float", "cbit"}
+                if operand_type not in numeric_types:
+                    self.error(f"Unary '-' not supported on type '{operand_type}'", node)
+                return operand_type
+            else:
+                self.error(f"Unknown unary operator '{node.op}'", node)
+                return "any"
 
         elif isinstance(node, ForNode):
             iter_type = self.check_node(node.iterable)
@@ -472,7 +510,7 @@ class TypeChecker:
                 return "map<unknown,unknown>"
             k_type = self.check_node(node.keys[0])
             v_type = self.check_node(node.values[0])
-            for k, v in zip(node.keys[1:], node.values[1:]):
+            for k, v in zip(node.keys[1:], node.values[1:], strict=False):
                 kt = self.check_node(k)
                 vt = self.check_node(v)
                 if not self.types_compatible(k_type, kt):
@@ -494,6 +532,9 @@ class TypeChecker:
             for stmt in node.catch_body:
                 self.check_node(stmt)
             self.exit_scope()
+            if getattr(node, 'finally_body', None):
+                for stmt in node.finally_body:
+                    self.check_node(stmt)
             return None
 
         elif isinstance(node, ThrowNode):
@@ -521,29 +562,32 @@ class TypeChecker:
             if callee_name and callee_name in self.global_funcs:
                 func = self.global_funcs[callee_name]
                 if len(node.args) != len(func.params):
-                    self.error(f"Argument count mismatch for call to '{callee_name}': expected {len(func.params)}, got {len(node.args)}", node)
+                    self.error(f"Argument count mismatch for call to '{callee_name}': "
+                               f"expected {len(func.params)}, got {len(node.args)}", node)
                 
                 # Perform simple generic binding if the function has generic parameters
                 bindings = {}
-                for arg, (p_name, p_type) in zip(node.args, func.params):
+                for arg, (p_name, p_type) in zip(node.args, func.params, strict=False):
                     arg_type = self.check_node(arg)
                     
                     # If parameter is generic placeholder, bind it
                     if p_type in func.generic_params:
                         if p_type in bindings:
                             if not self.types_compatible(bindings[p_type], arg_type):
-                                self.error(f"Generic parameter '{p_type}' bound to conflicting types '{bindings[p_type]}' and '{arg_type}'", node)
+                                self.error(f"Generic parameter '{p_type}' bound to conflicting types "
+                                           f"'{bindings[p_type]}' and '{arg_type}'", node)
                         else:
                             bindings[p_type] = arg_type
                     else:
                         # Otherwise check type compatibility
                         if not self.types_compatible(p_type, arg_type):
-                            self.error(f"Type mismatch for parameter '{p_name}': expected '{p_type}', got '{arg_type}'", node)
+                            self.error(f"Type mismatch for parameter '{p_name}': "
+                                       f"expected '{p_type}', got '{arg_type}'", node)
                 
                 # Resolve return type based on generic bindings
-                ret_type = func.return_type
-                if ret_type in bindings:
-                    return bindings[ret_type]
+                ret_type = bindings.get(func.return_type, func.return_type)
+                if isinstance(func, AsyncFuncDeclNode):
+                    return f"task<{ret_type}>"
                 return ret_type
             elif callee_name and callee_name in self.STDLIB_FUNCTIONS:
                 for arg in node.args:
@@ -595,22 +639,26 @@ class TypeChecker:
                 self.error(f"Call to undefined qfunc '{node.name}'", node)
             qfunc = self.global_qfuncs[node.name]
             if len(node.args) != len(qfunc.params):
-                self.error(f"Argument count mismatch for qfunc '{node.name}': expected {len(qfunc.params)}, got {len(node.args)}", node)
-            for arg_name, (param_name, param_type) in zip(node.args, qfunc.params):
+                self.error(f"Argument count mismatch for qfunc '{node.name}': "
+                           f"expected {len(qfunc.params)}, got {len(node.args)}", node)
+            for arg_name, (_param_name, param_type) in zip(node.args, qfunc.params, strict=False):
                 arg_type = self.lookup_var(arg_name, node)
                 if arg_type != param_type:
-                    self.error(f"Type mismatch for argument '{arg_name}': expected '{param_type}', got '{arg_type}'", node)
+                    self.error(f"Type mismatch for argument '{arg_name}': "
+                               f"expected '{param_type}', got '{arg_type}'", node)
             return None
 
         elif isinstance(node, GateNode):
             for target in node.targets:
                 t_type = self.lookup_var(target, node)
                 if t_type != "qubit":
-                    self.error(f"Gate '{node.gate_name}' target '{target}' must be of type 'qubit', got '{t_type}'", node)
+                    self.error(f"Gate '{node.gate_name}' target '{target}' must be of type "
+                               f"'qubit', got '{t_type}'", node)
             for arg in node.args:
                 arg_type = self.check_node(arg)
                 if arg_type not in ("int", "float"):
-                    self.error(f"Rotation gate '{node.gate_name}' angle must evaluate to a number, got '{arg_type}'", node)
+                    self.error(f"Rotation gate '{node.gate_name}' angle must evaluate "
+                               f"to a number, got '{arg_type}'", node)
             return None
 
         elif isinstance(node, MeasureNode):
@@ -628,7 +676,8 @@ class TypeChecker:
             comparable = {"int", "float", "cbit", "bool", "string"}
             if left_type not in comparable or right_type not in comparable:
                 if not self.types_compatible(left_type, right_type):
-                    self.error(f"Condition comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                    self.error(f"Condition comparison '{node.op}' not supported between "
+                               f"'{left_type}' and '{right_type}'", node)
             self.enter_scope()
             for stmt in node.body:
                 self.check_node(stmt)
@@ -653,7 +702,8 @@ class TypeChecker:
             comparable = {"int", "float", "cbit", "bool", "string"}
             if left_type not in comparable or right_type not in comparable:
                 if not self.types_compatible(left_type, right_type):
-                    self.error(f"Assert comparison '{node.op}' not supported between '{left_type}' and '{right_type}'", node)
+                    self.error(f"Assert comparison '{node.op}' not supported between "
+                               f"'{left_type}' and '{right_type}'", node)
             return None
 
         elif isinstance(node, ProgramNode):
@@ -670,9 +720,9 @@ class TypeChecker:
             return None
 
         elif isinstance(node, MatchNode):
-            match_type = self.check_node(node.expr)
+            self.check_node(node.expr)
             for pattern, body in node.cases:
-                pattern_type = self.check_node(pattern)
+                self.check_node(pattern)
                 self.enter_scope()
                 for stmt in body:
                     self.check_node(stmt)

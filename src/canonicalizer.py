@@ -14,7 +14,10 @@ class Canonicalizer:
         representation = []
         for node in g_opt.topological_sort():
             if node.type == 'GATE':
-                args_str = ",".join(f"{float(a):.6f}" if isinstance(a, (int, float)) else str(a) for a in node.args) if node.args else ""
+                args_str = (
+                    ",".join(f"{float(a):.6f}" if isinstance(a, (int, float)) else str(a) for a in node.args)
+                    if node.args else ""
+                )
                 targets_str = ",".join(node.targets)
                 cond_str = f" if {node.condition[0]}{node.condition[1]}{node.condition[2]}" if node.condition else ""
                 representation.append(f"GATE:{node.gate_name}:{targets_str}:{args_str}{cond_str}")

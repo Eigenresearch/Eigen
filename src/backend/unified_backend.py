@@ -745,5 +745,13 @@ def _register_default_backends() -> None:
 
     register_backend("ionq_runtime", make_ionq_runtime)
 
+    def make_simulator(name: str = "simulator") -> QuantumBackend:
+        from src.backend.backends.simulator_backend import SimulatorBackend
+
+        return SimulatorBackend(name=name)
+
+    register_backend("simulator", make_simulator)
+    register_backend("local", lambda: make_simulator("local"))
+
 
 _register_default_backends()

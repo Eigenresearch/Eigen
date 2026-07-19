@@ -72,7 +72,7 @@ def generate_fish_completions() -> str:
     for cmd in EIGEN_COMMANDS:
         lines.append(f"complete -c eigen -n '__fish_use_subcommand' -a '{cmd}'")
     for flag in EIGEN_FLAGS:
-        lines.append(f"complete -c eigen -l '{flag.lstrip('--')}' -d 'Flag'")
+        lines.append(f"complete -c eigen -l '{flag.removeprefix('--')}' -d 'Flag'")
     return "\n".join(lines) + "\n"
 
 

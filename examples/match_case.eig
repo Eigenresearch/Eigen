@@ -1,0 +1,55 @@
+eigen 1.0
+
+# Pattern matching with match / case.
+#
+# Eigen's match statement evaluates an expression and dispatches to the
+# first case whose pattern equals the matched value. A `default` block
+# runs when no case matches. See parser.py:parse_match for the grammar.
+
+func describe(status: int) -> int {
+    match status {
+        case 0 {
+            print "ok"
+        }
+        case 1 {
+            print "warning"
+        }
+        case 2 {
+            print "error"
+        }
+        case 3 {
+            print "fatal"
+        }
+        default {
+            print "unknown"
+        }
+    }
+    return status
+}
+
+# Drive the matcher with several values.
+let a: int = describe(0)
+let b: int = describe(1)
+let c: int = describe(2)
+let d: int = describe(3)
+let e: int = describe(99)
+
+assert a == 0
+assert b == 1
+assert c == 2
+assert d == 3
+assert e == 99
+
+# match also works on expressions, not just variables.
+let n: int = 7
+match n {
+    case 1 {
+        print "one"
+    }
+    case 7 {
+        print "lucky"
+    }
+    default {
+        print "other"
+    }
+}

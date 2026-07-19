@@ -123,7 +123,7 @@ def _invoke_handler(fn, fields):
     fields are unpacked positionally; if it accepts exactly one
     positional arg, the entire fields list is passed in (so the
     handler can index/iterate)."""
-    if not hasattr(fn, "__call__") and not callable(fn):
+    if not callable(fn) and not callable(fn):
         # Treat as a static return value (rare but useful).
         return fn
     import inspect
@@ -175,14 +175,14 @@ class ADTRegistry:
         try:
             return self._adts[name]
         except KeyError:
-            raise ADTValueError(f"No ADT named {name!r} is registered")
+            raise ADTValueError(f"No ADT named {name!r} is registered") from None
 
     def adt_for_variant(self, variant_name: str) -> AlgebraicDataType:
         try:
             adt_name = self._variant_to_adt[variant_name]
         except KeyError:
             raise ADTValueError(
-                f"No ADT variant named {variant_name!r} is registered")
+                f"No ADT variant named {variant_name!r} is registered") from None
         return self._adts[adt_name]
 
     def constructor(self, variant_name: str,

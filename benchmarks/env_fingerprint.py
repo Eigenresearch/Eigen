@@ -2,7 +2,6 @@
 import sys
 import platform
 import os
-import subprocess
 
 lines = []
 lines.append("=== ENVIRONMENT FINGERPRINT ===")
@@ -35,7 +34,7 @@ except ImportError:
     lines.append("matplotlib: not installed")
 
 try:
-    import eigen_native
+    import eigen_native  # noqa: F401  (availability check)
     lines.append("eigen_native: available")
 except ImportError:
     lines.append("eigen_native: not available")

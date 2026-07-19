@@ -46,7 +46,8 @@ def rust_arena_to_nested_dict(arena, node_id):
     
     res = {"type": variant + "Node"}
     for k, v in fields.items():
-        if k in ("body", "imports", "targets", "args", "tasks", "params", "elements", "keys", "values", "try_body", "catch_body"):
+        if k in ("body", "imports", "targets", "args", "tasks", "params",
+                 "elements", "keys", "values", "try_body", "catch_body"):
             if isinstance(v, list):
                 if k == "params" and len(v) > 0 and isinstance(v[0], list):
                     res[k] = v
@@ -54,7 +55,10 @@ def rust_arena_to_nested_dict(arena, node_id):
                     res[k] = [rust_arena_to_nested_dict(arena, x) if isinstance(x, int) else x for x in v]
             else:
                 res[k] = v
-        elif k in ("left", "right", "condition_left", "condition_right", "expr", "iter", "cond", "obj", "index", "struct_expr", "value_expr", "array_expr", "index_expr", "key_expr", "map_expr", "call") or (k == "value" and variant != "Literal"):
+        elif (k in ("left", "right", "condition_left", "condition_right", "expr",
+                    "iter", "cond", "obj", "index", "struct_expr", "value_expr",
+                    "array_expr", "index_expr", "key_expr", "map_expr", "call")
+              or (k == "value" and variant != "Literal")):
             res[k] = rust_arena_to_nested_dict(arena, v) if isinstance(v, int) else v
         elif k == "value" and variant == "Literal":
             if isinstance(v, dict):
@@ -78,11 +82,14 @@ def rust_arena_to_nested_dict(arena, node_id):
 class TestFrontendEquivalence(unittest.TestCase):
     def setUp(self):
         self.workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "release", "eigen-frontend.exe")
+        self.binary_path = os.path.join(
+            self.workspace_root, "native", "rust", "target", "release", "eigen-frontend.exe")
         if not os.path.exists(self.binary_path):
-            self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "debug", "eigen-frontend.exe")
+            self.binary_path = os.path.join(
+                self.workspace_root, "native", "rust", "target", "debug", "eigen-frontend.exe")
         if not os.path.exists(self.binary_path):
-            self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "release", "eigen_frontend")
+            self.binary_path = os.path.join(
+                self.workspace_root, "native", "rust", "target", "release", "eigen_frontend")
         if not os.path.exists(self.binary_path):
             self.binary_path = os.path.join(self.workspace_root, "native", "rust", "target", "debug", "eigen_frontend")
         self.skip_rust = not os.path.exists(self.binary_path)
@@ -119,20 +126,24 @@ class TestFrontendEquivalence(unittest.TestCase):
         rust_res = self.run_rust_binary(source)
         if rust_res.returncode != 0:
             rust_failed = True
-            rust_error = rust_res.stderr
         else:
             rust_failed = False
             rust_json_output = json.loads(rust_res.stdout)
             rust_root_id = rust_json_output["root_id"]
             rust_ast_arena = rust_json_output["ast"]
 
-        self.assertEqual(py_failed, rust_failed, f"Parser failure mismatch on:\n{source}\nPython failed: {py_failed} ({py_error})\nRust failed: {rust_failed} ({rust_res.stderr})")
+        self.assertEqual(py_failed, rust_failed,
+                         f"Parser failure mismatch on:\n{source}\n"
+                         f"Python failed: {py_failed} ({py_error})\n"
+                         f"Rust failed: {rust_failed} ({rust_res.stderr})")
         
         if not py_failed:
             # Reconstruct Rust AST to nested dictionary starting at ProgramNode root_id
             rust_nested = rust_arena_to_nested_dict(rust_ast_arena, rust_root_id)
             py_nested = python_ast_to_dict(py_ast)
-            self.assertEqual(py_nested, rust_nested, f"AST structure mismatch on:\n{source}\nPython AST: {py_nested}\nRust AST: {rust_nested}")
+            self.assertEqual(py_nested, rust_nested,
+                             f"AST structure mismatch on:\n{source}\n"
+                             f"Python AST: {py_nested}\nRust AST: {rust_nested}")
 
     def test_simple_program(self):
         self.assert_equivalent("eigen 1.0\nlet x: int = 5\n")
@@ -141,19 +152,24 @@ class TestFrontendEquivalence(unittest.TestCase):
         self.assert_equivalent("eigen 1.0\nlet x: float = 3.14\nlet y: int = 2 + 3 * 4\n")
 
     def test_functions_and_calls(self):
-        self.assert_equivalent("eigen 1.0\nfunc add(a: int, b: int) -> int {\n    return a + b\n}\nlet z: int = add(1, 2)\n")
+        self.assert_equivalent("eigen 1.0\nfunc add(a: int, b: int) -> int {\n"
+                               "    return a + b\n}\nlet z: int = add(1, 2)\n")
 
     def test_loops_and_conditionals(self):
-        self.assert_equivalent("eigen 1.0\nif 1 < 2 {\n    print(1)\n} else {\n    print(0)\n}\nfor i in 0..10 {\n    print(i)\n}\n")
+        self.assert_equivalent("eigen 1.0\nif 1 < 2 {\n    print(1)\n} else {\n"
+                               "    print(0)\n}\nfor i in 0..10 {\n    print(i)\n}\n")
 
     def test_quantum_constructs(self):
         self.assert_equivalent("eigen 1.0\nqubit q0\nqubit q1\nH q0\nCNOT q0 q1\nmeasure q0 -> c0\n")
 
     def test_structs(self):
-        self.assert_equivalent("eigen 1.0\nstruct Point {\n    x: int,\n    y: int\n}\nlet p: Point = Point { x: 10, y: 20 }\nlet px: int = p.x\n")
+        self.assert_equivalent("eigen 1.0\nstruct Point {\n    x: int,\n    y: int\n}\n"
+                               "let p: Point = Point { x: 10, y: 20 }\nlet px: int = p.x\n")
 
     def test_arrays_and_maps(self):
-        self.assert_equivalent("eigen 1.0\nlet a: array<int> = [1, 2, 3]\nlet a0: int = a[0]\nlet m: map<string, int> = {\"hello\": 1, \"world\": 2}\nlet mv: int = m[\"hello\"]\n")
+        self.assert_equivalent("eigen 1.0\nlet a: array<int> = [1, 2, 3]\nlet a0: int = a[0]\n"
+                               "let m: map<string, int> = {\"hello\": 1, \"world\": 2}\n"
+                               "let mv: int = m[\"hello\"]\n")
 
 if __name__ == "__main__":
     unittest.main()

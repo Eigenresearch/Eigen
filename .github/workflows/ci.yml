@@ -43,8 +43,27 @@ jobs:
 
       - name: Run mypy on critical modules
         run: |
-          mypy || (echo "::warning::mypy reported type issues (non-blocking for 2.7; tighten before 2.8)" && true)
-        continue-on-error: true
+          python -m mypy
+        continue-on-error: false
+
+      - name: Dependency Audit (pip-audit)
+        run: |
+          pip-audit
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cyclonedx-py pip --output-format json --outfile sbom.json
+          cyclonedx-py pip --output-format xml --outfile sbom.xml
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.*
+
+      - name: Check version consistency
+        run: |
+          python scripts/check_version.py
 
   test:
     name: Tests & Coverage
@@ -80,9 +99,8 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu || true
       - name: Run test suite with coverage
         run: |
-          pytest --cov=src --cov-report=term-missing --cov-report=xml --tb=short -q
-          # Enforce the coverage gate from pyproject.toml [tool.coverage.report].
-          pytest --cov=src --cov-report=term --cov-fail-under=75 -q tests/test_simulator.py 2>/dev/null || true
+          # Run all tests and enforce coverage gate from pyproject.toml
+          pytest --cov=src --cov-report=term-missing --cov-report=xml --cov-fail-under=75 --tb=short -q
 
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.10'
@@ -158,16 +176,17 @@ jobs:
 
           # Regression gate: the §1.1 anomaly (loops/recursion >200x slower than
           # quantum sim) must remain fixed. Bell.eig (quantum sim) under 5 ms;
-          # arrays.eig (10-element sum) under 15 ms; fibonacci.eig (fib 20) under
-          # 100 ms (the historical anomaly was 234 ms; the JIT's fast-array-loop
-          # path fully fixes the loops anomaly, but pure `fib(20)` recursion
-          # still routes through VM CALL dispatch — see auditfix.md §1.1 which
-          # explicitly notes "recursion isn't covered by Fast-Loop JIT"). These
-          # thresholds are deliberately generous to avoid CI noise.
+          # arrays.eig (10-element sum) under 15 ms; factorial.eig under 5 ms.
+          # fibonacci.eig (fib 20): the fragile Python-sourcegen fast-loop JIT
+          # that previously met the 100 ms gate was removed (audit §2 — silent
+          # mis-execution of continue/break). The pure interpreter currently
+          # runs fib(20) in ~250-400 ms; a Rust loop JIT is future work, so
+          # the gate is loosened to 600 ms to avoid CI noise while still
+          # catching catastrophic (10x+) regressions.
           gates = {
               "bell.eig": (5.0, "quantum sim baseline"),
               "arrays.eig": (15.0, "10-element array sum, §1.1 anomaly fix"),
-              "fibonacci.eig": (100.0, "fib(20) recursive, §1.1 anomaly fix"),
+              "fibonacci.eig": (600.0, "fib(20) recursive, post-JIT-removal ceiling"),
               "factorial.eig": (5.0, "factorial(30) baseline"),
           }
           failures = []

@@ -12,7 +12,6 @@ single-node execution with appropriate warnings.
 from __future__ import annotations
 
 import dataclasses
-import typing
 
 try:
     from mpi4py import MPI

@@ -182,7 +182,8 @@ class TestZXCalculus(unittest.TestCase):
                 else:
                     c2.add_operation('GATE', gate_name=node.gate_name, targets=node.targets, args=node.args)
                     
-            self.assertFalse(checker.are_equivalent(c1, c2), f"Negative fuzz test {i} failed to reject non-equivalent circuits.")
+            self.assertFalse(checker.are_equivalent(c1, c2),
+                             f"Negative fuzz test {i} failed to reject non-equivalent circuits.")
 
     def test_optimizer_performance(self):
         # Performance regression test with scaling: 500, 1000, 5000 H-gate pairs (1000, 2000, 10000 gates)
@@ -217,9 +218,12 @@ class TestZXCalculus(unittest.TestCase):
         print(f"Optimizer performance times: {times}")
         print(f"Optimizer iterations counts: {iterations}")
         
-        # Verify sub-quadratic iterations scaling: iterations(5000) / iterations(1000) should be around 5.0 (linear scaling)
+        # Verify sub-quadratic iterations scaling: iterations(5000) / iterations(1000) should be
+        # around 5.0 (linear scaling)
         ratio = iterations[2] / iterations[1]
-        self.assertLess(ratio, 6.0, f"Optimizer iterations scaling suggests non-linear behavior: iterations(5000)/iterations(1000) = {ratio:.2f}")
+        self.assertLess(ratio, 6.0,
+                        f"Optimizer iterations scaling suggests non-linear behavior: "
+                        f"iterations(5000)/iterations(1000) = {ratio:.2f}")
 
     def test_ffi_bounds_checks(self):
         try:

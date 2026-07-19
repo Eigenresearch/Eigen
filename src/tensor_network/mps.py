@@ -3,7 +3,8 @@ import math
 import random
 import cmath
 import logging
-import warnings
+
+from src.numerical_stability import TruncationAccumulator
 
 logger = logging.getLogger('eigen.mps')
 if not logger.handlers:
@@ -58,6 +59,8 @@ class MPSSimulator:
         self._warned_auto_increase = False
         self.rng = random.Random(seed)
         self.created_qubits = [] # Qubits in original creation order
+        self._truncation_accumulator = TruncationAccumulator()
+        self._truncation_step = 0
 
     def allocate_qubit(self, name: str):
         if name in self.qubit_map:
@@ -83,56 +86,78 @@ class MPSSimulator:
 
         Returns truncated (U, S, Vh, chi) and updates tracking metrics.
         Handles auto_bond_dim increase and accuracy warnings.
+        Uses entropy-adaptive chi selection: reduces chi when entanglement
+        entropy is low, increases chi (up to chi_max=128) when high.
         """
         available = len(S)
-
-        if self.auto_bond_dim and available > self.max_bond_dim:
-            S_sum2 = np.sum(S**2)
-            if S_sum2 > 1e-15:
-                S_norm = S / np.sqrt(S_sum2)
-                for test_chi in range(self.max_bond_dim, available + 1):
-                    dw = np.sum(S_norm[test_chi:]**2) if test_chi < len(S_norm) else 0.0
-                    if dw <= self.max_truncation_error:
-                        chi = test_chi
-                        break
-                else:
-                    chi = available
-                if chi > self.max_bond_dim:
-                    self.max_bond_dim = chi
-                    if not self._warned_auto_increase:
-                        logger.info(
-                            "Auto-increased bond dimension to %d "
-                            "(truncation error threshold: %g)",
-                            chi, self.max_truncation_error
-                        )
-                        self._warned_auto_increase = True
-            else:
-                chi = min(available, self.max_bond_dim)
-        else:
-            chi = min(available, self.max_bond_dim)
 
         S_sum2 = np.sum(S**2)
         if S_sum2 > 1e-15:
             S_norm = S / np.sqrt(S_sum2)
-            discarded_weight = np.sum(S_norm[chi:]**2) if chi < len(S_norm) else 0.0
-            self.cumulative_truncation_error += discarded_weight
-            self.last_discarded_weight = discarded_weight
+        else:
+            S_norm = S.copy()
 
-            schmidt = S_norm[:chi]
-            schmidt_sum2 = np.sum(schmidt**2)
-            if schmidt_sum2 > 1e-15:
-                schmidt = schmidt / np.sqrt(schmidt_sum2)
-                self.last_entropy = -float(np.sum(schmidt**2 * np.log2(schmidt**2 + 1e-15)))
+        probs = S_norm**2
+        full_entropy = -float(np.sum(probs * np.log2(probs + 1e-15)))
 
-            if discarded_weight > self.max_truncation_error and not self._warned_degraded:
-                logger.warning(
-                    "Simulation accuracy may be degraded: "
-                    "discarded weight %g exceeds threshold %g "
-                    "(cumulative error: %g, bond dim: %d/%d available)",
-                    discarded_weight, self.max_truncation_error,
-                    self.cumulative_truncation_error, chi, available
-                )
-                self._warned_degraded = True
+        if self.auto_bond_dim and available > self.max_bond_dim:
+            for test_chi in range(self.max_bond_dim, available + 1):
+                dw = np.sum(S_norm[test_chi:]**2) if test_chi < len(S_norm) else 0.0
+                if dw <= self.max_truncation_error:
+                    chi = test_chi
+                    break
+            else:
+                chi = available
+            if chi > self.max_bond_dim:
+                self.max_bond_dim = chi
+                if not self._warned_auto_increase:
+                    logger.info(
+                        "Auto-increased bond dimension to %d "
+                        "(truncation error threshold: %g)",
+                        chi, self.max_truncation_error
+                    )
+                    self._warned_auto_increase = True
+        else:
+            chi = min(available, self.max_bond_dim)
+
+        if full_entropy < 2.0 and chi > 1:
+            for test_chi in range(1, chi + 1):
+                dw = np.sum(S_norm[test_chi:]**2) if test_chi < len(S_norm) else 0.0
+                if dw <= self.max_truncation_error:
+                    chi = test_chi
+                    break
+        elif full_entropy > 4.0 and chi < available:
+            chi = min(chi * 2, available, 128)
+
+        chi = min(chi, 128)
+
+        discarded_weight = np.sum(S_norm[chi:]**2) if chi < len(S_norm) else 0.0
+        self.cumulative_truncation_error += discarded_weight
+        self.last_discarded_weight = discarded_weight
+
+        schmidt = S_norm[:chi]
+        schmidt_sum2 = np.sum(schmidt**2)
+        if schmidt_sum2 > 1e-15:
+            schmidt = schmidt / np.sqrt(schmidt_sum2)
+            self.last_entropy = -float(np.sum(schmidt**2 * np.log2(schmidt**2 + 1e-15)))
+
+        self._truncation_accumulator.record(
+            step_index=self._truncation_step,
+            bond_dimension=int(chi),
+            truncation_error=float(discarded_weight),
+            discarded_weight=float(discarded_weight),
+        )
+        self._truncation_step += 1
+        if (discarded_weight > self.max_truncation_error
+                and not self._warned_degraded):
+            logger.warning(
+                "Simulation accuracy may be degraded: "
+                "discarded weight %g exceeds threshold %g "
+                "(cumulative error: %g, bond dim: %d/%d available)",
+                discarded_weight, self.max_truncation_error,
+                self.cumulative_truncation_error, chi, available
+            )
+            self._warned_degraded = True
 
         U = U[:, :chi]
         S = S[:chi]
@@ -243,28 +268,37 @@ class MPSSimulator:
                 c_idx += 1
             i = c_idx
             j = t_idx
+            control_at_i = True
         else:
             while c_idx > t_idx + 1:
                 self._swap_adjacent(c_idx - 1)
                 c_idx -= 1
             i = t_idx
             j = c_idx
+            control_at_i = False
             
-        # Now control is at i, target is at j = i+1
+        # Now control and target are at adjacent positions i and j=i+1
         # 2. Apply gate at i and j
-        A = self.tensors[i]      # shape (L, 2_c, M)
-        B = self.tensors[j]      # shape (M, 2_t, R)
+        A = self.tensors[i]      # shape (L, 2, M)
+        B = self.tensors[j]      # shape (M, 2, R)
         
-        # shape: (L, 2_c, 2_t, R)
+        # shape: (L, 2, 2, R)
         theta = np.tensordot(A, B, axes=(2, 0))
         
-        # Reshape gate matrix to (2_c_new, 2_t_new, 2_c_old, 2_t_old)
+        # Reshape gate matrix to (2, 2, 2, 2)
+        # Default ordering: U[c_new, t_new, c_old, t_old]
         U = np.array(gate_matrix_4x4, dtype=complex).reshape(2, 2, 2, 2)
         
-        # Contract: U[c_new, t_new, c_old, t_old] with theta[L, c_old, t_old, R]
+        if not control_at_i:
+            # Target is at position i (left), control at j (right).
+            # theta is (L, t_old, c_old, R). Transpose U to match
+            # the (target, control) physical index ordering.
+            U = U.transpose(1, 0, 3, 2)
+        
+        # Contract: U[new_d1, new_d2, old_d1, old_d2] with theta[L, old_d1, old_d2, R]
         # shape: (2, 2, L, R)
         res = np.tensordot(U, theta, axes=((2, 3), (1, 2)))
-        # Transpose to (L, 2_c_new, 2_t_new, R)
+        # Transpose to (L, new_d1, new_d2, R)
         res = np.transpose(res, (2, 0, 1, 3))
         
         # SVD reshape
@@ -420,7 +454,7 @@ class MPSSimulator:
             T_new = np.tensordot(T, A, axes=(0, 0))
             # Contract T_new(L*, d, R) with A*(L*, d, R*) -> T_final(R, R*)
             T = np.tensordot(T_new, np.conj(A), axes=((0, 1), (0, 1)))
-        return float(np.abs(T[0, 0]))
+        return float(T[0, 0].real)
 
     def get_state_vector(self) -> list[complex]:
         # To get the full state vector, we contract all tensors in chain order
@@ -486,6 +520,9 @@ class MPSSimulator:
 
     def get_cumulative_truncation_error(self) -> float:
         return self.cumulative_truncation_error
+
+    def get_truncation_accumulator(self) -> 'TruncationAccumulator':
+        return self._truncation_accumulator
 
     def get_last_discarded_weight(self) -> float:
         return self.last_discarded_weight

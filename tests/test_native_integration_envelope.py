@@ -1,5 +1,4 @@
 """§11.2 — Native integration envelope tests."""
-import time
 import unittest
 
 from src.native_integration_envelope import (

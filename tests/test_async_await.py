@@ -157,7 +157,7 @@ class TestTaskResultAccess(unittest.TestCase):
         # because the AsyncError wrapper was discarded in `run_to_completion`'s
         # try/except, `.result` returns the underlying error via `self._error`.
         with self.assertRaises(ValueError):
-            task.result
+            task.result()
 
     def test_result_returns_none_if_no_yields_or_returns(self):
         def _empty():
@@ -223,7 +223,7 @@ class TestCooperativeScenario(unittest.TestCase):
 
         # Note: Python doesn't support `async def` with `await_()`,
         # but since we use generators, we can build it with `yield`:
-        def submit_circuit():
+        def submit_circuit_gen():
             c = "circ"
             submit = AsyncTask.start(self._submit_factory, c)
             task_id = yield from submit.generator
@@ -231,7 +231,7 @@ class TestCooperativeScenario(unittest.TestCase):
             result = yield from poll.generator
             return result
 
-        task = AsyncTask(submit_circuit())
+        task = AsyncTask(submit_circuit_gen())
         result = task.run_to_completion()
         self.assertEqual(result, "result-for-task-circ")
         # Verify both calls happened

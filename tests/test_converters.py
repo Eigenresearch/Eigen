@@ -1,5 +1,4 @@
-﻿import sys
-import unittest
+﻿import unittest
 from src.utils.converters import to_msb_first_dict, reorder_state_vector
 
 class TestConverters(unittest.TestCase):

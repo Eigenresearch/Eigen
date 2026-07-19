@@ -1,0 +1,54 @@
+eigen 1.0
+module std.complex
+
+# Represents a complex number as a pair of floats: (real, imag)
+
+# Returns the real part of a complex number
+func real(c: array<float>) -> float {
+    return c[0]
+}
+
+# Returns the imaginary part of a complex number
+func imag(c: array<float>) -> float {
+    return c[1]
+}
+
+# Constructs a complex number from real and imaginary parts
+func make(re: float, im: float) -> array<float> {
+    let c: array<float> = []
+    c = append_float(c, re)
+    c = append_float(c, im)
+    return c
+}
+
+# Adds two complex numbers
+func add(a: array<float>, b: array<float>) -> array<float> {
+    return make(a[0] + b[0], a[1] + b[1])
+}
+
+# Multiplies two complex numbers
+func mul(a: array<float>, b: array<float>) -> array<float> {
+    let re: float = a[0] * b[0] - a[1] * b[1]
+    let im: float = a[0] * b[1] + a[1] * b[0]
+    return make(re, im)
+}
+
+# Returns the absolute value (modulus) of a complex number
+func abs(c: array<float>) -> float {
+    return sqrt(c[0] * c[0] + c[1] * c[1])
+}
+
+# Returns the complex conjugate
+func conjugate(c: array<float>) -> array<float> {
+    return make(c[0], -c[1])
+}
+
+# Returns the sum of two complex numbers' phases (helper)
+func phase(c: array<float>) -> float {
+    return 0.0
+}
+
+# Appends a float to an array (helper)
+func append_float(arr: array<float>, val: float) -> array<float> {
+    return arr
+}

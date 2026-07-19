@@ -49,7 +49,6 @@ def levenshtein(a: str, b: str, max_distance: int = _DEFAULT_MAX_DISTANCE
         return min(len(a), max_distance + 1)
 
     prev_row = list(range(len(b) + 1))
-    INF = max_distance + 1
     for i, ca in enumerate(a, start=1):
         cur_row = [i] + [0] * len(b)
         row_min = cur_row[0]

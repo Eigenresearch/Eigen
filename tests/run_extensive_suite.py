@@ -1,6 +1,5 @@
 import time
 import random
-import math
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.backend.ebc_compiler import EBCCompiler
@@ -443,7 +442,7 @@ def py_struct():
     i = 0
     while i < 1000:
         p = DummyPoint(i, i * 2)
-        z = p.x + p.y
+        p.x + p.y
         i += 1
 
 def py_map():
@@ -451,7 +450,7 @@ def py_map():
     i = 0
     while i < 1000:
         m["key"] = i
-        val = m["key"]
+        m["key"]
         i += 1
 
 def py_bitwise():
@@ -467,7 +466,7 @@ def py_dummy(x):
 def py_call_overhead():
     i = 0
     while i < 3000:
-        r = py_dummy(i)
+        py_dummy(i)
         i += 1
 
 def py_circuit_loop():
@@ -588,8 +587,10 @@ def benchmark():
             # (since measurement outcomes could vary randomly, we compare output dimensions and normalize)
             # For exact deterministic matches:
             if len(state_eig) == len(state_py):
-                fidelity = abs(sum(c1.conjugate() * c2 for c1, c2 in zip(state_eig, state_py)))
-                # If random measurements were executed, average fidelity may differ but states are isomorphic in dimensions
+                fidelity = abs(sum(c1.conjugate() * c2
+                                   for c1, c2 in zip(state_eig, state_py, strict=False)))
+                # If random measurements were executed, average fidelity may differ but states are
+                # isomorphic in dimensions
                 if name == "05. Quantum Teleportation" or name == "13. Bernstein-Vazirani":
                     accuracy_status = "PASSED (Deterministic Output Correct)"
                 else:
@@ -605,8 +606,9 @@ def benchmark():
         
     # Write Markdown file
     with open("extensive_results.md", "w", encoding="utf-8") as f:
-        f.write("# Extensive Benchmark: Native Python vs Eigen VM (Misery 2.6)\n\n")
-        f.write("Comparison of execution time between native Python execution and Eigen VM (with JIT enabled) across 25 tests (including 11 accuracy/precision checks).\n\n")
+        f.write("# Extensive Benchmark: Native Python vs Eigen VM (Meridian 2.7)\n\n")
+        f.write("Comparison of execution time between native Python execution and Eigen VM "
+                "(with JIT enabled) across 25 tests (including 11 accuracy/precision checks).\n\n")
         f.write("## Performance & Correctness Summary\n\n")
         f.write("| Benchmark Test Case | Native Python | Eigen VM | Accuracy / Fidelity |\n")
         f.write("| --- | --- | --- | --- |\n")
@@ -620,7 +622,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Misery» Performance Dashboard</title>
+    <title>Eigen 2.7 «Meridian» Performance Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -778,8 +780,9 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Misery» extensive Performance Dashboard</h1>
-        <div class="subtitle">Detailed benchmark comparing Native Python vs. Eigen JIT VM execution across 25 tests.</div>
+        <h1>Eigen 2.7 «Meridian» extensive Performance Dashboard</h1>
+        <div class="subtitle">"""
+        """Detailed benchmark comparing Native Python vs. Eigen JIT VM execution across 25 tests.</div>
         
         <div class="grid">
             <div class="card">

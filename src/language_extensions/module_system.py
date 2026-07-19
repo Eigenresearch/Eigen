@@ -165,7 +165,7 @@ class ModuleRegistry:
             return self._modules[path]
         except KeyError:
             raise ModuleLookupError(
-                f"No module registered under path {path!r}")
+                f"No module registered under path {path!r}") from None
 
     def __contains__(self, path: str) -> bool:
         return path in self._modules

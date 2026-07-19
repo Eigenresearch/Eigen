@@ -2,50 +2,56 @@ import os
 import sys
 import json
 import hashlib
-import shutil
+import tarfile
+
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        tomllib = None
 
 def parse_toml(content: str) -> dict:
-    result = {}
-    current_section = None
-    
-    for line in content.splitlines():
-        line = line.strip()
-        if not line or line.startswith('#'):
-            continue
-            
-        if line.startswith('[') and line.endswith(']'):
-            current_section = line[1:-1].strip()
-            result[current_section] = {}
-        elif '=' in line:
-            key, val = line.split('=', 1)
-            key = key.strip()
-            val = val.strip()
-            
-            # Strip quotes
-            if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-                val = val[1:-1]
-                
-            if current_section:
-                result[current_section][key] = val
-            else:
-                result[key] = val
-                
-    return result
+    if tomllib is not None:
+        return tomllib.loads(content)
+    raise ImportError(
+        "TOML parser (tomllib or tomli) is required but not found. "
+        "Install `tomli` or upgrade to Python 3.11+ for TOML support."
+    )
+
+def _format_toml_value(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_format_toml_value(x) for x in v) + "]"
+    return f'"{v}"'
+
+
+def _write_section(section_name: str, section_data: dict, lines: list) -> None:
+    lines.append(f"[{section_name}]")
+    for k, v in section_data.items():
+        if isinstance(v, dict):
+            _write_section(f"{section_name}.{k}", v, lines)
+        else:
+            lines.append(f"{k} = {_format_toml_value(v)}")
+    lines.append("")
+
 
 def write_toml(data: dict) -> str:
     lines = []
-    if 'package' in data:
-        lines.append("[package]")
-        for k, v in data['package'].items():
-            lines.append(f'{k} = "{v}"')
+    for k, v in data.items():
+        if not isinstance(v, dict):
+            lines.append(f"{k} = {_format_toml_value(v)}")
+    if lines:
         lines.append("")
-        
-    if 'dependencies' in data:
-        lines.append("[dependencies]")
-        for k, v in data['dependencies'].items():
-            lines.append(f'{k} = "{v}"')
-        lines.append("")
-        
+    for k, v in data.items():
+        if isinstance(v, dict):
+            _write_section(k, v, lines)
     return "\n".join(lines)
 
 
@@ -220,7 +226,10 @@ assert result == 0
                     else:
                         print(f"  WARNING: Locked hash for '{dep}' changed! Re-resolving.")
                 else:
-                    print(f"  WARNING: Locked version '{locked_ver}' is incompatible with constraint '{ver}'. Re-resolving.")
+                    print(
+                        f"  WARNING: Locked version '{locked_ver}' is incompatible with constraint '{ver}'. "
+                        "Re-resolving."
+                    )
 
             if not use_locked:
                 # Dynamic resolution: scan registry_dir for dep-*.tar
@@ -245,7 +254,10 @@ assert result == 0
                         base_ver = base_ver[1:]
                     resolved_ver = base_ver
                     sha256_hash = hashlib.sha256(dep.encode('utf-8') + resolved_ver.encode('utf-8')).hexdigest()
-                    print(f"  No matching versions found in registry for '{dep}' (constraint '{ver}'). Using fallback version {resolved_ver}")
+                    print(
+                        f"  No matching versions found in registry for '{dep}' (constraint '{ver}'). "
+                        f"Using fallback version {resolved_ver}"
+                    )
 
             new_lock[dep] = {
                 "version": resolved_ver,
@@ -281,8 +293,20 @@ assert result == 0
 
         # Write to local registry dir to simulate registry upload
         tar_path = os.path.join(self.registry_dir, f"{pkg_name}-{pkg_ver}.tar")
-        with open(tar_path, 'w') as f:
-            f.write(f"MOCK PACKAGE CONTENT FOR {pkg_name} VERSION {pkg_ver}")
+        os.makedirs(self.registry_dir, exist_ok=True)
+
+        # Build a real tar archive from the workspace files so downstream
+        # tooling (verify/extract/install) can treat the artifact as a
+        # genuine tarball rather than a plain-text stub.
+        with tarfile.open(tar_path, "w") as tar:
+            if os.path.isfile(self.toml_path):
+                tar.add(self.toml_path, arcname="eigen.toml")
+            src_dir = os.path.join(self.workspace_root, "src")
+            if os.path.isdir(src_dir):
+                tar.add(src_dir, arcname="src")
+            readme_path = os.path.join(self.workspace_root, "README.md")
+            if os.path.isfile(readme_path):
+                tar.add(readme_path, arcname="README.md")
 
         # P3 §11.1: ALSO register metadata in the structured
         # PackageRegistry (see `src/registry.py`) so that semver
@@ -318,8 +342,9 @@ assert result == 0
         matches = []
         for f in files:
             if f.endswith('.tar') and query in f:
-                name_parts = f[:-4].split('-')
-                matches.append((name_parts[0], name_parts[1]))
+                name_parts = f[:-4].rsplit('-', 1)
+                if len(name_parts) == 2:
+                    matches.append((name_parts[0], name_parts[1]))
                 
         if matches:
             for name, ver in matches:

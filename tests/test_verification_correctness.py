@@ -7,7 +7,6 @@ Tests are organised by the four roadmap checkboxes:
   3. Exact equivalence только где математически обосновано.
   4. Предупреждения в CLI output о границах верификации.
 """
-import math
 import unittest
 
 from src.ir.ir_graph import EQIRGraph

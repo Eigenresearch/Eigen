@@ -1,0 +1,43 @@
+eigen 1.0
+
+# String interpolation example.
+#
+# Eigen supports `${expr}` interpolation inside double-quoted string
+# literals. The lexer emits a single STRING_LIT token containing the
+# literal text plus NUL-delimited expression markers; the parser
+# (parser.py:parse_primary, STRING_LIT branch) reconstructs the
+# expression AST nodes and produces a StringInterpolationNode.
+#
+# At runtime the VM evaluates each embedded expression and concatenates
+# the results into the final string.
+
+let name: string = "Eigen"
+let version: float = 2.8
+let qubits: int = 127
+
+# 1. Simple interpolation.
+print "Welcome to ${name} ${version}"
+
+# 2. Interpolation with arithmetic expressions.
+let n: int = 5
+print "factorial(${n}) = ${n * (n - 1) * (n - 2) * (n - 3) * (n - 4)}"
+
+# 3. Interpolation in a function.
+func greet(who: string, count: int) -> string {
+    return "hello ${who}, you have ${count} qubits"
+}
+
+let msg: string = greet("alice", qubits)
+print msg
+
+# 4. Interpolation with multiple expressions in one string.
+let a: int = 3
+let b: int = 4
+print "${a}^2 + ${b}^2 = ${a * a + b * b}"
+
+# 5. Quantum result formatting.
+qubit q0
+H q0
+cbit c0
+measure q0 -> c0
+print "measured ${c0}"

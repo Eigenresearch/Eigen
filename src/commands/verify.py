@@ -24,7 +24,10 @@ def verify_equiv_command(args, workspace_root):
     all_qubits = qubits1 | qubits2
     if len(all_qubits) > 16:
         print("\nResult: INDETERMINATE (Circuit too large or complex to verify) [WARNING]")
-        print(f"Details: Circuit has {len(all_qubits)} > 16 qubits. ZX equivalence checker cannot verify it without hanging.")
+        print(
+            f"Details: Circuit has {len(all_qubits)} > 16 qubits. "
+            "ZX equivalence checker cannot verify it without hanging."
+        )
         print("=" * 50)
         sys.exit(3)
         
@@ -89,7 +92,6 @@ def verify_command(args, workspace_root):
     from src.frontend.parser import Parser
     from src.semantic.import_resolver import ImportResolver
     from src.semantic.type_checker import TypeChecker, TypeErrorException
-    from src.ir.ir_converter import EQIRConverter
     
     filepath = args.file
     if not os.path.isfile(filepath):
@@ -145,7 +147,7 @@ def verify_command(args, workspace_root):
     # Phase 4: Qubit Safety Analysis
     print("[4/5] Qubit safety analysis...")
     from src.frontend.ast import (
-        VarDeclNode, GateNode, MeasureNode, QFuncCallNode, QFuncDeclNode,
+        VarDeclNode, GateNode, MeasureNode, QFuncDeclNode,
         IfNode, WhileNode, ForNode, TryCatchNode
     )
     allocated_qubits = set()

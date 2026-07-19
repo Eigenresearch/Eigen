@@ -1,15 +1,15 @@
 import unittest
 from src.backend.bytecode import Opcode, Instruction
 from src.backend.ebc_compiler import (
-    EBCCompiler, Label, WhileNode, TryCatchNode, ThrowNode,
+    EBCCompiler, WhileNode, TryCatchNode, ThrowNode,
     StructAllocNode, StructGetNode, StructSetNode,
     MapAllocNode, MapGetNode, MapSetNode,
     ArrayAllocNode, ArrayGetNode, ArraySetNode
 )
 from src.backend.vm import EigenVM, VMRef, UndefinedVariableError
 from src.frontend.ast import (
-    ProgramNode, LetNode, VarDeclNode, LiteralNode, VarRefNode,
-    BinaryOpNode, GateNode, MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, QFuncCallNode
+    ProgramNode, LetNode, LiteralNode, VarRefNode,
+    BinaryOpNode, IfNode, ReturnNode, QFuncCallNode
 )
 from src.ir.ir_graph import EQIRGraph
 
@@ -22,7 +22,8 @@ class TestEigenVMAndCompiler(unittest.TestCase):
     def test_arithmetic_and_comparisons(self):
         # Program: assert (2 + 3 * 4) == 14
         # and: (5 > 3) and (2 <= 2)
-        # AST: LetNode(res, "int", BinaryOpNode("+", LiteralNode(2, "int"), BinaryOpNode("*", LiteralNode(3, "int"), LiteralNode(4, "int"))))
+        # AST: LetNode(res, "int", BinaryOpNode("+", LiteralNode(2, "int"),
+        #     BinaryOpNode("*", LiteralNode(3, "int"), LiteralNode(4, "int"))))
         expr = BinaryOpNode("+", LiteralNode(2, "int"), BinaryOpNode("*", LiteralNode(3, "int"), LiteralNode(4, "int")))
         let_node = LetNode("res", "int", expr)
         
@@ -258,7 +259,6 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         # compiled blocks (after enough iterations to cross the hot threshold)
         # and that LRU evicts oldest entries when the cache is full.
 
-        from src.jit.jit_compiler import JITCompiler
 
         # 2. Create a basic loop program to trigger JIT compilation
         # let i: int = 0
@@ -279,6 +279,8 @@ class TestEigenVMAndCompiler(unittest.TestCase):
         vm_module.native = None
         try:
             vm1 = EigenVM()
+            vm1._try_fast_loop = lambda instructions: False
+            vm1._try_fast_array_loop = lambda instructions: False
             vm1.execute(instructions)
             self.assertEqual(vm1.lookup_var("i"), 15)
 
@@ -292,6 +294,8 @@ class TestEigenVMAndCompiler(unittest.TestCase):
             # 3. Create a second VM instance and run again: its per-instance
             # cache starts empty and is not contaminated by the first VM.
             vm2 = EigenVM()
+            vm2._try_fast_loop = lambda instructions: False
+            vm2._try_fast_array_loop = lambda instructions: False
             vm2.execute(instructions)
             self.assertEqual(vm2.lookup_var("i"), 15)
         finally:
@@ -317,7 +321,6 @@ class TestEigenVMAndCompiler(unittest.TestCase):
 
     def test_jit_v2_constant_folding(self):
         from src.jit.jit_compiler import JITCompiler
-        from src.backend.bytecode import Instruction, Opcode
         jit = JITCompiler(self.vm)
         
         # 2 + 3 * 4 -> should fold 3 * 4 to 12, then 2 + 12 to 14
@@ -336,7 +339,6 @@ class TestEigenVMAndCompiler(unittest.TestCase):
 
     def test_jit_v2_inlining(self):
         from src.jit.jit_compiler import JITCompiler
-        from src.backend.bytecode import Instruction, Opcode
         
         # Define a simple function: func add_one(x) { return x + 1 }
         # EBC:
@@ -378,7 +380,6 @@ class TestEigenVMAndCompiler(unittest.TestCase):
 
     def test_jit_v2_type_guards_and_deopt(self):
         from src.jit.jit_compiler import JITCompiler
-        from src.backend.bytecode import Instruction, Opcode
         
         # Loop program that modifies type of 'val':
         # val = 5 (int)

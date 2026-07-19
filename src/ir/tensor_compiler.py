@@ -6,7 +6,6 @@ via tensor contraction.
 """
 import math
 import cmath
-import random
 
 try:
     import numpy as np
@@ -245,7 +244,7 @@ class TensorCircuitCompiler:
         # If no contraction edges, do outer products
         if not order:
             result = None
-            for nid, (data, indices) in tensor_data.items():
+            for _nid, (data, _indices) in tensor_data.items():
                 if result is None:
                     result = data
                 else:

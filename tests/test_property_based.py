@@ -13,7 +13,6 @@ from src.frontend.parser import Parser
 from src.frontend.ast import (
     LetNode,
     LiteralNode,
-    GateNode,
 )
 from src.sparse_simulator import SparseQuantumSimulator
 from src.tensor_network.mps import MPSSimulator

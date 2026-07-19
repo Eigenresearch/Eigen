@@ -1,5 +1,4 @@
-import os
-from src.backend.bytecode import Opcode, Instruction
+from src.backend.bytecode import Opcode
 from src.ir.ssa.cfg import BasicBlock
 
 class LLVMCompiler:
@@ -44,7 +43,10 @@ class LLVMCompiler:
                             stack_types.append('int')
                     else:
                         stack_types.append('int')
-                elif opcode in (Opcode.EQ, Opcode.NEQ, Opcode.LT, Opcode.GT, Opcode.LTE, Opcode.GTE, Opcode.AND, Opcode.OR, Opcode.NOT):
+                elif opcode in (
+                    Opcode.EQ, Opcode.NEQ, Opcode.LT, Opcode.GT,
+                    Opcode.LTE, Opcode.GTE, Opcode.AND, Opcode.OR, Opcode.NOT
+                ):
                     if opcode in (Opcode.AND, Opcode.OR):
                         if len(stack_types) >= 2:
                             stack_types.pop()

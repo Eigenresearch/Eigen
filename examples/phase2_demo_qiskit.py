@@ -1,5 +1,4 @@
 # Transpiled from Eigen EQIR v1.1 Graph to Qiskit Script
-import numpy as np
 from qiskit import QuantumCircuit, transpile
 from qiskit_aer import AerSimulator
 
@@ -23,9 +22,11 @@ qc = QuantumCircuit(2, 2)
 qc.h(0)
 qc.cx(0, 1)
 qc.measure(1, 1)
-print('[PRINT DIRECTIVE] cbit c1:', c1 if 'c1' in locals() else 'c1')
+# cbit c1: classical bit 1 — inspect via job result, not a Python var.
+print('[PRINT DIRECTIVE] cbit c1:', 'c1')
 qc.measure(0, 0)
-print('[PRINT DIRECTIVE] cbit c0:', c0 if 'c0' in locals() else 'c0')
+# cbit c0: classical bit 0 — inspect via job result, not a Python var.
+print('[PRINT DIRECTIVE] cbit c0:', 'c0')
 # Assert condition: (__unsupported_DotAccessNode__ == 31) == True
 # Eigen warning: unsupported print expression omitted (__unsupported_DotAccessNode__)
 # Assert condition: (__unsupported_CallNode__ == 120) == True

@@ -48,6 +48,7 @@ import json
 import os
 import re
 import time
+import types
 import typing
 
 from src.packager import parse_version, version_satisfies
@@ -66,13 +67,20 @@ class PackageMetadata:
     description: str = ""
     license: str = ""
     author: str = ""
-    dependencies: typing.Dict[str, str] = dataclasses.field(default_factory=dict)
+    dependencies: typing.Mapping[str, str] = dataclasses.field(default_factory=dict)
     tarball_relpath: str = ""
     sha256: str = ""
     published_at: int = 0
     checksum_algorithm: str = "sha256"
     signature: str = ""
     advisory_tags: typing.Tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if not isinstance(self.dependencies, types.MappingProxyType):
+            object.__setattr__(
+                self, "dependencies",
+                types.MappingProxyType(dict(self.dependencies)),
+            )
 
     def to_dict(self) -> dict:
         return {

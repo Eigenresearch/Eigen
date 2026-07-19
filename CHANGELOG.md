@@ -2,6 +2,60 @@
 
 All notable changes to the Eigen programming language project will be documented in this file.
 
+## [2.8.0] — Mars
+
+### Critical Fixes
+- Fixed stabilizer CNOT X-update (was updating control instead of target)
+- Fixed X/Z gates not updating destabilizers
+- Fixed allocate_qubit resetting all stabilizer state
+- Fixed CZ having same ZX-graph as CNOT
+- Replaced WeakValueDictionary in VM heap (caused non-deterministic crashes)
+- Fixed CooperativeTaskScheduler yielding the pending task list instead of busy-waiting (note: ASYNC_CALL/AWAIT/YIELD_TASK opcodes are declared and scaffolded but not yet wired into VM dispatch; SPAWN/JOIN cooperative parallelism works)
+- Fixed SEMICOLON token never emitted by lexer
+
+### Performance
+- VM Arithmetic Loop: 113x speedup (107ms → 0.95ms)
+- Constant folding in compiler
+- JIT fast-loop now recognizes peephole-optimized conditions
+- Batched max_instruction_count checks (every 4096 ops)
+- LRU cache eviction in all compiler caches
+- In-place state updates for dense simulator
+- MPS adaptive bond dimension based on entanglement entropy
+
+### New Features
+- Unicode/hex escape sequences (\uXXXX, \xNN)
+- Block comments (/* ... */)
+- Single-quoted strings ('...')
+- Finally block in try/catch
+- UnaryOpNode (replacing BinaryOpNode hack)
+- LSP hover and go-to-definition with real symbol lookup
+- CLI --version flag and 6 new subcommands (reproduce, verify, audit, lsp, doctor, profile); 28 subcommands total
+- ReadoutError noise channel
+- T2 ≤ 2*T1 validation
+
+### Security
+- Replaced pickle cache with JSON + HMAC fallback
+- Hardened JIT exec() sandbox
+- Frame pool clears stale data on recycling
+- Registry returns frozen dicts
+
+### Infrastructure
+- llvmlite is now optional (install with [aot] extra)
+- MPI support via [distributed] extra
+- Python 3.14 support
+- Parser bug fix: qfunc with gate statements
+
+## [2.7.0] — Meridian
+
+### Added
+- Incremental AST/EQIR/EBC and import caches, lazy module loading, and parallel compilation.
+- GPU acceleration surface, pulse-level control, distributed simulation, and expanded FFI targets.
+- DAP debugging, shell completion, playground, code migration, and research reproducibility tooling.
+- Major/minor bytecode compatibility checks and expanded Python 3.10–3.13 support.
+
+### Fixed
+- Recursive MLIR conversion guard, AOT timeout handling, and forward-compatible VM diagnostics.
+
 ## [2.5.0] - 2026-06-30
 
 Release 2.5.0 «Mitz» delivers a massive performance overhaul (1.8x faster than CPython), 8 new language features, 12 critical bug fixes, a stabilizer simulator for 1000+ qubit Clifford circuits, SABRE quantum routing, and comprehensive infrastructure improvements.

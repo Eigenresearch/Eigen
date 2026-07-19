@@ -60,14 +60,13 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-import math
 import typing
 
 
 # Try numpy if available (it should be in the venv by virtue of
 # the existing test suite using it). Fall back to `array` if not.
 try:
-    import numpy as np
+    import numpy as np  # noqa: F401  (availability check)
     _HAS_NUMPY = True
 except ImportError:
     _HAS_NUMPY = False
@@ -217,8 +216,6 @@ def apply_gate_in_place(state_vector, gate_matrix, targets,
                 raise ValueError(
                     f"Gate matrix row {r} has {len(row)} cols, expected "
                     f"{expected_dim} for {n_targets} target(s)")
-    dim = 1 << n_qubits
-    indices_per_pair = expected_dim
     # Pre-compute bit positions for each target
     target_bits = [int(t) for t in targets]
 
@@ -262,7 +259,7 @@ def apply_gate_in_place(state_vector, gate_matrix, targets,
                 acc += gate_matrix[r][c] * subspace[c]
             new_subspace[r] = acc
         # Write back in place
-        for i, val in zip(subspace_indices, new_subspace):
+        for i, val in zip(subspace_indices, new_subspace, strict=False):
             state_vector[i] = val
     return state_vector
 

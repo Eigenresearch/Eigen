@@ -261,7 +261,7 @@ def run_eigen_str_concat(N):
 
 def run_python_str_concat(N):
     s = ""
-    for i in range(N):
+    for _i in range(N):
         s = s + "x"
     return s
 

@@ -189,7 +189,6 @@ class CircuitSlicer:
         cuts: typing.List[Cut] = []
         for step in steps:
             name = step[0]
-            args = list(step[1:])
             qubits = _qubit_targets(step)
             if not qubits:
                 # No qubit operand (e.g. a barrier / reset marker):
@@ -245,8 +244,7 @@ class CircuitSlicer:
         the standard slice() with num_partitions=1.
         """
         from src.distributed.mpi_simulator import (
-            is_mpi_available, get_rank, get_world_size,
-            distribute_state_vector,
+            is_mpi_available, get_world_size,
         )
         if is_mpi_available() and get_world_size() > 1:
             # Assign qubits round-robin across MPI ranks

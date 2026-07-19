@@ -83,7 +83,7 @@ def load_native_library(workspace_root: str):
                         pass
 
     # Generic workspace search
-    for root, dirs, files in os.walk(os.path.join(workspace_root, "native", "rust")):
+    for root, _dirs, files in os.walk(os.path.join(workspace_root, "native", "rust")):
         # Skip search dirs we already checked
         if "target\\release" in root or "target/release" in root or "target\\debug" in root or "target/debug" in root:
             continue
@@ -175,7 +175,11 @@ def link_object_file(obj_path: str, lib_path: str, out_path: str, lto: bool = Fa
     # Try MSVC link (on Windows)
     if sys.platform == "win32":
         try:
-            cmd = ["link", obj_path, lib_path] + py_link_args + extra_msvc + [f"/OUT:{out_path}", "ws2_32.lib", "userenv.lib", "ntdll.lib", "kernel32.lib", "msvcrt.lib", "ucrt.lib", "vcruntime.lib"]
+            cmd = (
+                ["link", obj_path, lib_path] + py_link_args + extra_msvc
+                + [f"/OUT:{out_path}", "ws2_32.lib", "userenv.lib", "ntdll.lib",
+                   "kernel32.lib", "msvcrt.lib", "ucrt.lib", "vcruntime.lib"]
+            )
             subprocess.run(cmd, check=True, capture_output=True)
             return True
         except Exception:
@@ -189,7 +193,10 @@ def link_object_file(obj_path: str, lib_path: str, out_path: str, lto: bool = Fa
             dummy_path = f.name
         try:
             # We pass linker args through -C link-arg
-            cmd = ["rustc", "--crate-type", "bin"] + extra_rustc + ["-C", f"link-arg={obj_path}", "-C", f"link-arg={lib_path}"]
+            cmd = (
+                ["rustc", "--crate-type", "bin"] + extra_rustc
+                + ["-C", f"link-arg={obj_path}", "-C", f"link-arg={lib_path}"]
+            )
             for arg in py_link_args:
                 cmd.extend(["-C", f"link-arg={arg}"])
             if sys.platform == "win32":
@@ -224,7 +231,10 @@ class AOTCompiler:
     def __init__(self, safe_mode: bool = False):
         self.safe_mode = safe_mode
 
-    def _compile_to_llvm_module(self, source_path: str, workspace_root: str, optimize: bool = True, seed: int = 0, emit_qir: bool = False):
+    def _compile_to_llvm_module(
+        self, source_path: str, workspace_root: str,
+        optimize: bool = True, seed: int = 0, emit_qir: bool = False
+    ):
         with open(source_path, 'r', encoding='utf-8') as f:
             content = f.read()
 
@@ -244,8 +254,8 @@ class AOTCompiler:
 
         # Check for unsupported types (structs, maps, any) to fail fast
         allowed_types = {'int', 'float', 'bool', 'cbit', 'qubit', 'string', 'void', 'None'}
-        for scope, vars in var_types.items():
-            for v_name, v_type in vars.items():
+        for _scope, vars in var_types.items():
+            for _v_name, v_type in vars.items():
                 if v_type not in allowed_types:
                     if v_type in ('any', 'dynamic'):
                         raise TypeError("AOT does not support dynamic types; use --vm")

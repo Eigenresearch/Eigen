@@ -1,9 +1,9 @@
 import llvmlite.ir as ir
-from src.backend.bytecode import Opcode, Instruction
 from src.ir.ssa.cfg import BasicBlock
 
 class LLVMCodegen:
-    def __init__(self, var_types: dict, funcs: dict, func_params: dict, safe_mode: bool = False, emit_qir: bool = False):
+    def __init__(self, var_types: dict, funcs: dict, func_params: dict,
+                 safe_mode: bool = False, emit_qir: bool = False):
         self.var_types = var_types       # scope_name -> {var_name: type_str}
         self.funcs = funcs               # func_name -> (param_types, return_type)
         self.func_params = func_params   # func_name -> [param_name, ...]
@@ -22,58 +22,147 @@ class LLVMCodegen:
             result_type = ir.IntType(8).as_pointer()
             
             # QIR opaque allocation/release
-            self.qir_alloc_fn = ir.Function(self.module, ir.FunctionType(qubit_type, []), name="__quantum__rt__qubit_allocate")
-            self.qir_free_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__rt__qubit_release")
+            self.qir_alloc_fn = ir.Function(
+                self.module, ir.FunctionType(qubit_type, []),
+                name="__quantum__rt__qubit_allocate")
+            self.qir_free_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__rt__qubit_release")
             
             # QIR single qubit gates
-            self.qir_h_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__h__body")
-            self.qir_x_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__x__body")
-            self.qir_y_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__y__body")
-            self.qir_z_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__z__body")
-            self.qir_s_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__s__body")
-            self.qir_t_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type]), name="__quantum__qis__t__body")
+            self.qir_h_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__h__body")
+            self.qir_x_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__x__body")
+            self.qir_y_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__y__body")
+            self.qir_z_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__z__body")
+            self.qir_s_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__s__body")
+            self.qir_t_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type]),
+                name="__quantum__qis__t__body")
             
             # QIR parameterized single qubit rotation gates
-            self.qir_rx_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]), name="__quantum__qis__rx__body")
-            self.qir_ry_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]), name="__quantum__qis__ry__body")
-            self.qir_rz_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]), name="__quantum__qis__rz__body")
+            self.qir_rx_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]),
+                name="__quantum__qis__rx__body")
+            self.qir_ry_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]),
+                name="__quantum__qis__ry__body")
+            self.qir_rz_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [ir.DoubleType(), qubit_type]),
+                name="__quantum__qis__rz__body")
             
             # QIR two qubit gates
-            self.qir_cnot_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]), name="__quantum__qis__cnot__body")
-            self.qir_cz_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]), name="__quantum__qis__cz__body")
-            self.qir_swap_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]), name="__quantum__qis__swap__body")
+            self.qir_cnot_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]),
+                name="__quantum__qis__cnot__body")
+            self.qir_cz_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]),
+                name="__quantum__qis__cz__body")
+            self.qir_swap_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [qubit_type, qubit_type]),
+                name="__quantum__qis__swap__body")
             
             # QIR measurement and result helpers
-            self.qir_measure_fn = ir.Function(self.module, ir.FunctionType(result_type, [qubit_type]), name="__quantum__qis__mz__body")
-            self.qir_get_one_fn = ir.Function(self.module, ir.FunctionType(result_type, []), name="__quantum__rt__result_get_one")
-            self.qir_result_equal_fn = ir.Function(self.module, ir.FunctionType(ir.IntType(1), [result_type, result_type]), name="__quantum__rt__result_equal")
+            self.qir_measure_fn = ir.Function(
+                self.module, ir.FunctionType(result_type, [qubit_type]),
+                name="__quantum__qis__mz__body")
+            self.qir_get_one_fn = ir.Function(
+                self.module, ir.FunctionType(result_type, []),
+                name="__quantum__rt__result_get_one")
+            self.qir_result_equal_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.IntType(1), [result_type, result_type]),
+                name="__quantum__rt__result_equal")
         else:
-            self.qrt_init_fn = ir.Function(self.module, ir.FunctionType(sim_type, [ir.IntType(64)]), name="eigen_qrt_init")
-            self.qrt_alloc_fn = ir.Function(self.module, ir.FunctionType(ir.IntType(32), [sim_type]), name="eigen_qrt_alloc")
-            self.qrt_h_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_h")
-            self.qrt_x_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_x")
-            self.qrt_y_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_y")
-            self.qrt_z_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_z")
-            self.qrt_s_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_s")
-            self.qrt_t_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]), name="eigen_qrt_t")
-            self.qrt_rx_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]), name="eigen_qrt_rx")
-            self.qrt_ry_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]), name="eigen_qrt_ry")
-            self.qrt_rz_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]), name="eigen_qrt_rz")
-            self.qrt_cnot_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]), name="eigen_qrt_cnot")
-            self.qrt_cz_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]), name="eigen_qrt_cz")
-            self.qrt_swap_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]), name="eigen_qrt_swap")
-            self.qrt_measure_fn = ir.Function(self.module, ir.FunctionType(ir.IntType(32), [sim_type, ir.IntType(32)]), name="eigen_qrt_measure")
-            self.qrt_trace_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type]), name="eigen_qrt_trace")
-            self.qrt_free_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [sim_type]), name="eigen_qrt_free")
+            self.qrt_init_fn = ir.Function(
+                self.module, ir.FunctionType(sim_type, [ir.IntType(64)]),
+                name="eigen_qrt_init")
+            self.qrt_alloc_fn = ir.Function(
+                self.module, ir.FunctionType(ir.IntType(32), [sim_type]),
+                name="eigen_qrt_alloc")
+            self.qrt_h_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_h")
+            self.qrt_x_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_x")
+            self.qrt_y_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_y")
+            self.qrt_z_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_z")
+            self.qrt_s_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_s")
+            self.qrt_t_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_t")
+            self.qrt_rx_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]),
+                name="eigen_qrt_rx")
+            self.qrt_ry_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]),
+                name="eigen_qrt_ry")
+            self.qrt_rz_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.DoubleType()]),
+                name="eigen_qrt_rz")
+            self.qrt_cnot_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]),
+                name="eigen_qrt_cnot")
+            self.qrt_cz_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]),
+                name="eigen_qrt_cz")
+            self.qrt_swap_fn = ir.Function(
+                self.module,
+                ir.FunctionType(ir.VoidType(), [sim_type, ir.IntType(32), ir.IntType(32)]),
+                name="eigen_qrt_swap")
+            self.qrt_measure_fn = ir.Function(
+                self.module, ir.FunctionType(ir.IntType(32), [sim_type, ir.IntType(32)]),
+                name="eigen_qrt_measure")
+            self.qrt_trace_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type]),
+                name="eigen_qrt_trace")
+            self.qrt_free_fn = ir.Function(
+                self.module, ir.FunctionType(ir.VoidType(), [sim_type]),
+                name="eigen_qrt_free")
 
         # Print helpers
-        self.qrt_print_int_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.IntType(64)]), name="eigen_qrt_print_int")
-        self.qrt_print_bool_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.IntType(1)]), name="eigen_qrt_print_bool")
-        self.qrt_print_float_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.DoubleType()]), name="eigen_qrt_print_float")
-        self.qrt_print_string_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()]), name="eigen_qrt_print_string")
+        self.qrt_print_int_fn = ir.Function(
+            self.module, ir.FunctionType(ir.VoidType(), [ir.IntType(64)]),
+            name="eigen_qrt_print_int")
+        self.qrt_print_bool_fn = ir.Function(
+            self.module, ir.FunctionType(ir.VoidType(), [ir.IntType(1)]),
+            name="eigen_qrt_print_bool")
+        self.qrt_print_float_fn = ir.Function(
+            self.module, ir.FunctionType(ir.VoidType(), [ir.DoubleType()]),
+            name="eigen_qrt_print_float")
+        self.qrt_print_string_fn = ir.Function(
+            self.module,
+            ir.FunctionType(ir.VoidType(), [ir.IntType(8).as_pointer()]),
+            name="eigen_qrt_print_string")
         
         # Panic helpers
-        self.qrt_panic_div_zero_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), []), name="eigen_qrt_panic_div_zero")
+        self.qrt_panic_div_zero_fn = ir.Function(
+            self.module, ir.FunctionType(ir.VoidType(), []),
+            name="eigen_qrt_panic_div_zero")
 
         # Trap helper
         self.trap_fn = ir.Function(self.module, ir.FunctionType(ir.VoidType(), []), name="llvm.trap")
@@ -179,7 +268,8 @@ class LLVMCodegen:
         self.string_constants[val] = ptr
         return ptr
 
-    def compile_program(self, blocks: list[BasicBlock], resolved_qfuncs: dict, main_start_idx: int, seed: int = 0) -> ir.Module:
+    def compile_program(self, blocks: list[BasicBlock], resolved_qfuncs: dict,
+                         main_start_idx: int, seed: int = 0) -> ir.Module:
         # Group blocks by function scope
         self.start_to_block_id = {block.start_idx: block.id for block in blocks}
         boundaries = []
@@ -343,7 +433,11 @@ class LLVMCodegen:
                         else:
                             if self.safe_mode:
                                 # Sadd/Ssub/Smul with overflow
-                                name_map = {"ADD": "llvm.sadd.with.overflow", "SUB": "llvm.ssub.with.overflow", "MUL": "llvm.smul.with.overflow"}
+                                name_map = {
+                                    "ADD": "llvm.sadd.with.overflow",
+                                    "SUB": "llvm.ssub.with.overflow",
+                                    "MUL": "llvm.smul.with.overflow",
+                                }
                                 intrinsic = self.module.declare_intrinsic(name_map[op], [ir.IntType(64)])
                                 ret_struct = builder.call(intrinsic, [a, b])
                                 res = builder.extract_value(ret_struct, 0)
@@ -402,7 +496,9 @@ class LLVMCodegen:
                                     sign_diff = builder.xor(a_neg, b_neg)
                                     correct = builder.and_(r_not_zero, sign_diff)
 
-                                    correction = builder.select(correct, ir.Constant(ir.IntType(64), 1), ir.Constant(ir.IntType(64), 0))
+                                    correction = builder.select(
+                                        correct, ir.Constant(ir.IntType(64), 1),
+                                        ir.Constant(ir.IntType(64), 0))
                                     q_corrected = builder.sub(q, correction)
                                     builder.store(q_corrected, res_val)
                             res = builder.load(res_val)
@@ -632,7 +728,8 @@ class LLVMCodegen:
                             builder.store(casted, alloca_slots[orig_c])
                         else:
                             if orig_c not in self.global_vars:
-                                self.global_vars[orig_c] = ir.GlobalVariable(self.module, ir.IntType(1), name=f"g_{orig_c}")
+                                self.global_vars[orig_c] = ir.GlobalVariable(
+                    self.module, ir.IntType(1), name=f"g_{orig_c}")
                                 self.global_vars[orig_c].initializer = ir.Constant(ir.IntType(1), 0)
                             g_var = self.global_vars[orig_c]
                             casted = self._cast_type(res_bool, g_var.type.pointee, builder)
@@ -652,7 +749,9 @@ class LLVMCodegen:
                                 builder.call(self.qrt_print_int_fn, [val])
                         elif isinstance(val.type, ir.DoubleType):
                             builder.call(self.qrt_print_float_fn, [val])
-                        elif isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8:
+                        elif (isinstance(val.type, ir.PointerType)
+                              and isinstance(val.type.pointee, ir.IntType)
+                              and val.type.pointee.width == 8):
                             builder.call(self.qrt_print_string_fn, [val])
 
                 if not builder.block.is_terminated:

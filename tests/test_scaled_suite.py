@@ -18,9 +18,7 @@ from src.resource_estimator.estimator import ResourceEstimator
 from src.noise.noise_model import NoiseModel
 from src.equivalence import EquivalenceChecker
 from src.frontend.ast import (
-    ProgramNode, LetNode, LiteralNode, VarRefNode, BinaryOpNode,
-    VarDeclNode, GateNode, MeasureNode, IfNode, ReturnNode,
-    FuncDeclNode, TraceNode, PrintNode, AssertNode
+    ProgramNode, IfNode, FuncDeclNode
 )
 
 
@@ -1146,7 +1144,7 @@ class TestEQIRConverterParameterized(unittest.TestCase):
         gate_nodes = [n for n in sorted_nodes if n.type == 'GATE']
         self.assertEqual(len(gate_nodes), 6)
         expected_gates = ['H', 'X', 'Y', 'Z', 'S', 'T']
-        for node, expected in zip(gate_nodes, expected_gates):
+        for node, expected in zip(gate_nodes, expected_gates, strict=False):
             self.assertEqual(node.gate_name, expected)
 
     def test_rotation_gates_with_args(self):

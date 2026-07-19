@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional, Sequence
+from typing import Iterable, Optional
 
 
 class UnresolvedParameterError(ValueError):
@@ -201,7 +201,6 @@ def run_resolved_circuit(simulator, circuit: "ResolvedCircuit") -> None:
     silently no-op. This is the P2 surface binding; the IR will later
     get a single `Q_GATE_NAME` opcode that does this lookup natively.
     """
-    name = circuit.name if hasattr(circuit, "name") else ""
     for instr in circuit.instructions:
         gate = instr[0]
         qubits = list(instr[1])

@@ -8,6 +8,20 @@ from src.crash_report import write_crash_report
 
 @register_command("exec")
 def exec_command(args, workspace_root):
+    # §6.2 (Security): Subprocess isolation for untrusted code.
+    if getattr(args, "sandbox", False) and os.environ.get("EIGEN_SANDBOX") != "1":
+        import subprocess
+        new_env = os.environ.copy()
+        new_env["EIGEN_SANDBOX"] = "1"
+        cmd = [sys.executable] + sys.argv
+        if "--sandbox" in cmd:
+            cmd.remove("--sandbox")
+        try:
+            return subprocess.call(cmd, env=new_env)
+        except Exception as e:
+            print(f"Error launching sandbox subprocess: {e}", file=sys.stderr)
+            sys.exit(1)
+
     if not args.file.endswith('.ebc'):
         print("Error: 'eigen exec' expects a compiled EBC (.ebc) file.", file=sys.stderr)
         sys.exit(1)
@@ -33,12 +47,16 @@ def exec_command(args, workspace_root):
     timeout_val = getattr(args, 'instruction_timeout', None)
     if deterministic_val and seed_val is None:
         seed_val = 0
-    vm = EigenVM(trace_mode=args.trace, seed=seed_val, verbose=verbose_val, deterministic=deterministic_val, max_instruction_count=max_instr_val, instruction_timeout_s=timeout_val)
+    vm = EigenVM(trace_mode=args.trace, seed=seed_val, verbose=verbose_val,
+                 deterministic=deterministic_val, max_instruction_count=max_instr_val,
+                 instruction_timeout_s=timeout_val)
     try:
         vm.execute(instructions)
     except AssertionError as ae:
         print(f"Assertion Error: {ae}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        write_crash_report(e, vm.call_stack, vm.ip, instructions[vm.ip].opcode if vm.ip < len(instructions) else "HALT", vm.globals)
+        write_crash_report(e, vm.call_stack, vm.ip,
+                           instructions[vm.ip].opcode if vm.ip < len(instructions) else "HALT",
+                           vm.globals)
         sys.exit(1)

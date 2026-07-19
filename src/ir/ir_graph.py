@@ -233,7 +233,7 @@ class EQIRGraph:
             nodes_map[nd["id"]] = (node, nd["children_ids"])
             
         # Re-establish parent-child links
-        for nid, (node, children_ids) in nodes_map.items():
+        for _nid, (node, children_ids) in nodes_map.items():
             for cid in children_ids:
                 if cid in graph.nodes:
                     node.add_child(graph.nodes[cid])

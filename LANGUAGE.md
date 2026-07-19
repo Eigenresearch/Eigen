@@ -1,6 +1,6 @@
-﻿# Eigen 2.6 — Misery Language Specification & Developer Reference
+﻿# Eigen 2.7 — Meridian Language Specification & Developer Reference
 
-This document provides the authoritative language specification and developer reference for **Eigen 2.6 — Misery**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, advanced noise modelling, hardware-aware quantum routing, and native acceleration.
+This document provides the authoritative language specification and developer reference for **Eigen 2.7 — Meridian**, a domain-specific, hybrid classical-quantum programming language. Eigen integrates a robust classical execution runtime (supporting structures, dynamic collections, recursion, and exception handling) with quantum circuit execution, automatic SSA and graph-based optimization, formal verification, advanced noise modelling, hardware-aware quantum routing, and native acceleration.
 
 ---
 

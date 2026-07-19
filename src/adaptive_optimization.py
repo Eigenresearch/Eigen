@@ -117,6 +117,7 @@ class HotPathRegistry:
         self._is_loop[name] = self._is_loop.get(name, False) or is_loop
 
     def top_k_hot_paths(self, k: int = 5) -> typing.List[HotPathInfo]:
+        import heapq
         items = []
         for name, count in self._counts.items():
             durs = self._durations.get(name, [])
@@ -126,10 +127,9 @@ class HotPathRegistry:
                 average_duration_ns=avg,
                 is_loop=self._is_loop.get(name, False),
             ))
-        # Sort by score descending; tie-break by name for
-        # deterministic output (important for reproducibility §6.4).
-        items.sort(key=lambda i: (-i.score(), i.name))
-        return items[:k]
+        # §1.2 — Use heapq to find top-k hot paths efficiently.
+        # Score is negated because heapq is a min-heap by default.
+        return heapq.nlargest(k, items, key=lambda i: (i.score(), [-ord(c) for c in i.name]))
 
     def total_invocations(self) -> int:
         return sum(self._counts.values())
@@ -254,7 +254,7 @@ def describe_circuit(graph) -> CircuitDescription:
     if graph is None:
         return desc
     nodes = getattr(graph, "nodes", {})
-    if hasattr(_count_gates, "__call__"):
+    if callable(_count_gates):
         try:
             desc.gate_count = _count_gates(graph)
         except Exception:

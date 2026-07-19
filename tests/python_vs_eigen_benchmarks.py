@@ -1,6 +1,5 @@
 import time
 import random
-import math
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.backend.ebc_compiler import EBCCompiler
@@ -177,8 +176,11 @@ def benchmark():
 
     # Generate Markdown Table
     with open("python_vs_eigen.md", "w", encoding="utf-8") as f:
-        f.write("# Language Benchmark: Native Python vs Eigen VM (Misery 2.6)\n\n")
-        f.write("Comparison of execution time between native Python execution and Eigen VM (with JIT compilation enabled) across 30 runs.\n\n")
+        f.write("# Language Benchmark: Native Python vs Eigen VM (Meridian 2.7)\n\n")
+        f.write(
+            "Comparison of execution time between native Python execution "
+            "and Eigen VM (with JIT compilation enabled) across 30 runs.\n\n"
+        )
         f.write("| Benchmark Test Case | Native Python (ms) | Eigen VM (ms) | Slowdown / Ratio |\n")
         f.write("| --- | --- | --- | --- |\n")
         for name, data in sorted(results.items()):

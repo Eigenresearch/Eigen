@@ -1,6 +1,5 @@
 import time
 import random
-import math
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.backend.ebc_compiler import EBCCompiler
@@ -568,7 +567,7 @@ def py_map_ops():
     i = 0
     while i < 1000:
         m["key"] = i
-        val = m["key"]
+        m["key"]
     return m["key"]
 
 def py_bitwise():
@@ -633,7 +632,7 @@ def py_nested_exceptions():
                 if i % 3 == 0: raise ValueError()
             except ValueError:
                 catches += 1
-                raise KeyError()
+                raise KeyError() from None
         except KeyError:
             catches += 1
         i += 1
@@ -897,7 +896,7 @@ def benchmark():
             
             # Compute fidelity for exact checks
             if len(state) == len(py_output):
-                fidelity = abs(sum(c1.conjugate() * c2 for c1, c2 in zip(state, py_output)))
+                fidelity = abs(sum(c1.conjugate() * c2 for c1, c2 in zip(state, py_output, strict=False)))
                 if name in ("Q01. Teleportation", "Q12. Bernstein-Vazirani 3", "Q13. Bernstein-Vazirani 10"):
                     accuracy_status = "PASSED (Correct Outcome)"
                 else:
@@ -927,12 +926,15 @@ def benchmark():
 
     # Generate Markdown Output File
     with open("master_benchmark_results.md", "w", encoding="utf-8") as f:
-        f.write("# Master Benchmark: Native Python vs Eigen VM (Misery 2.6)\n\n")
-        f.write("Unified master benchmark results of all 35 tests, displaying execution speeds, verification accuracy, and outputs.\n\n")
-        f.write("| Test Case | Native Python | Eigen VM | Python Output | Eigen VM Output | Accuracy / Verification |\n")
+        f.write("# Master Benchmark: Native Python vs Eigen VM (Meridian 2.7)\n\n")
+        f.write("Unified master benchmark results of all 35 tests, displaying execution speeds, "
+                "verification accuracy, and outputs.\n\n")
+        f.write("| Test Case | Native Python | Eigen VM | Python Output | "
+                "Eigen VM Output | Accuracy / Verification |\n")
         f.write("| --- | --- | --- | --- | --- | --- |\n")
         for name, data in sorted(results.items()):
-            f.write(f"| {name} | {data['avg_py']:.3f} ms | {data['avg_eig']:.3f} ms | `{data['py_out']}` | `{data['eig_out']}` | {data['accuracy']} |\n")
+            f.write(f"| {name} | {data['avg_py']:.3f} ms | {data['avg_eig']:.3f} ms | "
+                    f"`{data['py_out']}` | `{data['eig_out']}` | {data['accuracy']} |\n")
 
     # Generate HTML Unified Dashboard
     with open("master_dashboard.html", "w", encoding="utf-8") as f:
@@ -940,7 +942,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Misery» Master Dashboard</title>
+    <title>Eigen 2.7 «Meridian» Master Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -1084,10 +1086,12 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Misery» Unified Master Dashboard</h1>
-        <div class="subtitle">Extensive compilation of all 35 tests, analyzing execution time, correctness, and exact outputs.</div>
+        <h1>Eigen 2.7 «Meridian» Unified Master Dashboard</h1>
+        <div class="subtitle">"""
+        """Extensive compilation of all 35 tests, analyzing execution time, correctness, and exact outputs.</div>
         
-        <input type="text" id="search" onkeyup="filterTable()" placeholder="Search test cases, outputs, or status..." class="search-box">
+        <input type="text" id="search" """
+        """onkeyup="filterTable()" placeholder="Search test cases, outputs, or status..." class="search-box">
         
         <div class="grid">
             <div class="card">

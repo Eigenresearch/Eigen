@@ -120,7 +120,7 @@ class TestTypeAliasResolution(unittest.TestCase):
         tc = _check(_TRAIT_SRC)
         # The variable `n` in main's scope should resolve to 'int' (the
         # canonical target of `QubitCount`), not 'QubitCount'.
-        scope = tc.scopes[-1] if tc.scopes else {}
+        tc.scopes[-1] if tc.scopes else {}
         # After check_program, scopes are at global level. The function's
         # local scope has been popped. We instead verify the substitution
         # behaviour directly via _resolve_type_alias.

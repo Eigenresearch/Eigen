@@ -1,7 +1,7 @@
-from src.frontend.lexer import Token, TokenType
+from src.frontend.lexer import Lexer, Token, TokenType
 from src.frontend.ast import (
     ProgramNode, ImportNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode,
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode, StructDeclNode,
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
@@ -9,7 +9,7 @@ from src.frontend.ast import (
     IndexAccessNode, MapAllocNode, ParallelBlockNode, TaskStatementNode,
     MatchNode, StringInterpolationNode,
     TraitDeclNode, TraitMethodSignatureNode, ImplBlockNode,
-    TypeAliasDeclNode,
+    TypeAliasDeclNode, AsyncFuncDeclNode, AwaitExprNode, OperatorDeclNode,
 )
 
 def node_to_str(node) -> str:
@@ -83,7 +83,13 @@ class Parser:
 
     def parse(self) -> ProgramNode:
         from src.frontend.ast import NATIVE_AVAILABLE
-        if NATIVE_AVAILABLE and hasattr(self.tokens, "source") and self.tokens.source is not None:
+        promoted_syntax = any(
+            token.type in (TokenType.ASYNC, TokenType.AWAIT, TokenType.OPERATOR)
+            for token in self.tokens
+        )
+        if (NATIVE_AVAILABLE and not promoted_syntax
+                and hasattr(self.tokens, "source")
+                and self.tokens.source is not None):
             import eigen_native
             try:
                 return eigen_native.parse_native(self.tokens.source)
@@ -127,11 +133,12 @@ class Parser:
         types_to_match = [
             TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL,
             TokenType.QUBIT, TokenType.CBIT, TokenType.ARRAY, TokenType.MAP,
-            TokenType.IDENTIFIER
+            TokenType.TASK, TokenType.IDENTIFIER
         ]
         if allow_gates:
             types_to_match.extend([
-                TokenType.GATE_H, TokenType.GATE_X, TokenType.GATE_Y, TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T
+                TokenType.GATE_H, TokenType.GATE_X, TokenType.GATE_Y,
+                TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T
             ])
         tok = self.match(*types_to_match)
         if not tok:
@@ -167,6 +174,10 @@ class Parser:
         # qfunc declaration
         if tok.type == TokenType.QFUNC:
             return self.parse_qfunc_decl()
+
+        # async function declaration
+        if tok.type == TokenType.ASYNC:
+            return self.parse_async_func_decl()
 
         # func declaration
         if tok.type == TokenType.FUNC:
@@ -278,15 +289,21 @@ class Parser:
 
         # Variable declarations: e.g. qubit q0, cbit c0, map<string, int> m, MyStruct s
         # We can backtrack to see if it is a type followed by an identifier.
-        saved_pos = self.pos
-        try:
-            type_name = self.parse_type(allow_gates=False)
-            if self.current().type == TokenType.IDENTIFIER:
-                name_tok = self.consume(TokenType.IDENTIFIER, "Expected identifier")
-                return VarDeclNode(name_tok.value, type_name)
-        except Exception:
-            pass
-        self.pos = saved_pos
+        _type_start_tokens = frozenset([
+            TokenType.INT, TokenType.FLOAT, TokenType.STRING, TokenType.BOOL,
+            TokenType.QUBIT, TokenType.CBIT, TokenType.ARRAY, TokenType.MAP,
+            TokenType.TASK, TokenType.IDENTIFIER
+        ])
+        if tok.type in _type_start_tokens:
+            saved_pos = self.pos
+            try:
+                type_name = self.parse_type(allow_gates=False)
+                if self.current().type == TokenType.IDENTIFIER:
+                    name_tok = self.consume(TokenType.IDENTIFIER, "Expected identifier")
+                    return VarDeclNode(name_tok.value, type_name)
+            except SyntaxError:
+                pass
+            self.pos = saved_pos
 
         # Custom qfunc/func call at statement level: e.g. bell(q0, q1)
         if tok.type == TokenType.IDENTIFIER and self.peek().type == TokenType.LPAREN:
@@ -369,20 +386,22 @@ class Parser:
         expression_starters = (
             TokenType.IDENTIFIER, TokenType.INT_LIT, TokenType.FLOAT_LIT, TokenType.STRING_LIT,
             TokenType.TRUE, TokenType.FALSE, TokenType.NULL, TokenType.LPAREN, TokenType.LBRACK,
-            TokenType.MINUS, TokenType.PLUS, TokenType.NOT, TokenType.PI, TokenType.TAU, TokenType.E
+            TokenType.MINUS, TokenType.PLUS, TokenType.NOT, TokenType.AWAIT,
+            TokenType.PI, TokenType.TAU, TokenType.E
         )
         if tok.type in expression_starters:
             saved_pos = self.pos
             try:
                 expr = self.parse_expr()
-                assign_ops = (TokenType.EQUALS, TokenType.ADD_ASSIGN, TokenType.SUB_ASSIGN, TokenType.MUL_ASSIGN, TokenType.DIV_ASSIGN)
+                assign_ops = (TokenType.EQUALS, TokenType.ADD_ASSIGN,
+                              TokenType.SUB_ASSIGN, TokenType.MUL_ASSIGN, TokenType.DIV_ASSIGN)
                 if self.current().type in assign_ops:
                     op_tok = self.match(*assign_ops)
                     val_expr = self.parse_expr()
                     return AssignmentNode(expr, op_tok.value, val_expr)
                 else:
                     return expr
-            except Exception:
+            except SyntaxError:
                 self.pos = saved_pos
 
         self.error(f"Unexpected token in statement: {tok}")
@@ -424,50 +443,57 @@ class Parser:
 
     def parse_generic_param_name(self) -> str:
         tok = self.current()
-        if tok.type in (TokenType.IDENTIFIER, TokenType.GATE_H, TokenType.GATE_X, TokenType.GATE_Y, TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T):
+        if tok.type in (TokenType.IDENTIFIER, TokenType.GATE_H, TokenType.GATE_X,
+                        TokenType.GATE_Y, TokenType.GATE_Z, TokenType.GATE_S, TokenType.GATE_T):
             self.pos += 1
             return tok.value
         self.error("Expected generic parameter name")
 
-    def parse_func_decl(self) -> FuncDeclNode:
-        self.consume(TokenType.FUNC, "Expected 'func'")
-        name_tok = self.consume(TokenType.IDENTIFIER, "Expected function name")
-        
+    def _parse_function_parts(self, name: str) -> tuple[list[str], list[tuple[str, str]], str, list[ASTNode]]:
         generic_params = []
         if self.match(TokenType.LT):
             generic_params.append(self.parse_generic_param_name())
             while self.match(TokenType.COMMA):
                 generic_params.append(self.parse_generic_param_name())
             self.consume(TokenType.GT, "Expected '>'")
-            
-        self.consume(TokenType.LPAREN, "Expected '('")
+
+        self.consume(TokenType.LPAREN, f"Expected '(' after {name}")
         params = []
         if self.current().type != TokenType.RPAREN:
             p_name_tok = self.consume(TokenType.IDENTIFIER, "Expected parameter name")
             self.consume(TokenType.COLON, "Expected ':'")
-            p_type = self.parse_type()
-            params.append((p_name_tok.value, p_type))
-            
+            params.append((p_name_tok.value, self.parse_type()))
             while self.match(TokenType.COMMA):
                 p_name_tok = self.consume(TokenType.IDENTIFIER, "Expected parameter name")
                 self.consume(TokenType.COLON, "Expected ':'")
-                p_type = self.parse_type()
-                params.append((p_name_tok.value, p_type))
-                
+                params.append((p_name_tok.value, self.parse_type()))
+
         self.consume(TokenType.RPAREN, "Expected ')'")
         return_type = "void"
         if self.match(TokenType.ARROW):
             return_type = self.parse_type()
-        
+
         self.consume(TokenType.LBRACE, "Expected '{'")
         body = []
-        while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+        while self.current().type not in (TokenType.RBRACE, TokenType.EOF):
             stmt = self.parse_statement()
             if stmt:
                 body.append(stmt)
         self.consume(TokenType.RBRACE, "Expected '}'")
-        
-        return FuncDeclNode(name_tok.value, generic_params, params, return_type, body)
+        return generic_params, params, return_type, body
+
+    def parse_func_decl(self) -> FuncDeclNode:
+        self.consume(TokenType.FUNC, "Expected 'func'")
+        name = self.consume(TokenType.IDENTIFIER, "Expected function name").value
+        parts = self._parse_function_parts(name)
+        return FuncDeclNode(name, *parts)
+
+    def parse_async_func_decl(self) -> AsyncFuncDeclNode:
+        self.consume(TokenType.ASYNC, "Expected 'async'")
+        self.consume(TokenType.FUNC, "Expected 'func' after 'async'")
+        name = self.consume(TokenType.IDENTIFIER, "Expected async function name").value
+        parts = self._parse_function_parts(name)
+        return AsyncFuncDeclNode(name, *parts)
 
     def parse_struct_decl(self) -> StructDeclNode:
         self.consume(TokenType.STRUCT, "Expected 'struct'")
@@ -603,6 +629,22 @@ class Parser:
         self.match(TokenType.SEMICOLON)
         return TypeAliasDeclNode(name_tok.value, target)
 
+    _OVERLOADABLE_OPERATOR_TOKENS = (
+        TokenType.PLUS, TokenType.MINUS, TokenType.MUL, TokenType.DIV,
+        TokenType.MOD, TokenType.POW, TokenType.EQ, TokenType.NE,
+        TokenType.LT, TokenType.LE, TokenType.GT, TokenType.GE,
+        TokenType.AMP, TokenType.PIPE, TokenType.CARET,
+        TokenType.LSHIFT, TokenType.RSHIFT, TokenType.TILDE,
+    )
+
+    def parse_operator_decl(self) -> OperatorDeclNode:
+        self.consume(TokenType.OPERATOR, "Expected 'operator'")
+        operator = self.match(*self._OVERLOADABLE_OPERATOR_TOKENS)
+        if operator is None:
+            self.error("Expected overloadable operator symbol")
+        parts = self._parse_function_parts(f"operator {operator.value}")
+        return OperatorDeclNode(operator.value, *parts)
+
     def parse_impl_block(self) -> ImplBlockNode:
         """Parse `impl Trait for Type { ...func... }` or `impl Type { ... }`.
 
@@ -642,15 +684,19 @@ class Parser:
         self.consume(TokenType.LBRACE, "Expected '{'")
         methods = []
         while self.current().type not in (TokenType.RBRACE, TokenType.EOF):
-            # Use the existing func-decl parser to keep method signatures
-            # and bodies consistent with free functions. The func-decl
-            # parser expects `func` as the first token, so it composes
-            # cleanly.
+            if self.current().type == TokenType.OPERATOR:
+                methods.append(self.parse_operator_decl())
+                continue
+            # Use the existing statement parser to keep method signatures
+            # and bodies consistent with free and async functions.
             stmt = self.parse_statement()
             if isinstance(stmt, FuncDeclNode):
                 methods.append(stmt)
             else:
-                self.error(f"Expected 'func' inside impl block, got {type(stmt).__name__}")
+                self.error(
+                    "Expected 'func', 'async func', or 'operator' inside "
+                    f"impl block, got {type(stmt).__name__}"
+                )
 
         self.consume(TokenType.RBRACE, "Expected '}'")
         return ImplBlockNode(trait_name, target_type, methods)
@@ -775,9 +821,13 @@ class Parser:
         self.consume(TokenType.CATCH, "Expected 'catch'")
         
         catch_var = None
+        catch_type = None
         if self.match(TokenType.LPAREN):
             catch_var_tok = self.consume(TokenType.IDENTIFIER, "Expected catch variable name")
             catch_var = catch_var_tok.value
+            # Optional type annotation: catch (e: TypeError)
+            if self.match(TokenType.COLON):
+                catch_type = self.parse_type()
             self.consume(TokenType.RPAREN, "Expected ')'")
         elif self.current().type == TokenType.IDENTIFIER:
             catch_var_tok = self.consume(TokenType.IDENTIFIER, "Expected catch variable name")
@@ -791,7 +841,16 @@ class Parser:
                 catch_body.append(stmt)
         self.consume(TokenType.RBRACE, "Expected '}'")
         
-        return TryCatchNode(try_body, catch_var, catch_body)
+        finally_body = []
+        if self.match(TokenType.FINALLY):
+            self.consume(TokenType.LBRACE, "Expected '{' after 'finally'")
+            while self.current().type != TokenType.RBRACE and self.current().type != TokenType.EOF:
+                stmt = self.parse_statement()
+                if stmt:
+                    finally_body.append(stmt)
+            self.consume(TokenType.RBRACE, "Expected '}'")
+        
+        return TryCatchNode(try_body, catch_var, catch_body, finally_body, catch_type)
 
     def parse_noise(self) -> NoiseNode:
         self.consume(TokenType.NOISE, "Expected 'noise'")
@@ -981,15 +1040,14 @@ class Parser:
         return base
 
     def parse_unary(self) -> ASTNode:
+        if self.match(TokenType.AWAIT):
+            return AwaitExprNode(self.parse_unary())
         if self.match(TokenType.NOT):
-            right = self.parse_unary()
-            return BinaryOpNode("not", right, LiteralNode(True, "bool"))
+            return UnaryOpNode("not", self.parse_unary())
         if self.match(TokenType.TILDE):
-            right = self.parse_unary()
-            return BinaryOpNode("~", right, LiteralNode(0, "int"))
+            return UnaryOpNode("~", self.parse_unary())
         if self.match(TokenType.MINUS):
-            right = self.parse_unary()
-            return BinaryOpNode("-", LiteralNode(0, "int"), right)
+            return UnaryOpNode("-", self.parse_unary())
         if self.match(TokenType.PLUS):
             return self.parse_unary()
         return self.parse_postfix()

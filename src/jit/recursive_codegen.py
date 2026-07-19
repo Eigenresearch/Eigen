@@ -39,6 +39,7 @@ from src.frontend.ast import (
     LiteralNode,
     VarRefNode,
     BinaryOpNode,
+    UnaryOpNode,
     IfNode,
     ReturnNode,
     AssignmentNode,
@@ -55,6 +56,11 @@ _SUPPORTED_BINARY_OPS = {
     "==": "==", "!=": "!=", "<": "<", ">": ">", "<=": "<=", ">=": ">=",
     "and": "and", "or": "or",
     "&": "&", "|": "|", "^": "^", "<<": "<<", ">>": ">>",
+}
+
+# Unary ops that map cleanly to Python source.
+_SUPPORTED_UNARY_OPS = {
+    "-": "-", "~": "~", "not": "not ",
 }
 
 # Scalar numeric/bool types only. Strings are excluded because string
@@ -80,6 +86,10 @@ def _is_pure_expr(node: ASTNode, candidate_names: set[str], self_name: str) -> b
             return False
         return (_is_pure_expr(node.left, candidate_names, self_name)
                 and _is_pure_expr(node.right, candidate_names, self_name))
+    if isinstance(node, UnaryOpNode):
+        if node.op not in _SUPPORTED_UNARY_OPS:
+            return False
+        return _is_pure_expr(node.operand, candidate_names, self_name)
     if isinstance(node, CallNode):
         callee = _callee_name(node)
         if callee is None:
@@ -170,6 +180,8 @@ def _collect_calls_expr(node: ASTNode, dst: set[str]) -> None:
     elif isinstance(node, BinaryOpNode):
         _collect_calls_expr(node.left, dst)
         _collect_calls_expr(node.right, dst)
+    elif isinstance(node, UnaryOpNode):
+        _collect_calls_expr(node.operand, dst)
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +263,9 @@ class _Renderer:
         if isinstance(node, BinaryOpNode):
             op = _SUPPORTED_BINARY_OPS[node.op]
             return f"({self._render_expr(node.left)} {op} {self._render_expr(node.right)})"
+        if isinstance(node, UnaryOpNode):
+            op = _SUPPORTED_UNARY_OPS[node.op]
+            return f"({op}{self._render_expr(node.operand)})"
         if isinstance(node, CallNode):
             args = ", ".join(self._render_expr(a) for a in node.args)
             callee = _callee_name(node)

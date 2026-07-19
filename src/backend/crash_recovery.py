@@ -57,7 +57,6 @@ import hashlib
 import json
 import os
 import platform
-import sys
 import time
 import traceback
 import typing

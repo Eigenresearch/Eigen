@@ -370,7 +370,6 @@ class DynamicCircuit:
     def run(self, sim) -> typing.Dict[str, int]:
         """Execute the steps against `sim`. Returns the local
         classical-bit dict."""
-        import cmath
         for step in self.steps:
             if step.kind == DynamicStepKind.GATE:
                 gate_name, targets, args = step.payload

@@ -1,14 +1,13 @@
 import os
 import sys
 import hashlib
+import hmac
 import json
 
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.semantic.import_resolver import ImportResolver
 from src.semantic.type_checker import TypeChecker, TypeErrorException
-from src.ir.ir_graph import EQIRGraph
-from src.backend.bytecode import Instruction
 from src.compiler_optimizations import IncrementalCache, LazyModuleLoader
 
 def get_workspace_root() -> str:
@@ -34,8 +33,8 @@ def get_project_hash(filepath: str, workspace_root: str) -> str:
         try:
             with open(abs_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-        except Exception as e:
-            raise FileNotFoundError(f"Could not read source file '{abs_path}': {e}")
+        except (OSError, UnicodeDecodeError) as e:
+            raise FileNotFoundError(f"Could not read source file '{abs_path}': {e}") from e
         
         visited_files[abs_path] = content
         
@@ -47,7 +46,7 @@ def get_project_hash(filepath: str, workspace_root: str) -> str:
             try:
                 sub_file = resolver.resolve_module_file(imp.module_path)
                 process_file(sub_file)
-            except Exception as e:
+            except (FileNotFoundError, ImportError) as e:
                 print(f"Warning: Failed to resolve import '{imp.module_path}': {e}", file=sys.stderr)
 
     process_file(filepath)
@@ -67,8 +66,8 @@ def get_file_hash(filepath: str) -> str:
     try:
         with open(filepath, 'rb') as f:
             hasher.update(f.read())
-    except Exception:
-        pass
+    except OSError as e:
+        print(f"Warning: Failed to hash file '{filepath}': {e}", file=sys.stderr)
     return hasher.hexdigest()
 
 from src.compiler_db import QueryDb
@@ -109,8 +108,8 @@ def query_resolve_imports(filepath: str, workspace_root: str):
         try:
             sub_file = resolver.resolve_module_file(imp.module_path)
             db.add_input_file(sub_file)
-        except Exception:
-            pass
+        except (FileNotFoundError, ImportError) as e:
+            print(f"Warning: Failed to resolve import '{imp.module_path}': {e}", file=sys.stderr)
     return resolved_ast
 
 def resolve_imports(filepath: str, workspace_root: str):
@@ -157,10 +156,12 @@ def load_from_cache(filepath: str, workspace_root: str, cache_type: str):
             if os.path.exists(cache_path):
                 try:
                     with open(cache_path, "rb") as f:
-                        import pickle
-                        return pickle.load(f)
-                except Exception:
-                    pass
+                        raw = f.read()
+                    obj = _deserialize_cache(raw, workspace_root)
+                    if obj is not None:
+                        return obj
+                except (OSError, ValueError) as e:
+                    print(f"Warning: Failed to load cache for '{query_key}': {e}", file=sys.stderr)
                     
     # 2. Try the QueryDb to_eqir check (for backwards compatibility with eqir query type)
     if cache_type == "eqir":
@@ -177,7 +178,6 @@ def load_from_cache(filepath: str, workspace_root: str, cache_type: str):
     return None
 
 def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
-    # Support manual legacy saving using pickle
     db = get_db(workspace_root)
     query_key = f"{cache_type}:{filepath}"
     
@@ -190,20 +190,15 @@ def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
     }
     db.add_input_file(filepath)
     
-    # Compute result hash
-    import hashlib
-    import pickle
+    payload_bytes = _serialize_cache(obj, workspace_root)
     hasher = hashlib.sha256()
-    try:
-        hasher.update(pickle.dumps(obj))
-    except Exception:
-        hasher.update(str(obj).encode('utf-8'))
+    hasher.update(payload_bytes)
     result_hash = hasher.hexdigest()
     
     cache_file = os.path.join(db.cache_dir, f"manual_{result_hash}.{cache_type}")
     os.makedirs(os.path.dirname(cache_file), exist_ok=True)
     with open(cache_file, "wb") as f:
-        pickle.dump(obj, f)
+        f.write(payload_bytes)
         
     try:
         rel_cache = os.path.relpath(cache_file, db.workspace_root)
@@ -214,6 +209,102 @@ def save_to_cache(filepath: str, workspace_root: str, cache_type: str, obj):
     db.records[query_key]["result_hash"] = result_hash
     db.current_query = None
     db.save()
+
+_CACHE_JSON_MAGIC = b"EIGENCJ1\n"
+_CACHE_PKL_MAGIC = b"EIGENCP1\n"
+
+def _cache_hmac_key(workspace_root: str) -> bytes:
+    key_path = os.path.join(workspace_root, ".eigen_cache", ".hmac_key")
+    if os.path.exists(key_path):
+        try:
+            with open(key_path, "rb") as f:
+                key = f.read()
+            if key:
+                return key
+        except OSError:
+            pass
+    key = os.urandom(32)
+    try:
+        os.makedirs(os.path.dirname(key_path), exist_ok=True)
+        with open(key_path, "wb") as f:
+            f.write(key)
+    except OSError:
+        pass
+    return key
+
+def _to_json_safe(obj):
+    cls = type(obj)
+    if hasattr(obj, "to_dict") and hasattr(cls, "from_dict"):
+        return {
+            "__obj__": True,
+            "class": f"{cls.__module__}.{cls.__qualname__}",
+            "data": obj.to_dict(),
+        }
+    if isinstance(obj, dict):
+        return {str(k): _to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_safe(v) for v in obj]
+    return obj
+
+def _from_json_safe(data):
+    if isinstance(data, dict):
+        if data.get("__obj__") is True and "class" in data and "data" in data:
+            cls_path = data["class"]
+            module_path, _, qualname = cls_path.rpartition(".")
+            if module_path:
+                import importlib
+                try:
+                    mod = importlib.import_module(module_path)
+                    cls = getattr(mod, qualname)
+                    if hasattr(cls, "from_dict"):
+                        return cls.from_dict(data["data"])
+                except (ImportError, AttributeError):
+                    pass
+            return _from_json_safe(data["data"])
+        return {k: _from_json_safe(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_from_json_safe(v) for v in data]
+    return data
+
+def _serialize_cache(obj, workspace_root: str) -> bytes:
+    try:
+        payload = {"__cache_format__": 1, "value": _to_json_safe(obj)}
+        json_bytes = json.dumps(payload, sort_keys=True).encode("utf-8")
+        return _CACHE_JSON_MAGIC + json_bytes
+    except (TypeError, ValueError):
+        import pickle
+        data = pickle.dumps(obj)
+        key = _cache_hmac_key(workspace_root)
+        sig = hmac.new(key, data, hashlib.sha256).hexdigest().encode("ascii")
+        return _CACHE_PKL_MAGIC + sig + b"\n" + data
+
+def _deserialize_cache(raw: bytes, workspace_root: str):
+    if raw.startswith(_CACHE_JSON_MAGIC):
+        try:
+            payload = json.loads(raw[len(_CACHE_JSON_MAGIC):].decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+        if isinstance(payload, dict) and payload.get("__cache_format__") == 1:
+            return _from_json_safe(payload.get("value"))
+        return _from_json_safe(payload)
+    if raw.startswith(_CACHE_PKL_MAGIC):
+        rest = raw[len(_CACHE_PKL_MAGIC):]
+        nl = rest.find(b"\n")
+        if nl < 0:
+            return None
+        sig = rest[:nl]
+        data = rest[nl + 1:]
+        key = _cache_hmac_key(workspace_root)
+        expected = hmac.new(key, data, hashlib.sha256).hexdigest().encode("ascii")
+        if not hmac.compare_digest(sig, expected):
+            return None
+        import pickle
+        try:
+            return pickle.loads(data)
+        except (pickle.PickleError, EOFError, OSError, AttributeError):
+            return None
+    return None
+
 
 def _has_classical_control_flow(node) -> bool:
     from src.frontend.ast import (
@@ -267,31 +358,36 @@ def compile_to_eqir(filepath: str, workspace_root: str) -> tuple:
         print(f"Error: File '{filepath}' not found.", file=sys.stderr)
         sys.exit(1)
     
-    # §1.2 — Check incremental AST/EQIR cache
+    source = None
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             source = f.read()
-        cached_ast, ast_hit = _incremental_cache.get_ast(source)
-        if ast_hit and cached_ast is not None:
-            # AST cache hit — skip parse + type_check, go straight to EQIR
-            from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
-            mlir_converter = ASTToMLIRConverter()
-            mlir_module = mlir_converter.convert(cached_ast)
-            eqir_converter = MLIRToEQIRConverter()
-            graph = eqir_converter.convert(mlir_module)
-            return graph, cached_ast
-    except Exception:
-        pass  # Fall through to normal pipeline on any cache error
+    except OSError as e:
+        print(f"Warning: Failed to read source '{filepath}': {e}", file=sys.stderr)
+    
+    # §1.2 — Check incremental AST/EQIR cache
+    if source is not None:
+        try:
+            cached_ast, ast_hit = _incremental_cache.get_ast(source)
+            if ast_hit and cached_ast is not None:
+                # AST cache hit — skip parse + type_check, go straight to EQIR
+                from src.ir.mlir_dialect import ASTToMLIRConverter, MLIRToEQIRConverter
+                mlir_converter = ASTToMLIRConverter()
+                mlir_module = mlir_converter.convert(cached_ast)
+                eqir_converter = MLIRToEQIRConverter()
+                graph = eqir_converter.convert(mlir_module)
+                return graph, cached_ast
+        except (OSError, EOFError, AttributeError, TypeError) as e:
+            print(f"Warning: incremental cache lookup failed, falling through to normal pipeline: {e}", file=sys.stderr)
     
     try:
         result = to_eqir(filepath, workspace_root)
         # §1.2 — Cache the AST for incremental compilation
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                source = f.read()
-            _incremental_cache.put_ast(source, result[1])
-        except Exception:
-            pass
+        if source is not None:
+            try:
+                _incremental_cache.put_ast(source, result[1])
+            except (AttributeError, TypeError) as e:
+                print(f"Warning: Failed to cache AST for '{filepath}': {e}", file=sys.stderr)
         return result
     except TypeErrorException as e:
         print(f"Type Verification Failed:\n{e}", file=sys.stderr)
@@ -324,15 +420,17 @@ def compile_multiple_parallel(filepaths: list[str],
             from src.frontend.lexer import Lexer as _L
             from src.frontend.parser import Parser as _P
             ast = _P(_L(content).tokenize()).parse()
+            base_dir = os.path.dirname(os.path.abspath(fp))
             for imp in ast.imports:
                 # Map import path to a file in the same list
-                dep_path = imp.module_path.replace('.', '/') + '.eig'
+                dep_rel = imp.module_path.replace('.', '/') + '.eig'
+                dep_abs = os.path.abspath(os.path.join(base_dir, dep_rel))
                 for other in filepaths:
-                    if other.endswith(dep_path):
+                    if os.path.abspath(other) == dep_abs:
                         deps.append(os.path.basename(other).replace('.eig', ''))
                         break
-        except Exception:
-            pass
+        except (OSError, SyntaxError) as e:
+            print(f"Warning: Failed to detect dependencies for '{fp}': {e}", file=sys.stderr)
         tasks.append(CompilationTask(
             module_name=os.path.basename(fp).replace('.eig', ''),
             source_path=fp,

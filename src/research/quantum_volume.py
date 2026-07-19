@@ -220,7 +220,7 @@ def quantum_volume(width: int, *, trials: int = 10, shots: int = 1000,
     # loadable.
     from src.simulator import QuantumSimulator
     ratios: typing.List[float] = []
-    for t in range(trials):
+    for _t in range(trials):
         sim = QuantumSimulator(sim_type="dense", seed=sim_seed)
         _allocate(width, sim)
         circuit = random_quantum_volume_circuit(width, rng)

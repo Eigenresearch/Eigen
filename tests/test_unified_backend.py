@@ -20,7 +20,6 @@ from __future__ import annotations
 import unittest
 
 from src.backend.unified_backend import (
-    BACKEND_REGISTRY,
     ExecutionResult,
     ExportBackendAdapter,
     PostProcessor,
@@ -336,7 +335,7 @@ class TestBatchExecute(unittest.TestCase):
         native = be.compile(g)
         results = be.batch_execute([(g, native), (g, native)], shots=10)
         self.assertEqual(len(results), 2)
-        for r, native in zip(results, [native, native]):
+        for r, _native_dup in zip(results, [native, native], strict=False):
             self.assertIsNotNone(r.error)
             self.assertIn("submitadapter.execute", r.error.lower())
 

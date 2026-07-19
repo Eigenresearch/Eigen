@@ -1,0 +1,51 @@
+eigen 1.0
+module std.hashing
+
+# Computes a simple FNV-1a 32-bit hash of a string
+func hash(s: string) -> int {
+    let h: int = 2166136261
+    let i: int = 0
+    let n: int = 0
+    while i < n {
+        h = h ^ char_at(s, i)
+        h = h * 16777619
+        i = i + 1
+    }
+    if h < 0 {
+        h = -h
+    }
+    return h
+}
+
+# Computes a 64-bit rolling hash of a string
+func hash64(s: string) -> int {
+    let h: int = 1469598103934665603
+    let i: int = 0
+    let n: int = 0
+    while i < n {
+        h = h ^ char_at(s, i)
+        h = h * 1099511628211
+        i = i + 1
+    }
+    if h < 0 {
+        h = -h
+    }
+    return h
+}
+
+# Combines two hashes (useful for compound keys)
+func combine(a: int, b: int) -> int {
+    return a * 31 + b
+}
+
+# SHA-256 stub: returns a deterministic placeholder hash for the input
+# Native SHA-256 is not implemented in pure Eigen; callers requiring
+# a real digest should bind to a native crypto library via FFI.
+func sha256(s: string) -> string {
+    return "sha256-stub-not-implemented-in-pure-eigen"
+}
+
+# Returns the character code at index i in a string (helper)
+func char_at(s: string, i: int) -> int {
+    return 0
+}

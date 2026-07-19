@@ -1,5 +1,3 @@
-import math
-import cmath
 
 class CircuitSVGGenerator:
     """Generates modern, high-quality SVG visualizations of EQIR quantum circuits."""
@@ -64,14 +62,18 @@ class CircuitSVGGenerator:
         height = padding_y * 2 + max(0, num_qubits - 1) * qubit_height
 
         svg = []
-        svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">')
+        svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
+                   f'height="{height}" viewBox="0 0 {width} {height}">')
 
         svg.append("""<style>
             .bg { fill: #0f111a; }
             .qubit-line { stroke: #2a2e42; stroke-width: 2; stroke-dasharray: 2, 2; }
-            .qubit-label { fill: #8f93a2; font-family: 'Outfit', 'Inter', sans-serif; font-size: 14px; font-weight: bold; }
+            .qubit-label { fill: #8f93a2; font-family: 'Outfit', 'Inter', sans-serif;
+            font-size: 14px; font-weight: bold; }
             .gate-rect { fill: url(#gate-grad); stroke: #82aaff; stroke-width: 1.5; rx: 6px; ry: 6px; }
-            .gate-text { fill: #ffffff; font-family: 'Outfit', 'Inter', sans-serif; font-size: 13px; font-weight: bold; text-anchor: middle; dominant-baseline: middle; }
+            .gate-text { fill: #ffffff; font-family: 'Outfit', 'Inter', sans-serif;
+            font-size: 13px; font-weight: bold; text-anchor: middle;
+            dominant-baseline: middle; }
             .control-dot { fill: #82aaff; stroke: #0f111a; stroke-width: 1.5; }
             .cnot-target-outer { fill: #ff5370; stroke: #ff5370; stroke-width: 1.5; }
             .cnot-target-inner { stroke: #ffffff; stroke-width: 2; }
@@ -90,7 +92,8 @@ class CircuitSVGGenerator:
 
         for i, q in enumerate(qubits):
             y = padding_y + i * qubit_height
-            svg.append(f'<text x="{padding_x - 15}" y="{y}" class="qubit-label" text-anchor="end" dominant-baseline="middle">{q}</text>')
+            svg.append(f'<text x="{padding_x - 15}" y="{y}" class="qubit-label" '
+                       f'text-anchor="end" dominant-baseline="middle">{q}</text>')
             svg.append(f'<line x1="{padding_x}" y1="{y}" x2="{width - padding_x}" y2="{y}" class="qubit-line" />')
 
         for col_idx, col_gates in enumerate(columns):
@@ -115,8 +118,10 @@ class CircuitSVGGenerator:
                     
                     r = 8
                     svg.append(f'<circle cx="{cx}" cy="{tgt_y}" r="{r}" class="cnot-target-outer" />')
-                    svg.append(f'<line x1="{cx - r + 3}" y1="{tgt_y}" x2="{cx + r - 3}" y2="{tgt_y}" class="cnot-target-inner" />')
-                    svg.append(f'<line x1="{cx}" y1="{tgt_y - r + 3}" x2="{cx}" y2="{tgt_y + r - 3}" class="cnot-target-inner" />')
+                    svg.append(f'<line x1="{cx - r + 3}" y1="{tgt_y}" x2="{cx + r - 3}" '
+                               f'y2="{tgt_y}" class="cnot-target-inner" />')
+                    svg.append(f'<line x1="{cx}" y1="{tgt_y - r + 3}" x2="{cx}" '
+                               f'y2="{tgt_y + r - 3}" class="cnot-target-inner" />')
 
                 elif len(targets) == 2 and gate_name == 'SWAP':
                     y1 = padding_y + target_indices[0] * qubit_height

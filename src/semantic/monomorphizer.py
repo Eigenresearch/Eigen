@@ -1,6 +1,6 @@
 from src.frontend.ast import (
     ProgramNode, FuncDeclNode, CallNode, VarRefNode, LiteralNode, LetNode, VarDeclNode,
-    BinaryOpNode, AssignmentNode, ReturnNode, IfNode, ForNode, WhileNode, PrintNode, AssertNode
+    BinaryOpNode, UnaryOpNode, AssignmentNode, ReturnNode, IfNode, ForNode, WhileNode, PrintNode, AssertNode
 )
 import copy
 
@@ -93,6 +93,10 @@ class Monomorphizer:
             node.right = self.visit(node.right)
             return node
 
+        elif isinstance(node, UnaryOpNode):
+            node.operand = self.visit(node.operand)
+            return node
+
         elif isinstance(node, CallNode):
             # Recursively visit arguments first
             node.args = [self.visit(arg) for arg in node.args]
@@ -113,7 +117,7 @@ class Monomorphizer:
                 
                 # Solve generic parameters (bindings)
                 bindings = {}
-                for arg_type, (p_name, p_type) in zip(arg_types, func.params):
+                for arg_type, (_p_name, p_type) in zip(arg_types, func.params, strict=False):
                     if p_type in func.generic_params:
                         bindings[p_type] = arg_type
 
@@ -179,4 +183,6 @@ class Monomorphizer:
             left_type = self.infer_type(node.left)
             if left_type in ("float", "int"):
                 return left_type
+        elif isinstance(node, UnaryOpNode):
+            return self.infer_type(node.operand)
         return "any"

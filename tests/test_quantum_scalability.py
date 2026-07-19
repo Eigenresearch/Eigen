@@ -1,6 +1,5 @@
 """§8.1 — Quantum Scalability tests, organised by the rows in
 the roadmap table."""
-import cmath
 import math
 import unittest
 
@@ -15,7 +14,6 @@ from src.quantum_scalability import (
     SparseDensityMatrix,
     MPSSwapRouter,
     SWAPMove,
-    SwapRoutingResult,
     OptimisedTableau,
 )
 
@@ -151,7 +149,7 @@ class TestApplyGateInPlace(unittest.TestCase):
         sv = [1+0j, 0+0j, 0+0j, 0+0j]  # |00>
         apply_gate_in_place(sv, IDENTITY_2, [0], 2)
         # Single-qubit identity on qubit 0 of a 2-qubit space
-        for a, b in zip(sv, [1+0j, 0+0j, 0+0j, 0+0j]):
+        for a, b in zip(sv, [1+0j, 0+0j, 0+0j, 0+0j], strict=False):
             self.assertAlmostEqual(a, b)
 
     def test_h_gate_creates_superposition(self):

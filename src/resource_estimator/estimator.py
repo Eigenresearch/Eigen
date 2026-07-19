@@ -10,8 +10,7 @@
 # through the shared `gate_registry` so adding a new gate to the registry
 # automatically flows the right classification here, instead of needing
 # a parallel `if/elif` chain (same audit fix as the exporter backends).
-import math
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.backend.gate_registry import (
     CLIFFORD_GATES,
     GATE_QUBIT_COUNT,

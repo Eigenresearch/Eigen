@@ -77,7 +77,7 @@ class Qasm3Exporter:
         # Translate measurements
         if measures:
             lines.append("")
-            for idx, (q, c) in enumerate(measures):
+            for idx, (q, _c) in enumerate(measures):
                 lines.append(f"c[{idx}] = measure q[{q_map[q]}];")
                 
         return "\n".join(lines)

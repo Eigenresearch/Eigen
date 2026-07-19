@@ -45,7 +45,7 @@ import unittest
 from src.frontend import ast as ast_module
 from src.frontend.ast import (
     ProgramNode, ImportNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode,
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode,
     StructDeclNode, StructLiteralNode, DotAccessNode, ArrayLiteralNode,
@@ -58,6 +58,8 @@ from src.frontend.ast import (
     TraitDeclNode, TraitMethodSignatureNode, ImplBlockNode,
     # §3.3 — type alias AST node.
     TypeAliasDeclNode,
+    # v2.8 promoted language syntax.
+    AsyncFuncDeclNode, AwaitExprNode, OperatorDeclNode,
 )
 from src.ir.ir_converter import EQIRConverter
 from src.ir.ir_graph import EQIRGraph
@@ -163,6 +165,7 @@ class TestASTExhaustiveness(unittest.TestCase):
             VarDeclNode: lambda: VarDeclNode('qq', 'qubit'),
             BinaryOpNode: lambda: BinaryOpNode('+', LiteralNode(1, 'int'),
                                                 LiteralNode(2, 'int')),
+            UnaryOpNode: lambda: UnaryOpNode('-', LiteralNode(5, 'int')),
             LiteralNode: lambda: LiteralNode(1, 'int'),
             VarRefNode: lambda: VarRefNode('x'),
             QFuncCallNode: lambda: QFuncCallNode('main', ['q0']),
@@ -178,6 +181,11 @@ class TestASTExhaustiveness(unittest.TestCase):
                                             LiteralNode(1, 'int')),
             FuncDeclNode: lambda: FuncDeclNode('foo', [], [], 'int',
                                                 [ReturnNode(LiteralNode(1, 'int'))]),
+            AsyncFuncDeclNode: lambda: AsyncFuncDeclNode(
+                'fetch', [], [], 'int', [ReturnNode(LiteralNode(1, 'int'))]),
+            AwaitExprNode: lambda: AwaitExprNode(VarRefNode('pending')),
+            OperatorDeclNode: lambda: OperatorDeclNode(
+                '+', [], [('other', 'S')], 'S', [ReturnNode(VarRefNode('self'))]),
             ForNode: lambda: ForNode('i', LiteralNode([1, 2], 'array'),
                                        [TraceNode()]),
             WhileNode: lambda: WhileNode(
@@ -248,8 +256,12 @@ class TestASTExhaustiveness(unittest.TestCase):
 
         all_subclasses = set(_all_ast_node_subclasses())
         # Sanity check: every concrete subclass has a factory entry.
-        missing = sorted(all_subclasses - set(factories.keys()))
-        unexpected = sorted(set(factories.keys()) - all_subclasses)
+        missing = sorted(
+            all_subclasses - set(factories.keys()), key=lambda cls: cls.__name__
+        )
+        unexpected = sorted(
+            set(factories.keys()) - all_subclasses, key=lambda cls: cls.__name__
+        )
         self.assertEqual(
             missing, [],
             msg=f"missing factories for: {missing}; unexpected: {unexpected}",
@@ -404,7 +416,6 @@ class TestASTFuzzRoundTrip(unittest.TestCase):
         rng = random.Random(FUZZ_SEED)
         compiled_count = 0
         skipped_count = 0
-        last_graph = None
         for i in range(N_FUZZ_PROGRAMS):
             program = self._fuzz_program(rng)
             try:
@@ -417,7 +428,6 @@ class TestASTFuzzRoundTrip(unittest.TestCase):
                 skipped_count += 1
                 continue
             compiled_count += 1
-            last_graph = graph
 
             self.assertIsInstance(graph, EQIRGraph)
 

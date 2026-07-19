@@ -137,9 +137,7 @@ class AmplitudeDampingChannel(NoiseChannel):
         elif hasattr(simulator, 'apply_1qubit_gate'):
             r = self.rng.random()
             if r < self.gamma:
-                outcome = simulator.measure(qubit_name)
-                if outcome == 1:
-                    simulator.X(qubit_name)
+                simulator.apply_1qubit_gate(qubit_name, k1)
             else:
                 simulator.apply_1qubit_gate(qubit_name, k0)
 
@@ -162,15 +160,14 @@ class PhaseDampingChannel(NoiseChannel):
     def apply_to_qubit(self, simulator, qubit_name: str, **kwargs):
         if self.lambda_val <= 0.0:
             return
-        p = 1.0 - math.sqrt(1.0 - self.lambda_val)
         k0 = [[1.0, 0.0], [0.0, math.sqrt(1.0 - self.lambda_val)]]
         k1 = [[0.0, 0.0], [0.0, math.sqrt(self.lambda_val)]]
         if hasattr(simulator, 'apply_kraus_channel'):
             simulator.apply_kraus_channel(qubit_name, [k0, k1])
         elif hasattr(simulator, 'apply_1qubit_gate'):
             r = self.rng.random()
-            if r < p:
-                simulator.Z(qubit_name)
+            if r < self.lambda_val:
+                simulator.apply_1qubit_gate(qubit_name, k1)
             else:
                 simulator.apply_1qubit_gate(qubit_name, k0)
 
@@ -200,6 +197,41 @@ class ReadoutErrorChannel(NoiseChannel):
         if self.prob > 0.0 and self.rng.random() < self.prob:
             return 1 - outcome
         return outcome
+
+
+class ReadoutError:
+    """Confusion-matrix-based readout error channel.
+
+    The confusion matrix is indexed as ``matrix[true_outcome]`` and yields
+    ``[p(0|true), p(1|true)]``. For a single qubit it is therefore a 2x2
+    stochastic matrix::
+
+        [[p(0|0), p(1|0)],
+         [p(0|1), p(1|1)]]
+
+    Each row must sum to 1. ``apply`` samples the observed outcome given a
+    noiseless ``outcome``.
+    """
+
+    def __init__(self, confusion_matrix, rng=None, seed=None):
+        matrix = [list(row) for row in confusion_matrix]
+        if len(matrix) != 2 or any(len(row) != 2 for row in matrix):
+            raise ValueError(
+                "confusion_matrix must be 2x2 for a single-qubit readout")
+        for row in matrix:
+            total = sum(row)
+            if total < 0.0:
+                raise ValueError("confusion_matrix rows must be non-negative")
+            if abs(total - 1.0) > 1e-9:
+                raise ValueError(
+                    f"confusion_matrix rows must be stochastic (sum to 1), "
+                    f"got row sum {total}")
+        self.matrix = matrix
+        self.rng = rng if rng is not None else random.Random(seed)
+
+    def apply(self, outcome: int, rng=None) -> int:
+        r = rng if rng is not None else self.rng
+        return r.choices([0, 1], weights=self.matrix[outcome])[0]
 
 
 class NoisePipeline:

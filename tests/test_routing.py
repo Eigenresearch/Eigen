@@ -1,7 +1,7 @@
 """Tests for Hardware Connectivity Mapper (routing module)."""
 import unittest
 from src.routing.router import (
-    CouplingMap, RoutedCircuit, BasicSwapRouter, GreedyRouter, SabreRouter, route_eqir_graph
+    CouplingMap, BasicSwapRouter, GreedyRouter, route_eqir_graph
 )
 from src.ir.ir_graph import EQIRGraph
 

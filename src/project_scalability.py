@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import collections
 import dataclasses
-import re
 import typing
 
 
@@ -392,8 +391,6 @@ class PackageGraph:
         """Return a list of layers; layer[k] is the set of
         packages that have all their dependencies in layers 0..k-1
         (so they can build in parallel across each layer)."""
-        # Track nodes that have been assigned
-        visited: typing.Set[str] = set()
         # All nodes whose all deps are visited can go in this layer
         layers: typing.List[typing.List[str]] = []
         # First layer = nodes with no dependencies inside the workspace

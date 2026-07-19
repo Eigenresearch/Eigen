@@ -24,13 +24,10 @@ import json
 import math
 import cmath
 import os
-import re
 import statistics
-import sys
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -464,10 +461,10 @@ def run_benchmark(cases_dir: str = CASES_DIR) -> list[CaseResult]:
         n_d = _gate_depth(graph, qubit_index)
 
         # Pre-compile graph once.
-        def _eigen_run():
+        def _eigen_run(graph=graph, qubit_index=qubit_index):
             return eigen_run(graph, qubit_index)
 
-        def _numpy_run():
+        def _numpy_run(graph=graph, n_q=n_q, qubit_index=qubit_index):
             return numpy_simulate(graph, n_q, qubit_index)
 
         # Time Eigen.
@@ -671,7 +668,6 @@ def to_latex(results: list[CaseResult]) -> str:
     # Histogram bin labels.
     bin_labels = ",".join(f"{i+1}" for i in range(len(hist_counts)))
     bin_ticks = f"xticklabels={{{', '.join(lbl for _, _, lbl in bins)}}}"
-    bin_count = len(hist_counts)
 
     # Build the LaTeX document as one big string.
     latex = r"""\documentclass[11pt,a4paper]{article}
@@ -691,7 +687,8 @@ def to_latex(results: list[CaseResult]) -> str:
 % Black-and-white only — no colour anywhere. Strict line-based visual rhythm.
 \definecolor{linegray}{HTML}{222222}
 
-\title{Eigen vs numpy state-vector: """ + f"{n_rows}" + r""" hard-quantum benchmarks across """ + f"{len(by_cat)}" + r""" categories}
+\title{Eigen vs numpy state-vector: """ + f"{n_rows}" + r""" hard-quantum benchmarks across """ \
++ f"{len(by_cat)}" + r""" categories}
 \author{Eigen 2.7 hard-quantum benchmark harness}
 \date{\today}
 
@@ -738,19 +735,23 @@ evolution (parse / type-check / compile cost is amortised).
 $Q$ = qubits, $g$ = gates, $d$=depth. \texttt{PASS} requires accuracy $\ge 99.9\%$.
 \textbf{""" + f"{n_passing}" + r""" pass / """ + f"{n_failing}" + r""" fail}.}\\
 \toprule
-Test case & cat & $\mathbf{q}$ & $\mathbf{g}$ & $\mathbf{d}$ & Eigen (ms) & numpy (ms) & speedup & acc (\%) & max dev & status \\
+""" + r"""Test case & cat & $\mathbf{q}$ & $\mathbf{g}$ & $\mathbf{d}$ & Eigen (ms) & """ \
++ r"""numpy (ms) & speedup & acc (\%) & max dev & status \\
 \midrule[0.4pt]
 \endfirsthead
 \multicolumn{11}{c}{\tiny\itshape continued from previous page}\\
 \toprule
-Test case & cat & $\mathbf{q}$ & $\mathbf{g}$ & $\mathbf{d}$ & Eigen (ms) & numpy (ms) & speedup & acc (\%) & max dev & status \\
+""" + r"""Test case & cat & $\mathbf{q}$ & $\mathbf{g}$ & $\mathbf{d}$ & Eigen (ms) & """ \
++ r"""numpy (ms) & speedup & acc (\%) & max dev & status \\
 \midrule[0.4pt]
 \endhead
 \midrule[0.1pt]
 \multicolumn{11}{r}{\tiny\itshape continued on next page}\\
 \endfoot
 \midrule[0.4pt]
-\textbf{mean (over valid rows)} & -- & -- & -- & -- & """ + f"{mean_eigen:.3f}" + r""" & """ + f"{mean_numpy:.3f}" + r""" & """ + f"{overall_speedup:.2f}" + r""" & """ + f"{mean_acc*100:.4f}" + r""" & """ + f"{mean_dev:.2e}" + r""" & -- \\
+\textbf{mean (over valid rows)} & -- & -- & -- & -- & """ + f"{mean_eigen:.3f}" + r""" & """ \
++ f"{mean_numpy:.3f}" + r""" & """ + f"{overall_speedup:.2f}" + r""" & """ \
++ f"{mean_acc*100:.4f}" + r""" & """ + f"{mean_dev:.2e}" + r""" & -- \\
 \bottomrule
 \endlastfoot
 """ + longtable_body + r"""
@@ -766,11 +767,14 @@ Test case & cat & $\mathbf{q}$ & $\mathbf{g}$ & $\mathbf{d}$ & Eigen (ms) & nump
 \renewcommand{\arraystretch}{1.05}
 \begin{tabular}{@{}l r r r r r r r r@{}}
 \toprule
-Category & $n$ & mean $\mathbf{q}$ & mean $\mathbf{g}$ & mean $\mathbf{d}$ & Eigen (ms) & numpy (ms) & mean sp & mean acc (\%) \\
+""" + r"""Category & $n$ & mean $\mathbf{q}$ & mean $\mathbf{g}$ & mean $\mathbf{d}$ & """ \
++ r"""Eigen (ms) & numpy (ms) & mean sp & mean acc (\%) \\
 \midrule[0.4pt]
 """ + cat_table_body + r"""
 \\ \midrule[0.4pt]
-\textbf{overall} & """ + f"{n_rows}" + r""" & -- & -- & -- & """ + f"{mean_eigen:.3f}" + r""" & """ + f"{mean_numpy:.3f}" + r""" & """ + f"{overall_speedup:.2f}" + r""" & """ + f"{mean_acc*100:.4f}" + r""" \\
+\textbf{overall} & """ + f"{n_rows}" + r""" & -- & -- & -- & """ + f"{mean_eigen:.3f}" + r""" & """ \
++ f"{mean_numpy:.3f}" + r""" & """ + f"{overall_speedup:.2f}" + r""" & """ \
++ f"{mean_acc*100:.4f}" + r""" \\
 \bottomrule
 \end{tabular}
 \caption{Per-category aggregation: each row summarises one category of tests.

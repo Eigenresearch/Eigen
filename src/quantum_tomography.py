@@ -18,7 +18,6 @@ quantum device.
 from __future__ import annotations
 
 import dataclasses
-import enum
 import math
 import typing
 
@@ -312,7 +311,7 @@ def _poly_extrapolate(xs: typing.List[float],
         sum_x = sum(xs)
         sum_y = sum(ys)
         sum_x2 = sum(x * x for x in xs)
-        sum_xy = sum(x * y for x, y in zip(xs, ys))
+        sum_xy = sum(x * y for x, y in zip(xs, ys, strict=False))
         denom = n * sum_x2 - sum_x * sum_x
         if denom == 0:
             return ys[0], [0, ys[0]]
@@ -332,8 +331,8 @@ def _poly_extrapolate(xs: typing.List[float],
         A = [[s4, s3, s2],
               [s3, s2, sum(xs)],
               [s2, sum(xs), n]]
-        sy2 = sum(x ** 2 * y for x, y in zip(xs, ys))
-        sy1 = sum(x * y for x, y in zip(xs, ys))
+        sy2 = sum(x ** 2 * y for x, y in zip(xs, ys, strict=False))
+        sy1 = sum(x * y for x, y in zip(xs, ys, strict=False))
         b = [sy2, sy1, sum(ys)]
         c = _solve_3x3(A, b)
         return c[2] if c is not None else 0.0, c or [0, 0, 0]
@@ -372,7 +371,7 @@ def _exp_extrapolate(xs: typing.List[float],
     sum_e = sum(ez)
     sum_e2 = sum(e * e for e in ez)
     sum_y = sum(ys)
-    sum_ey = sum(e * y for e, y in zip(ez, ys))
+    sum_ey = sum(e * y for e, y in zip(ez, ys, strict=False))
     denom = n * sum_e2 - sum_e * sum_e
     if abs(denom) < 1e-12:
         return ys[0]
@@ -465,7 +464,7 @@ def m3_measurement_mitigation(
            for i in range(n)]
     _gauss_jordan(aug, n)
     mitigated = [aug[i][n] for i in range(n)]
-    mitigated_dict = {k: max(0.0, v) for k, v in zip(keys, mitigated)}
+    mitigated_dict = {k: max(0.0, v) for k, v in zip(keys, mitigated, strict=False)}
     return M3Result(noisy_counts=noisy_counts,
                        mitigated_counts=mitigated_dict,
                        calibration_matrix=calibration_matrix)

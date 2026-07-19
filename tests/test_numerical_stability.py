@@ -5,9 +5,7 @@ import math
 import unittest
 
 from src.numerical_stability import (
-    NumericalStabilityReport,
     normalise,
-    TruncationMetrics,
     TruncationAccumulator,
     EntanglementEntropyTracker,
     binary_von_neumann_entropy,

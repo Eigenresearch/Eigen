@@ -11,6 +11,10 @@ import dataclasses
 import hashlib
 import os
 import typing
+from collections import OrderedDict
+
+
+_MAX_CACHE_SIZE = 128
 
 
 @dataclasses.dataclass
@@ -33,7 +37,7 @@ class TypeCheckerCache:
     __slots__ = ("_cache", "_hits", "_misses")
 
     def __init__(self):
-        self._cache: dict[tuple[str, int], typing.Any] = {}
+        self._cache: "OrderedDict[tuple[str, int], typing.Any]" = OrderedDict()
         self._hits = 0
         self._misses = 0
 
@@ -42,12 +46,17 @@ class TypeCheckerCache:
         result = self._cache.get(key)
         if result is not None:
             self._hits += 1
+            self._cache.move_to_end(key)
             return result
         self._misses += 1
         return None
 
     def put(self, name: str, scope_id: int, resolved_type: typing.Any):
-        self._cache[(name, scope_id)] = resolved_type
+        key = (name, scope_id)
+        self._cache[key] = resolved_type
+        self._cache.move_to_end(key)
+        if len(self._cache) > _MAX_CACHE_SIZE:
+            self._cache.popitem(last=False)
 
     def invalidate_scope(self, scope_id: int):
         keys_to_remove = [k for k in self._cache if k[1] == scope_id]
@@ -74,13 +83,13 @@ class ImportCache:
     __slots__ = ("_cache", "_file_hashes")
 
     def __init__(self):
-        self._cache: dict[str, typing.Any] = {}
+        self._cache: "OrderedDict[str, typing.Any]" = OrderedDict()
         self._file_hashes: dict[str, str] = {}
 
     def _file_hash(self, path: str) -> str:
         try:
             with open(path, "rb") as f:
-                return hashlib.md5(f.read()).hexdigest()
+                return hashlib.sha256(f.read()).hexdigest()
         except (IOError, OSError):
             return ""
 
@@ -93,15 +102,22 @@ class ImportCache:
             current_hash = self._file_hash(source_file)
             cached_hash = self._file_hashes.get(source_file)
             if cached_hash == current_hash:
+                if module_path in self._cache:
+                    self._cache.move_to_end(module_path)
                 return self._cache.get(module_path), True
             else:
                 self._file_hashes[source_file] = current_hash
                 return None, False
+        if module_path in self._cache:
+            self._cache.move_to_end(module_path)
         return self._cache.get(module_path), True
 
     def put(self, module_path: str, module: typing.Any,
             source_file: str | None = None):
         self._cache[module_path] = module
+        self._cache.move_to_end(module_path)
+        if len(self._cache) > _MAX_CACHE_SIZE:
+            self._cache.popitem(last=False)
         if source_file and os.path.exists(source_file):
             self._file_hashes[source_file] = self._file_hash(source_file)
 
@@ -129,41 +145,52 @@ class IncrementalCache:
                   "_source_hashes")
 
     def __init__(self):
-        self._ast_cache: dict[str, typing.Any] = {}
-        self._eqir_cache: dict[str, typing.Any] = {}
-        self._ebc_cache: dict[str, typing.Any] = {}
+        self._ast_cache: "OrderedDict[str, typing.Any]" = OrderedDict()
+        self._eqir_cache: "OrderedDict[str, typing.Any]" = OrderedDict()
+        self._ebc_cache: "OrderedDict[str, typing.Any]" = OrderedDict()
         self._source_hashes: dict[str, str] = {}
 
     def _source_hash(self, source: str) -> str:
-        return hashlib.sha256(source.encode("utf-8")).hexdigest()[:16]
+        return hashlib.sha256(source.encode("utf-8")).hexdigest()[:32]
 
     def get_ast(self, source: str) -> tuple[typing.Any, bool]:
         h = self._source_hash(source)
-        key = h
-        if key in self._ast_cache and self._source_hashes.get(key) == h:
-            return self._ast_cache[key], True
+        if h in self._ast_cache:
+            self._ast_cache.move_to_end(h)
+            return self._ast_cache[h], True
         return None, False
 
     def put_ast(self, source: str, ast: typing.Any):
         h = self._source_hash(source)
         self._ast_cache[h] = ast
+        self._ast_cache.move_to_end(h)
+        if len(self._ast_cache) > _MAX_CACHE_SIZE:
+            self._ast_cache.popitem(last=False)
         self._source_hashes[h] = h
 
     def get_eqir(self, source_hash: str) -> tuple[typing.Any, bool]:
         if source_hash in self._eqir_cache:
+            self._eqir_cache.move_to_end(source_hash)
             return self._eqir_cache[source_hash], True
         return None, False
 
     def put_eqir(self, source_hash: str, graph: typing.Any):
         self._eqir_cache[source_hash] = graph
+        self._eqir_cache.move_to_end(source_hash)
+        if len(self._eqir_cache) > _MAX_CACHE_SIZE:
+            self._eqir_cache.popitem(last=False)
 
     def get_ebc(self, source_hash: str) -> tuple[typing.Any, bool]:
         if source_hash in self._ebc_cache:
+            self._ebc_cache.move_to_end(source_hash)
             return self._ebc_cache[source_hash], True
         return None, False
 
     def put_ebc(self, source_hash: str, bytecode: typing.Any):
         self._ebc_cache[source_hash] = bytecode
+        self._ebc_cache.move_to_end(source_hash)
+        if len(self._ebc_cache) > _MAX_CACHE_SIZE:
+            self._ebc_cache.popitem(last=False)
 
     def invalidate(self, source: str | None = None):
         if source:
@@ -193,15 +220,22 @@ class LazyModuleLoader:
     __slots__ = ("_loaders", "_loaded", "_loading")
 
     def __init__(self):
-        self._loaders: dict[str, typing.Callable] = {}
-        self._loaded: dict[str, typing.Any] = {}
+        self._loaders: "OrderedDict[str, typing.Callable]" = OrderedDict()
+        self._loaded: "OrderedDict[str, typing.Any]" = OrderedDict()
         self._loading: set[str] = set()
 
     def register(self, name: str, loader: typing.Callable):
         self._loaders[name] = loader
+        self._loaders.move_to_end(name)
+        # §5 (memory): bound the loader registry so long-lived processes
+        # (LSP server) cannot accumulate unbounded closures.
+        while len(self._loaders) > _MAX_CACHE_SIZE:
+            evicted, _ = self._loaders.popitem(last=False)
+            self._loaded.pop(evicted, None)
 
     def load(self, name: str) -> typing.Any:
         if name in self._loaded:
+            self._loaded.move_to_end(name)
             return self._loaded[name]
         if name in self._loading:
             raise RuntimeError(f"Circular lazy load detected for '{name}'")
@@ -211,12 +245,24 @@ class LazyModuleLoader:
         try:
             module = self._loaders[name]()
             self._loaded[name] = module
+            self._loaded.move_to_end(name)
+            while len(self._loaded) > _MAX_CACHE_SIZE:
+                self._loaded.popitem(last=False)
             return module
         finally:
             self._loading.discard(name)
 
     def is_loaded(self, name: str) -> bool:
         return name in self._loaded
+
+    def clear(self):
+        """Drop registered, loaded, and in-flight modules.
+
+        Primarily useful for isolated compiler sessions and deterministic tests.
+        """
+        self._loaders.clear()
+        self._loaded.clear()
+        self._loading.clear()
 
     def unload(self, name: str):
         self._loaded.pop(name, None)
@@ -243,7 +289,7 @@ def regex_lexer_tokenize(source: str) -> list[tuple]:
         ("COMMENT", r"#[^\n]*"),
         ("FLOAT_LIT", r"\d+\.\d+([eE][+-]?\d+)?"),
         ("INT_LIT", r"\d+"),
-        ("STRING_LIT", r'"[^"]*"'),
+        ("STRING_LIT", r'"(?:[^"\\]|\\.)*"'),
         ("STRING_LIT_SINGLE", r"'[^']*'"),
         ("ARROW", r"->"),
         ("POW", r"\*\*"),

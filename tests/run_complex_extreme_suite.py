@@ -1,6 +1,4 @@
 import time
-import random
-import math
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.backend.ebc_compiler import EBCCompiler
@@ -280,7 +278,7 @@ def py_nested_exceptions():
                 if i % 3 == 0: raise ValueError()
             except ValueError:
                 catches += 1
-                raise KeyError()
+                raise KeyError() from None
         except KeyError:
             catches += 1
         i += 1
@@ -356,7 +354,9 @@ def benchmark():
         vm_res.execute(instrs)
         
         # Get output string description
-        if name in ("01. 16-Qubit Sparse Circuit", "02. 12-Qubit QFT Simulation", "03. 14-Qubit GHZ State", "06. Bernstein-Vazirani s=341", "10. Phase Estimation QPE-4"):
+        if name in ("01. 16-Qubit Sparse Circuit", "02. 12-Qubit QFT Simulation",
+                    "03. 14-Qubit GHZ State", "06. Bernstein-Vazirani s=341",
+                    "10. Phase Estimation QPE-4"):
             state = vm_res.simulator.get_state_vector()
             # Find non-zero amplitudes
             non_zeros = []
@@ -388,12 +388,14 @@ def benchmark():
         times_python = []
         for _ in range(10):
             start = time.perf_counter()
-            py_res = run_py_test(name)
+            run_py_test(name)
             times_python.append(time.perf_counter() - start)
             
         py_output = run_py_test(name)
         if isinstance(py_output, list) or hasattr(py_output, '__iter__') and not isinstance(py_output, (str, bytes)):
-            if name in ("04. Fibonacci 22 Recursion", "05. Array Bubble Sort 25", "07. Ackermann Recursion 3,2", "08. Nested Exceptions", "09. Complex Struct/Map Logic"):
+            if name in ("04. Fibonacci 22 Recursion", "05. Array Bubble Sort 25",
+                        "07. Ackermann Recursion 3,2", "08. Nested Exceptions",
+                        "09. Complex Struct/Map Logic"):
                 py_out = f"Result: {py_output}"
             else:
                 non_zeros = []
@@ -419,12 +421,14 @@ def benchmark():
 
     # Generate Markdown File
     with open("complex_extreme_results.md", "w", encoding="utf-8") as f:
-        f.write("# Extreme Performance & Correctness: Native Python vs Eigen VM (Misery 2.6)\n\n")
-        f.write("Detailed verification of 10 highly complex algorithmic and quantum operations, showing execution speeds and exact outputs to verify compiler correctness.\n\n")
+        f.write("# Extreme Performance & Correctness: Native Python vs Eigen VM (Meridian 2.7)\n\n")
+        f.write("Detailed verification of 10 highly complex algorithmic and quantum operations, "
+                "showing execution speeds and exact outputs to verify compiler correctness.\n\n")
         f.write("| Test Case | Native Python Time | Eigen VM Time | Python Output | Eigen VM Output |\n")
         f.write("| --- | --- | --- | --- | --- |\n")
         for name, data in sorted(results.items()):
-            f.write(f"| {name} | {data['avg_py']:.3f} ms | {data['avg_eig']:.3f} ms | `{data['py_out']}` | `{data['eig_out']}` |\n")
+            f.write(f"| {name} | {data['avg_py']:.3f} ms | {data['avg_eig']:.3f} ms | "
+                    f"`{data['py_out']}` | `{data['eig_out']}` |\n")
 
     # Generate Dashboard HTML
     with open("complex_dashboard.html", "w", encoding="utf-8") as f:
@@ -432,7 +436,7 @@ def benchmark():
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Eigen 2.6 «Misery» Complex Extreme Dashboard</title>
+    <title>Eigen 2.7 «Meridian» Complex Extreme Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -576,8 +580,9 @@ def benchmark():
 </head>
 <body>
     <div class="container">
-        <h1>Eigen 2.6 «Misery» Extreme Performance Dashboard</h1>
-        <div class="subtitle">Comparison of execution speeds and actual algorithm outputs (Native Python vs. Eigen VM).</div>
+        <h1>Eigen 2.7 «Meridian» Extreme Performance Dashboard</h1>
+        <div class="subtitle">"""
+        """Comparison of execution speeds and actual algorithm outputs (Native Python vs. Eigen VM).</div>
         
         <div class="grid">
             <div class="card">

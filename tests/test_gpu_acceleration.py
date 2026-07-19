@@ -431,7 +431,6 @@ class TestGPUDispatchOnAllGateTypes(unittest.TestCase):
         sys.modules.pop('cupy', None)
 
     def test_all_named_gates_route_through_gpu_engine(self):
-        import cmath
         # Allocate 3 qubits for CCX/CSWAP/CP/CRX/CRY/CRZ.
         for n in ('q0', 'q1', 'q2'):
             self.sim.allocate_qubit(n)

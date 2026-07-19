@@ -32,7 +32,6 @@ import logging
 import time
 import urllib.error
 import urllib.request
-from typing import Optional
 
 from src.ir.ir_graph import EQIRGraph
 

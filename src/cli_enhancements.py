@@ -36,7 +36,6 @@ import difflib
 import enum
 import os
 import re
-import shutil
 import time
 import typing
 
@@ -106,12 +105,14 @@ def _bash_completion(spec: CompletionSpec) -> str:
 
 
 def _zsh_completion(spec: CompletionSpec) -> str:
+    quoted = " ".join('"{s}"'.format(s=sc) for sc in spec.subcommands)
+    opt_str = ":".join(o.removeprefix("--") for o in spec.options)
     lines = [
         f"#compdef {spec.name}",
         f"_{spec.name}() {{",
         f"  local -a cmds",
-        f'  cmds=({" ".join(f"\"{sc}\"" for sc in spec.subcommands)})',
-        f'  _arguments -C "--{":".join(o.lstrip("--") for o in spec.options)}"',
+        f'  cmds=({quoted})',
+        f'  _arguments -C "--{opt_str}"',
         f'  _describe "subcommand" cmds',
         f"}}",
         f"_{spec.name} \"$@\"",
@@ -125,7 +126,7 @@ def _fish_completion(spec: CompletionSpec) -> str:
         lines.append(f"complete -c {spec.name} -n '__fish_use_subcommand' "
                       f"-a '{sc}'")
     for opt in spec.options:
-        lines.append(f"complete -c {spec.name} -l {opt.lstrip('--')}")
+        lines.append(f"complete -c {spec.name} -l {opt.removeprefix('--')}")
     return "\n".join(lines)
 
 
@@ -135,7 +136,8 @@ def _powershell_completion(spec: CompletionSpec) -> str:
         f"Register-ArgumentCompleter -Native -CommandName {spec.name} -ScriptBlock {{",
         f"    param($wordToComplete, $commandAst, $cursorPosition)",
         f'    $subcommands = @({"|".join(spec.subcommands)})',
-        f'    $subcommands | Where-Object {{ $_ -like "$wordToComplete*" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_) }}',
+        f'    $subcommands | Where-Object {{ $_ -like "$wordToComplete*" }} ' \
+        f'| ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_) }}',
         f"}}",
     ]
     return "\n".join(lines)
@@ -267,7 +269,7 @@ class FileWatcher:
         max_it = max_iterations if max_iterations is not None \
             else self.max_iterations
         events: typing.List[WatchEvent] = []
-        for i in range(max_it):
+        for _i in range(max_it):
             if self.should_stop():
                 break
             for p in self.paths:

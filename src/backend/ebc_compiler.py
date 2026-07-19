@@ -1,16 +1,16 @@
 from src.backend.bytecode import Opcode, Instruction
 from src.frontend.ast import (
     ProgramNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode, ASTNode,
     FuncDeclNode, ForNode, WhileNode, BreakNode, ContinueNode, StructDeclNode,
     StructLiteralNode, DotAccessNode, ArrayLiteralNode, TupleLiteralNode,
     TryCatchNode, ThrowNode, EnumDeclNode, NoiseNode, AssignmentNode, CallNode,
     IndexAccessNode, StructAllocNode, StructGetNode, StructSetNode,
     MapAllocNode, MapGetNode, MapSetNode, ArrayAllocNode, ArrayGetNode, ArraySetNode,
-    ParallelBlockNode, TaskStatementNode, MatchNode, StringInterpolationNode
+    ParallelBlockNode, TaskStatementNode, MatchNode, StringInterpolationNode,
 )
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 
@@ -27,6 +27,7 @@ class EBCCompiler:
     def __init__(self, peephole: bool = True):
         self.raw_code = []  # list of Instruction and Label objects
         self.qfuncs = {}    # func_name -> Label
+        self.async_funcs = set()
         self.global_structs = {}
         self.current_line = None
         self.loop_stack = []  # stack of (start_label, end_label)
@@ -46,7 +47,41 @@ class EBCCompiler:
         ">=": Opcode.GTE,
     }
 
+    _fold_map = {
+        "+": lambda a, b: a + b,
+        "-": lambda a, b: a - b,
+        "*": lambda a, b: a * b,
+        "==": lambda a, b: a == b,
+        "!=": lambda a, b: a != b,
+        "<": lambda a, b: a < b,
+        ">": lambda a, b: a > b,
+        "<=": lambda a, b: a <= b,
+        ">=": lambda a, b: a >= b,
+        "&": lambda a, b: a & b,
+        "|": lambda a, b: a | b,
+        "^": lambda a, b: a ^ b,
+        "<<": lambda a, b: a << b,
+        ">>": lambda a, b: a >> b,
+        "%": lambda a, b: a % b if b != 0 else None,
+    }
+
+    def _fold_constants(self, op: str, left_val, right_val):
+        fn = self._fold_map.get(op)
+        if fn is None:
+            return None
+        if op == "/" and right_val == 0:
+            return None
+        try:
+            return fn(left_val, right_val)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+
     def _compile_condition(self, left, op, right):
+        if isinstance(left, LiteralNode) and isinstance(right, LiteralNode):
+            folded = self._fold_constants(op, left.value, right.value)
+            if folded is not None:
+                self.emit(Opcode.LOAD_CONST, folded)
+                return
         self.visit_ast(left)
         self.visit_ast(right)
         self.emit(self._cond_op_map.get(op, Opcode.EQ))
@@ -91,7 +126,7 @@ class EBCCompiler:
                 self.emit(Opcode.ENTER_FRAME)
                 
                 # Pop arguments in reverse order and store in params
-                for param_name, param_type in reversed(node.params):
+                for param_name, _param_type in reversed(node.params):
                     self.emit(Opcode.STORE_VAR, param_name)
                 
                 # Compile function body
@@ -117,7 +152,7 @@ class EBCCompiler:
 
     def visit_ast(self, node: ASTNode):
         if hasattr(node, "line"):
-            self.current_line = getattr(node, "line")
+            self.current_line = node.line
 
         if isinstance(node, VarDeclNode):
             if node.type_name == "qubit":
@@ -153,6 +188,11 @@ class EBCCompiler:
                 self.visit_ast(node.left)
                 self.emit(Opcode.BIT_NOT)
             else:
+                if isinstance(node.left, LiteralNode) and isinstance(node.right, LiteralNode):
+                    folded = self._fold_constants(node.op, node.left.value, node.right.value)
+                    if folded is not None:
+                        self.emit(Opcode.LOAD_CONST, folded)
+                        return
                 self.visit_ast(node.left)
                 self.visit_ast(node.right)
                 op_map = {
@@ -180,6 +220,20 @@ class EBCCompiler:
                     self.emit(op_map[node.op])
                 else:
                     raise ValueError(f"Unsupported binary operator: {node.op}")
+
+        elif isinstance(node, UnaryOpNode):
+            if node.op == "not":
+                self.visit_ast(node.operand)
+                self.emit(Opcode.NOT)
+            elif node.op == "~":
+                self.visit_ast(node.operand)
+                self.emit(Opcode.BIT_NOT)
+            elif node.op == "-":
+                self.emit(Opcode.LOAD_CONST, 0)
+                self.visit_ast(node.operand)
+                self.emit(Opcode.SUB)
+            else:
+                raise ValueError(f"Unsupported unary operator: {node.op}")
 
         elif isinstance(node, GateNode):
             for arg in node.args:
@@ -245,7 +299,11 @@ class EBCCompiler:
             
             ok_label = Label("assert_ok")
             self.emit(Opcode.JMP_IF_TRUE, ok_label)
-            self.emit(Opcode.LOAD_CONST, f"Assertion Failed: {node.condition_left.to_source()} {node.op} {node.condition_right.to_source()}")
+            self.emit(
+                Opcode.LOAD_CONST,
+                f"Assertion Failed: {node.condition_left.to_source()} "
+                f"{node.op} {node.condition_right.to_source()}"
+            )
             self.emit(Opcode.THROW)
             self.emit_label(ok_label)
 
@@ -319,22 +377,34 @@ class EBCCompiler:
         elif isinstance(node, TryCatchNode):
             catch_label = Label("catch_block")
             end_label = Label("try_end")
-            
+            # TODO(F841): finally_label / finally_end_label are intended for
+            # proper finally-block control flow (end jump after finally_body);
+            # the compiler currently emits finally_body inline, not via these.
+            _finally_label = Label("finally_block")
+            _finally_end_label = Label("finally_end")
+            has_finally = bool(getattr(node, 'finally_body', None))
+
             self.emit(Opcode.PUSH_TRY, catch_label)
             for stmt in node.try_body:
                 self.visit_ast(stmt)
             self.emit(Opcode.POP_TRY)
+            if has_finally:
+                for stmt in node.finally_body:
+                    self.visit_ast(stmt)
             self.emit(Opcode.JMP, end_label)
-            
+
             self.emit_label(catch_label)
             if node.catch_var:
                 self.emit(Opcode.STORE_VAR, node.catch_var)
             else:
                 self.emit(Opcode.STORE_VAR, "_unused_exception")
-                
+
             for stmt in node.catch_body:
                 self.visit_ast(stmt)
-                
+            if has_finally:
+                for stmt in node.finally_body:
+                    self.visit_ast(stmt)
+
             self.emit_label(end_label)
 
         elif isinstance(node, ThrowNode):
@@ -349,11 +419,11 @@ class EBCCompiler:
                 bindings = dict(bindings)
                 
             if s_decl:
-                for f_name, f_type in s_decl.fields:
+                for f_name, _f_type in s_decl.fields:
                     self.visit_ast(bindings[f_name])
                 self.emit(Opcode.ALLOC_STRUCT, [f_name for f_name, _ in s_decl.fields])
             else:
-                for name, val in bindings.items():
+                for _name, val in bindings.items():
                     self.visit_ast(val)
                 self.emit(Opcode.ALLOC_STRUCT, list(bindings.keys()))
 
@@ -454,7 +524,7 @@ class EBCCompiler:
             self.emit(Opcode.SET_FIELD, node.field_name)
 
         elif isinstance(node, MapAllocNode):
-            for k, v in zip(node.keys, node.values):
+            for k, v in zip(node.keys, node.values, strict=False):
                 self.visit_ast(k)
                 self.visit_ast(v)
             self.emit(Opcode.ALLOC_MAP, len(node.keys))
@@ -488,7 +558,6 @@ class EBCCompiler:
 
         elif isinstance(node, ParallelBlockNode):
             # Emit SPAWN for each task, then JOIN
-            task_labels = []
             for task in node.tasks:
                 if isinstance(task, TaskStatementNode):
                     call = task.call
@@ -733,6 +802,10 @@ class EBCCompiler:
                         raise ValueError(f"Unresolved label: {instr.arg}")
                     instr.arg = resolved_idx
 
-        self.resolved_qfuncs = {name: label_to_index[label] for name, label in self.qfuncs.items() if label in label_to_index}
+        self.resolved_qfuncs = {
+            name: label_to_index[label]
+            for name, label in self.qfuncs.items()
+            if label in label_to_index
+        }
 
         return final_instructions

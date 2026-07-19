@@ -1,5 +1,4 @@
 import time
-import math
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.backend.ebc_compiler import EBCCompiler
@@ -98,8 +97,11 @@ def benchmark():
         print(f"{name} -> Python: {avg_py:.3f} ms | JIT: {avg_jit:.3f} ms | Speedup: {speedup:.2f}x")
 
     with open("benchmark_comparison.md", "w", encoding="utf-8") as f:
-        f.write("# Eigen 2.6 «Misery» Execution Benchmarks\n\n")
-        f.write("Comparison of execution time between Pure Python VM execution (JIT Disabled) and JIT-compiled VM execution (JIT Enabled) across 50 runs.\n\n")
+        f.write("# Eigen 2.7 «Meridian» Execution Benchmarks\n\n")
+        f.write(
+            "Comparison of execution time between Pure Python VM execution (JIT Disabled) "
+            "and JIT-compiled VM execution (JIT Enabled) across 50 runs.\n\n"
+        )
         f.write("| Benchmark Test Case | Pure Python VM (ms) | JIT-Enabled VM (ms) | Speedup Factor |\n")
         f.write("| --- | --- | --- | --- |\n")
         for name, data in results.items():

@@ -4,7 +4,6 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-import numpy as np
 
 # Read summary CSV
 summary_path = os.path.join("results", "benchmark_summary.csv")
@@ -208,7 +207,7 @@ for impl in ['eigen_vm', 'python']:
         key=lambda r: r['size'])
     sizes = [r['size'] for r in wl_rows]
     means = [r['mean_s'] * 1000 for r in wl_rows]
-    throughputs = [s / m for s, m in zip(sizes, means)]
+    throughputs = [s / m for s, m in zip(sizes, means, strict=False)]
     ax.plot(sizes, throughputs, marker='^',
              label=f"{impl} (gates/ms)", color=COLORS[impl],
              linewidth=2, markersize=8)

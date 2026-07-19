@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.frontend.lexer import Lexer, TokenType
 from src.frontend.parser import Parser
-from src.frontend.ast import ParallelBlockNode, TaskStatementNode
+from src.frontend.ast import ParallelBlockNode
 from src.backend.bytecode import Opcode
 
 
@@ -96,7 +96,7 @@ class TestGPUEngine:
         sim.CNOT('q0', 'q1')
         amps = sim.get_amplitudes_dict()
         assert len(amps) == 2
-        for state, amp in amps.items():
+        for _state, amp in amps.items():
             assert abs(abs(amp)**2 - 0.5) < 1e-10
 
     def test_simulator_dense_measure(self):
@@ -451,7 +451,17 @@ class TestIntegration:
         from src.backend.ebc_compiler import EBCCompiler
         from src.backend.vm import EigenVM
         
-        code = "eigen 2.3\nqubit q0\nqubit q1\ncbit c0\ncbit c1\nH q0\nCNOT q0, q1\nmeasure q0 -> c0\nmeasure q1 -> c1\n"
+        code = (
+            "eigen 2.3\n"
+            "qubit q0\n"
+            "qubit q1\n"
+            "cbit c0\n"
+            "cbit c1\n"
+            "H q0\n"
+            "CNOT q0, q1\n"
+            "measure q0 -> c0\n"
+            "measure q1 -> c1\n"
+        )
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', suffix='.eig', delete=False, dir='.') as f:
             f.write(code)

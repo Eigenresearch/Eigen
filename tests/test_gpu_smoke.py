@@ -121,7 +121,6 @@ class TestGPUEngineCudaFallback(unittest.TestCase):
             self.assertAlmostEqual(abs(self.engine.device_state[i]), 0.0, places=12)
 
     def test_apply_h_gate_correctness(self):
-        import numpy as np
         self.engine.initialize_state(1)
         inv_sqrt2 = 1.0 / math.sqrt(2.0)
         # |0> -> (|0> + |1>)/sqrt(2)
@@ -132,7 +131,6 @@ class TestGPUEngineCudaFallback(unittest.TestCase):
 
     def test_apply_cnot_correctness(self):
         """Bell state: H q0, then CNOT(q0, q1) -> (|00> + |11>)/sqrt(2)."""
-        import numpy as np
         self.engine.initialize_state(2)
         inv_sqrt2 = 1.0 / math.sqrt(2.0)
         self.engine.apply_gate([0], [[inv_sqrt2, inv_sqrt2], [inv_sqrt2, -inv_sqrt2]])
@@ -152,7 +150,6 @@ class TestGPUEngineCudaFallback(unittest.TestCase):
         SWAP is symmetric, so applying it on [a, b] must equal [b, a].
         """
         self.engine.initialize_state(2)
-        import numpy as np
         # Prepare |10> = q0=1, q1=0.
         self.engine.apply_gate([0], [[0, 1], [1, 0]])
         # Now apply SWAP(q0, q1) <-> SWAP(q1, q0). Result should be |01> = q0=0, q1=1.
@@ -168,7 +165,6 @@ class TestGPUEngineCudaFallback(unittest.TestCase):
         """Audit §1.4: the fix must produce a contiguous device_state so the
         next gate's tensordot doesn't trigger implicit copies. We assert the
         flag rather than the cost."""
-        import numpy as np
         self.engine.initialize_state(3)
         inv_sqrt2 = 1.0 / math.sqrt(2.0)
         self.engine.apply_gate([0], [[inv_sqrt2, inv_sqrt2], [inv_sqrt2, -inv_sqrt2]])
@@ -227,7 +223,6 @@ class TestGPUEngineTorchFallback(unittest.TestCase):
                 self.skipTest("torch fallback path requires torch tensors to test")
 
     def test_torch_branch_h_gate(self):
-        import numpy as np
         self.engine.initialize_state(1)
         inv_sqrt2 = 1.0 / math.sqrt(2.0)
         self.engine.apply_gate([0], [[inv_sqrt2, inv_sqrt2], [inv_sqrt2, -inv_sqrt2]])

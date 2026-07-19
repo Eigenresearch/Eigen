@@ -18,17 +18,14 @@ import unittest
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.frontend.ast import (
-    ProgramNode,
     QFuncDeclNode,
     QFuncCallNode,
     ParallelBlockNode,
-    TaskStatementNode,
     MapAllocNode,
-    ArrayLiteralNode,
-    TupleLiteralNode,
     DotAccessNode,
     IndexAccessNode,
     BinaryOpNode,
+    UnaryOpNode,
     LiteralNode,
     VarRefNode,
     StructLiteralNode,
@@ -296,18 +293,18 @@ class TestUnaryOperators(unittest.TestCase):
         ast = _parse(src)
         lets = [n for n in ast.body if isinstance(n, LetNode)]
         # -5 may be parsed as LiteralNode(-5) by native parser
-        # or as BinaryOpNode("-", 0, 5) by Python parser
+        # or as UnaryOpNode("-", LiteralNode(5)) by Python parser
         val = lets[0].value
         self.assertTrue(
-            isinstance(val, (BinaryOpNode, LiteralNode)),
-            f"Expected BinaryOpNode or LiteralNode, got {type(val).__name__}"
+            isinstance(val, (UnaryOpNode, LiteralNode)),
+            f"Expected UnaryOpNode or LiteralNode, got {type(val).__name__}"
         )
 
     def test_not_operator(self):
         src = 'eigen 1.0\nlet x: bool = not true'
         ast = _parse(src)
         lets = [n for n in ast.body if isinstance(n, LetNode)]
-        self.assertIsInstance(lets[0].value, BinaryOpNode)
+        self.assertIsInstance(lets[0].value, UnaryOpNode)
         self.assertEqual(lets[0].value.op, "not")
 
 

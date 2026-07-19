@@ -50,7 +50,7 @@ class SSAOptimizer:
                     resolved_const = self.constants.get(first_val, first_val)
                     
                     all_same = True
-                    for pred_id, val in operands:
+                    for _pred_id, val in operands:
                         resolved = self.constants.get(val, val)
                         if resolved != resolved_const:
                             all_same = False
@@ -158,7 +158,10 @@ class SSAOptimizer:
                 if (idx + 3 < len(instrs) and
                     inst.opcode == Opcode.LOAD_VAR and
                     instrs[idx+1].opcode == Opcode.LOAD_VAR and
-                    instrs[idx+2].opcode in (Opcode.ADD, Opcode.SUB, Opcode.MUL, Opcode.DIV, Opcode.EQ, Opcode.NEQ, Opcode.LT, Opcode.GT) and
+                    instrs[idx+2].opcode in (
+                        Opcode.ADD, Opcode.SUB, Opcode.MUL, Opcode.DIV,
+                        Opcode.EQ, Opcode.NEQ, Opcode.LT, Opcode.GT
+                    ) and
                     instrs[idx+3].opcode == Opcode.STORE_VAR):
                     
                     v1 = inst.arg
@@ -205,7 +208,7 @@ class SSAOptimizer:
                     defined_vars.append(inst.arg)
             for phi_var, operands in block.phi_nodes.items():
                 self.used_vars.add(phi_var)
-                for pred_id, val in operands:
+                for _pred_id, val in operands:
                     self.used_vars.add(val)
 
         if native is not None:
@@ -223,7 +226,11 @@ class SSAOptimizer:
                 if inst.opcode == Opcode.STORE_VAR:
                     var_name = inst.arg
                     # If this store is to an unused variable and preceded by a pure load
-                    if var_name in unused_set and new_instrs and new_instrs[-1].opcode in (Opcode.LOAD_CONST, Opcode.LOAD_VAR):
+                    if (
+                        var_name in unused_set
+                        and new_instrs
+                        and new_instrs[-1].opcode in (Opcode.LOAD_CONST, Opcode.LOAD_VAR)
+                    ):
                         new_instrs.pop()  # Remove the producer instruction
                         idx += 1
                         continue
@@ -269,7 +276,7 @@ def optimize_ebc(instructions: list[Instruction], de_ssa: bool = True) -> list[I
 
     # Save original block properties for target remapping
     original_blocks = [BasicBlock(b.id) for b in blocks]
-    for b_orig, b_curr in zip(original_blocks, blocks):
+    for b_orig, b_curr in zip(original_blocks, blocks, strict=False):
         b_orig.start_idx = b_curr.start_idx
         b_orig.end_idx = b_curr.end_idx
 

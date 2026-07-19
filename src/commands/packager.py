@@ -20,3 +20,8 @@ def install_command(args, workspace_root):
 def search_command(args, workspace_root):
     packager = EigenPackager(workspace_root)
     packager.search_packages(args.query)
+
+@register_command("publish")
+def publish_command(args, workspace_root):
+    packager = EigenPackager(workspace_root)
+    packager.publish_package()

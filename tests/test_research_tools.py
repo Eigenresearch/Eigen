@@ -232,7 +232,7 @@ class TestEntanglementWitness(unittest.TestCase):
         original_state = list(sim.get_state_vector())
         _ = ew.chsh_inequality_value(sim, "q0", "q1")
         after = sim.get_state_vector()
-        for a, b in zip(original_state, after):
+        for a, b in zip(original_state, after, strict=False):
             self.assertAlmostEqual(a, b, places=6)
 
     def test_bell_state_witness_rejects_none_sim(self):

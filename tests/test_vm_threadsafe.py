@@ -29,7 +29,6 @@ import threading
 import time
 import unittest
 
-from src.backend.bytecode import Instruction
 from src.backend.vm import EigenVM
 
 
@@ -135,7 +134,7 @@ class TestExecuteSerializesConcurrentThreads(unittest.TestCase):
         """Both threads attempt execute() concurrently; their entry and
         exit times must NOT overlap because of the state lock."""
         vm = EigenVM(seed=0, deterministic=True)
-        instrs = _compile_to_ebc(_LET_SRC)
+        _compile_to_ebc(_LET_SRC)
         event_lock = threading.Lock()
         running = [0]
         max_concurrent = [0]
@@ -198,7 +197,7 @@ class TestExecuteParallel(unittest.TestCase):
         vm.execute(instrs)
         globals_before = dict(vm.globals)
         # Now run parallel — parent should be untouched.
-        results = vm.execute_parallel(instrs, shots=4)
+        vm.execute_parallel(instrs, shots=4)
         self.assertEqual(vm.globals, globals_before,
                          "execute_parallel must not mutate parent VM state "
                          f"(before={globals_before}, after={dict(vm.globals)})")

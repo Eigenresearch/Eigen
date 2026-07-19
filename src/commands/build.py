@@ -1,11 +1,5 @@
-import os
 import json
 from src.cli import register_command
-from src.frontend.lexer import Lexer
-from src.frontend.parser import Parser
-from src.semantic.import_resolver import ImportResolver
-from src.semantic.type_checker import TypeChecker
-from src.backend.ebc_compiler import EBCCompiler
 from src.packager import EigenPackager
 
 @register_command("build")
@@ -47,7 +41,9 @@ def build_command(args, workspace_root):
             from src.aot.compiler import AOTCompiler
             seed_val = getattr(args, 'seed', 0)
             aot_comp = AOTCompiler()
-            llvm_module = aot_comp._compile_to_llvm_module(args.file, workspace_root, optimize=optimize, seed=seed_val, emit_qir=True)
+            llvm_module = aot_comp._compile_to_llvm_module(
+                args.file, workspace_root, optimize=optimize,
+                seed=seed_val, emit_qir=True)
             out_path = args.file.rsplit('.', 1)[0] + ".qir.ll"
             with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(str(llvm_module))
@@ -74,7 +70,8 @@ def build_command(args, workspace_root):
             seed_val = getattr(args, 'seed', 0)
             aot_comp = AOTCompiler()
             if getattr(args, 'emit_llvm', False):
-                llvm_module = aot_comp._compile_to_llvm_module(args.file, workspace_root, optimize=optimize, seed=seed_val)
+                llvm_module = aot_comp._compile_to_llvm_module(
+                    args.file, workspace_root, optimize=optimize, seed=seed_val)
                 out_path = args.file.rsplit('.', 1)[0] + ".ll"
                 with open(out_path, 'w', encoding='utf-8') as f:
                     f.write(str(llvm_module))

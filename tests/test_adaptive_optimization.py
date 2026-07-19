@@ -371,7 +371,7 @@ class TestRunAdaptive(unittest.TestCase):
     def test_run_adaptive_O0_does_nothing(self):
         g = _make_small_clifford()
         before = sum(1 for n in g.nodes.values() if n.type == "GATE")
-        report = run_adaptive(g, level=OptimizationLevel.O0)
+        run_adaptive(g, level=OptimizationLevel.O0)
         after = sum(1 for n in g.nodes.values() if n.type == "GATE")
         self.assertEqual(before, after)
 

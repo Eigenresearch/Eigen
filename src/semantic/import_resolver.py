@@ -1,16 +1,40 @@
 import os
 import concurrent.futures
+import threading
+from collections import OrderedDict
 from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
-from src.frontend.ast import ProgramNode, QFuncDeclNode, ImportNode, FuncDeclNode, StructDeclNode, EnumDeclNode
+from src.frontend.ast import ProgramNode, QFuncDeclNode, FuncDeclNode, StructDeclNode, EnumDeclNode
 from src.compiler_optimizations import ImportCache, LazyModuleLoader
 
-# Cache mapping file_path -> (mtime, ProgramNode)
-_PARSED_AST_CACHE = {}
+# §5 (memory) — Parsed-AST cache is an LRU with a hard size bound so
+# long-lived processes (LSP server) cannot leak unbounded ASTs, and a
+# lock so concurrent compiles cannot race on eviction.
+_PARSED_AST_CACHE_MAX = 256
+_PARSED_AST_CACHE: "OrderedDict[str, tuple[str, ProgramNode]]" = OrderedDict()
+_PARSED_AST_LOCK = threading.RLock()
 # §1.2 — File-hash-based import cache for unchanged modules
 _IMPORT_CACHE = ImportCache()
 # §1.2 — Lazy module loader for on-demand parsing
 _LAZY_LOADER = LazyModuleLoader()
+
+
+def clear_import_caches() -> None:
+    """Clear process-wide import artifacts for an isolated compiler session."""
+    with _PARSED_AST_LOCK:
+        _PARSED_AST_CACHE.clear()
+    _IMPORT_CACHE.invalidate()
+    _LAZY_LOADER.clear()
+
+
+def _contained(path: str, root: str) -> bool:
+    """True iff ``path`` stays inside ``root`` (no traversal escape)."""
+    try:
+        return os.path.commonpath([os.path.abspath(path), root]) == root
+    except ValueError:
+        # Raised on Windows when the paths are on different drives.
+        return False
+
 
 class ImportResolver:
     def __init__(self, workspace_root: str, stdlib_root: str | None = None):
@@ -20,8 +44,21 @@ class ImportResolver:
         else:
             self.stdlib_root = os.path.join(self.workspace_root, "stdlib")
         self.resolved_modules = {}  # module_path (str) -> ProgramNode
+        self._lock = threading.RLock()
+        self._recursion_limit = 100
 
     def resolve_module_file(self, module_path: str) -> str:
+        # §6 (security) — reject traversal segments before any path is
+        # built: ``import foo....bar`` (or an absolute-path segment) must
+        # never escape the workspace/stdlib roots.
+        segments = module_path.split('.')
+        if (not module_path or any(not s for s in segments)
+                or any(s in ('..',) or '/' in s or '\\' in s or ':' in s
+                       for s in segments)):
+            raise ImportError(
+                f"Illegal module path: {module_path!r} "
+                f"(must be dotted identifiers without traversal)")
+
         # §1.2 — Check import cache first
         cached_path, fresh = _IMPORT_CACHE.get(module_path)
         if cached_path and fresh:
@@ -29,22 +66,22 @@ class ImportResolver:
 
         std_modules = {'math', 'std', 'collections', 'random', 'io', 'time', 'string', 'linalg', 'quantum'}
         relative_path = module_path.replace('.', '/') + ".eig"
-        first_part = module_path.split('.')[0]
-        
+        first_part = segments[0]
+
         # stdlib priority: search stdlib first for standard namespaces
         if first_part in std_modules:
-            stdlib_path = os.path.join(self.stdlib_root, relative_path)
-            if os.path.isfile(stdlib_path):
+            stdlib_path = os.path.abspath(os.path.join(self.stdlib_root, relative_path))
+            if _contained(stdlib_path, self.stdlib_root) and os.path.isfile(stdlib_path):
                 _IMPORT_CACHE.put(module_path, stdlib_path, stdlib_path)
                 return stdlib_path
 
-        local_path = os.path.join(self.workspace_root, relative_path)
-        if os.path.isfile(local_path):
+        local_path = os.path.abspath(os.path.join(self.workspace_root, relative_path))
+        if _contained(local_path, self.workspace_root) and os.path.isfile(local_path):
             _IMPORT_CACHE.put(module_path, local_path, local_path)
             return local_path
 
-        stdlib_path = os.path.join(self.stdlib_root, relative_path)
-        if os.path.isfile(stdlib_path):
+        stdlib_path = os.path.abspath(os.path.join(self.stdlib_root, relative_path))
+        if _contained(stdlib_path, self.stdlib_root) and os.path.isfile(stdlib_path):
             _IMPORT_CACHE.put(module_path, stdlib_path, stdlib_path)
             return stdlib_path
 
@@ -76,9 +113,11 @@ class ImportResolver:
             import hashlib
             content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-            cached = _PARSED_AST_CACHE.get(file_path)
-            if cached and cached[0] == content_hash:
-                return cached[1]
+            with _PARSED_AST_LOCK:
+                cached = _PARSED_AST_CACHE.get(file_path)
+                if cached and cached[0] == content_hash:
+                    _PARSED_AST_CACHE.move_to_end(file_path)
+                    return cached[1]
 
             # §1.2 — LazyModuleLoader: register a lazy loader for
             # this file so it's only re-parsed on demand.
@@ -99,24 +138,35 @@ class ImportResolver:
             tokens = lexer.tokenize()
             parser = Parser(tokens)
             ast = parser.parse()
-            _PARSED_AST_CACHE[file_path] = (content_hash, ast)
+            with _PARSED_AST_LOCK:
+                _PARSED_AST_CACHE[file_path] = (content_hash, ast)
+                _PARSED_AST_CACHE.move_to_end(file_path)
+                while len(_PARSED_AST_CACHE) > _PARSED_AST_CACHE_MAX:
+                    _PARSED_AST_CACHE.popitem(last=False)
             return ast
 
-        def dfs_resolve(module_name: str, file_path: str):
+        def dfs_resolve(module_name: str, file_path: str, depth: int = 0):
+            if depth > self._recursion_limit:
+                raise ImportError(f"Import depth limit exceeded at {module_name}")
             if module_name in path_stack:
                 cycle = " -> ".join(path_stack + [module_name])
                 raise ImportError(f"Cyclic import detected: {cycle}")
-            if module_name in visited:
-                return
+            
+            with self._lock:
+                if module_name in visited:
+                    return
 
             path_stack.append(module_name)
 
             module_ast = parse_file(file_path)
-            self.resolved_modules[module_name] = module_ast
+            with self._lock:
+                self.resolved_modules[module_name] = module_ast
 
             sub_imports = []
             for sub_imp in module_ast.imports:
-                if sub_imp.module_path not in visited:
+                with self._lock:
+                    is_visited = sub_imp.module_path in visited
+                if not is_visited:
                     sub_file = self.resolve_module_file(sub_imp.module_path)
                     sub_imports.append((sub_imp.module_path, sub_file))
 
@@ -125,19 +175,20 @@ class ImportResolver:
                 concurrent.futures.wait(futures)
 
             for sub_module, sub_file in sub_imports:
-                dfs_resolve(sub_module, sub_file)
+                dfs_resolve(sub_module, sub_file, depth + 1)
 
             for node in module_ast.body:
                 if isinstance(node, (QFuncDeclNode, FuncDeclNode, StructDeclNode, EnumDeclNode)):
                     imported_nodes.append(node)
 
-            visited.add(module_name)
+            with self._lock:
+                visited.add(module_name)
             path_stack.pop()
 
         for imp in main_ast.imports:
             sub_module = imp.module_path
             sub_file = self.resolve_module_file(sub_module)
-            dfs_resolve(sub_module, sub_file)
+            dfs_resolve(sub_module, sub_file, 0)
 
         executor.shutdown()
 

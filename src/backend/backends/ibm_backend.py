@@ -8,7 +8,7 @@
 # is reachable via the `export_qasm2()` method for callers that explicitly
 # need it.
 from src.ir.ir_graph import EQIRGraph
-from src.backend.gate_registry import get_gate_spec, all_registered_gates
+from src.backend.gate_registry import get_gate_spec
 
 
 def _collect_qubits_and_measures(graph: EQIRGraph):

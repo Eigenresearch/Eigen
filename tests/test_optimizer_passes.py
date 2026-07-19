@@ -6,11 +6,9 @@ independently, plus regression tests for the pass manager.
 import math
 import unittest
 
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 from src.ir.optimizer import EQIROptimizer
 from src.ir.pass_manager import (
-    PassManager,
-    OptimizationPass,
     PassStats,
     PassReport,
     default_quantum_pipeline,
@@ -26,7 +24,6 @@ def _make_gate_graph(*ops):
     """
     graph = EQIRGraph()
     qubits_seen = set()
-    prev_nodes = {}
     for gate_name, targets, args in ops:
         for t in targets:
             if t not in qubits_seen:

@@ -4,7 +4,6 @@ Tests for src/backend/crash_recovery.py — sol.md §7.2 Crash Recovery.
 import dataclasses
 import json
 import os
-import platform
 import shutil
 import tempfile
 import unittest
@@ -450,10 +449,10 @@ class TestCrashReportAutoFileNaming(unittest.TestCase):
             exc = ValueError("x")
             _, path = builder.build_and_write(vm, exc,
                                                 instructions=[Instruction(Opcode.ADD)])
-            self.assertEqual(os.path.basename(path),
-                             f"{CrashReportBuilder(clock=_FakeClock())
-                                .build_from_vm(vm, exc,
-                                  instructions=[Instruction(Opcode.ADD)]).crash_id}.json")
+            expected_id = (CrashReportBuilder(clock=_FakeClock())
+                           .build_from_vm(vm, exc,
+                                          instructions=[Instruction(Opcode.ADD)]).crash_id)
+            self.assertEqual(os.path.basename(path), f"{expected_id}.json")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

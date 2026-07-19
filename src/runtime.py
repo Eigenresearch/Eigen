@@ -4,7 +4,8 @@ from src.ir.ir_graph import EQIRGraph
 from src.simulator import QuantumSimulator
 
 class EigenRuntime:
-    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none', seed: int | None = None):
+    def __init__(self, trace_mode: bool = False, noise_model=None,
+                 sim_type: str = 'dense', gpu_platform: str = 'none', seed: int | None = None):
         self.rng = random.Random(seed)
         from src.noise.noise_model import NoiseModel
         self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform, seed=seed)
@@ -58,7 +59,9 @@ class EigenRuntime:
             elif isinstance(node, ast.Name):
                 if node.id in ('True', 'False', 'None'):
                     return {'True': True, 'False': False, 'None': None}[node.id]
-                return variables.get(node.id, 0)
+                if node.id not in variables:
+                    raise NameError(f"Undefined variable: {node.id}")
+                return variables[node.id]
             elif isinstance(node, ast.UnaryOp):
                 operand = safe_eval(node.operand, variables)
                 if isinstance(node.op, ast.UAdd):
@@ -102,7 +105,7 @@ class EigenRuntime:
                     raise TypeError(f"Unsupported binary operator: {type(node.op)}")
             elif isinstance(node, ast.Compare):
                 left = safe_eval(node.left, variables)
-                for op, comparator in zip(node.ops, node.comparators):
+                for op, comparator in zip(node.ops, node.comparators, strict=False):
                     right = safe_eval(comparator, variables)
                     if isinstance(op, ast.Eq):
                         val = (left == right)
@@ -143,7 +146,7 @@ class EigenRuntime:
         try:
             tree = ast.parse(expr, mode='eval')
             return safe_eval(tree, self.classical_store)
-        except Exception:
+        except (SyntaxError, ValueError):
             return expr
 
     def execute(self, graph: EQIRGraph):
@@ -199,7 +202,9 @@ class EigenRuntime:
                     condition_met = False
                     
                 if not condition_met:
-                    self.log_trace(f"Skipping node {node.id} because condition {cbit_name} {op} {expected_val} failed (actual value is {actual_val})")
+                    self.log_trace(
+                        f"Skipping node {node.id} because condition {cbit_name} {op} "
+                        f"{expected_val} failed (actual value is {actual_val})")
                     continue
 
             # 2. Execute node based on type
@@ -299,7 +304,9 @@ class EigenRuntime:
                     assert_ok = False
                     
                 if not assert_ok:
-                    raise AssertionError(f"Eigen Assertion Failed: {left_ref} (value: {left_val}) {op} {right_val} at node {node.id}")
+                    raise AssertionError(
+                        f"Eigen Assertion Failed: {left_ref} (value: {left_val}) "
+                        f"{op} {right_val} at node {node.id}")
                 self.log_trace(f"Assertion Passed: {left_ref} ({left_val}) {op} {right_val}")
 
         self.log_trace("Finished execution of EQIR v1.1 Graph")

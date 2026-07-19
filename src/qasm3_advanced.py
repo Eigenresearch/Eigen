@@ -513,7 +513,7 @@ class Qasm3Importer:
         if m_tok.text != "measure":
             raise ImporterError(f"Expected 'measure', got {m_tok.text!r}")
         # The qubit operand: q[j]
-        qname = self._consume(kind="IDENT").text
+        self._consume(kind="IDENT")
         self._consume(text="[")
         qidx = self._consume(kind="NUMBER")
         self._consume(text="]")
@@ -538,12 +538,12 @@ class Qasm3Importer:
                 f"but got {len(targets)}")
         body_text = "\n".join(sub.body_lines)
         # Substitute formal parameters with their actual argument values.
-        for formal_param, arg_val in zip(sub.params, args):
+        for formal_param, arg_val in zip(sub.params, args, strict=False):
             body_text = re.sub(rf"\b{re.escape(formal_param)}\b",
                                 repr(arg_val), body_text)
         # Substitute formal qubit names with concrete indexed
         # references (e.g. `q0` → `q[0]`).
-        for formal_qubit, actual_index in zip(sub.qubits, targets):
+        for formal_qubit, actual_index in zip(sub.qubits, targets, strict=False):
             body_text = re.sub(rf"\b{re.escape(formal_qubit)}\b",
                                 f"q[{actual_index}]", body_text)
         # Prepend a qubit declaration so the sub-importer can

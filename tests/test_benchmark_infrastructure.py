@@ -1,6 +1,5 @@
 """§9.2 — Benchmark Infrastructure tests, organised by the four
 roadmap checkboxes."""
-import json
 import os
 import tempfile
 import unittest

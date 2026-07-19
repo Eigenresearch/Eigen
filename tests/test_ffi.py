@@ -17,11 +17,11 @@ from src.ffi import (
 # ---------------------------------------------------------------------------
 
 class TestFFIType(unittest.TestCase):
-    def test_has_nine_types(self):
-        self.assertEqual(len(FFIType), 9)
+    def test_has_core_types(self):
+        self.assertEqual(len(FFIType), 12)
         names = {t.value for t in FFIType}
-        for n in ("void", "int32_t", "int64_t", "float",
-                    "bool", "const char*",
+        for n in ("void", "int32_t", "int64_t", "uint32_t", "uint64_t",
+                    "size_t", "float", "bool", "const char*",
                     "eigen_handle", "void*", "double"):
             self.assertIn(n, names)
 

@@ -1,12 +1,10 @@
 """Generate all figures for the Eigen 2.7 paper — 15+ figures."""
-import csv, os, math
+import csv, os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.patches import Polygon
-from matplotlib.colors import ListedColormap, LinearSegmentedColormap
-import matplotlib.patches as mpatches
+from matplotlib.colors import ListedColormap
 
 FIG = os.path.join(os.path.dirname(__file__), "figures", "output")
 os.makedirs(FIG, exist_ok=True)
@@ -85,15 +83,19 @@ fig, ax = plt.subplots(figsize=(12, 7))
 spd_data = []; spd_labels = []
 for wl in wls:
     for sz in sorted(set(r['size'] for r in rows if r['workload']==wl)):
-        em = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='eigen_vm' and r['size']==sz), None)
-        pm = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='python' and r['size']==sz), None)
+        em = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='eigen_vm' and r['size']==sz), None)
+        pm = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='python' and r['size']==sz), None)
         if em and pm and em > 0:
             spd_data.append(pm/em); spd_labels.append(f"{wl[:10]}\nN={sz}")
 colors = ['#dc2626' if s<1 else '#2563eb' for s in spd_data]
 ax.barh(range(len(spd_data)), spd_data, color=colors, height=0.6)
 ax.set_yticks(range(len(spd_data))); ax.set_yticklabels(spd_labels, fontsize=6)
 ax.axvline(1.0, color='black', ls='--', lw=1)
-ax.set_xlabel('Speedup (Python / Eigen VM)'); ax.set_title('Figure 3: Speedup Ratio (blue=Eigen faster, red=Python faster)', fontsize=11, fontweight='bold')
+ax.set_xlabel('Speedup (Python / Eigen VM)'); ax.set_title(
+    'Figure 3: Speedup Ratio (blue=Eigen faster, red=Python faster)',
+    fontsize=11, fontweight='bold')
 save('fig3_speedup.png', fig)
 
 # Fig 4: Scaling — arithmetic sum
@@ -102,7 +104,8 @@ wl = 'arithmetic_sum'
 for impl in ['eigen_vm', 'python']:
     wr = sorted([r for r in rows if r['workload']==wl and r['implementation']==impl], key=lambda r: r['size'])
     ax.plot([r['size'] for r in wr], [r['mean_s']*1000 for r in wr], marker='s', label=impl, color=C[impl], lw=2)
-ax.set_xlabel('N'); ax.set_ylabel('Time (ms)'); ax.set_title('Figure 4: Scaling — Arithmetic Sum', fontsize=12, fontweight='bold')
+ax.set_xlabel('N'); ax.set_ylabel('Time (ms)'); ax.set_title(
+    'Figure 4: Scaling — Arithmetic Sum', fontsize=12, fontweight='bold')
 ax.set_xscale('log'); ax.set_yscale('log'); ax.legend(); ax.grid(True, alpha=0.3)
 save('fig4_scaling.png', fig)
 
@@ -113,7 +116,9 @@ for impl in ['eigen_vm', 'python']:
     wr = sorted([r for r in rows if r['workload']==wl and r['implementation']==impl], key=lambda r: r['size'])
     ax.errorbar([r['size'] for r in wr], [r['mean_s']*1000 for r in wr], yerr=[r['std_s']*1000 for r in wr],
                 marker='D', label=impl, color=C[impl], capsize=4, lw=2, markersize=8)
-ax.set_xlabel('Shots'); ax.set_ylabel('Time (ms)'); ax.set_title('Figure 5: Bell State Simulation — Eigen VM vs Python', fontsize=12, fontweight='bold')
+ax.set_xlabel('Shots'); ax.set_ylabel('Time (ms)'); ax.set_title(
+    'Figure 5: Bell State Simulation — Eigen VM vs Python',
+    fontsize=12, fontweight='bold')
 ax.set_xscale('log'); ax.set_yscale('log'); ax.legend(); ax.grid(True, alpha=0.3)
 save('fig5_bell_state.png', fig)
 
@@ -122,9 +127,10 @@ fig, ax = plt.subplots(figsize=(8, 6))
 wl = 'gate_chain'
 for impl in ['eigen_vm', 'python']:
     wr = sorted([r for r in rows if r['workload']==wl and r['implementation']==impl], key=lambda r: r['size'])
-    thr = [s/m for s, m in zip([r['size'] for r in wr], [r['mean_s'] for r in wr])]
+    thr = [s/m for s, m in zip([r['size'] for r in wr], [r['mean_s'] for r in wr], strict=False)]
     ax.plot([r['size'] for r in wr], thr, marker='^', label=f"{impl}", color=C[impl], lw=2, markersize=8)
-ax.set_xlabel('N (gates)'); ax.set_ylabel('Throughput (gates/s)'); ax.set_title('Figure 6: Gate Chain Throughput', fontsize=12, fontweight='bold')
+ax.set_xlabel('N (gates)'); ax.set_ylabel('Throughput (gates/s)'); ax.set_title(
+    'Figure 6: Gate Chain Throughput', fontsize=12, fontweight='bold')
 ax.set_xscale('log'); ax.legend(); ax.grid(True, alpha=0.3)
 save('fig6_gate_throughput.png', fig)
 
@@ -140,7 +146,9 @@ for wl in wls:
                 cv_labels.append(f"{wl[:8]}\n{impl[:5]}\nN={r['size']}")
 ax.barh(range(len(cv_data)), cv_data, color='#6366f1', height=0.7)
 ax.set_yticks(range(len(cv_data))); ax.set_yticklabels(cv_labels, fontsize=5)
-ax.set_xlabel('CV (std/mean)'); ax.set_title('Figure 7: Measurement Stability — Coefficient of Variation', fontsize=11, fontweight='bold')
+ax.set_xlabel('CV (std/mean)'); ax.set_title(
+    'Figure 7: Measurement Stability — Coefficient of Variation',
+    fontsize=11, fontweight='bold')
 save('fig7_stability.png', fig)
 
 # Fig 8: Raw trial distribution
@@ -151,9 +159,12 @@ with open("results/benchmark_raw.csv", "r") as f:
         raw_rows.append(r)
 fig, ax = plt.subplots(figsize=(10, 6))
 for impl in ['eigen_vm', 'python']:
-    trials = [r['elapsed_s']*1000 for r in raw_rows if r['workload']=='arithmetic_sum' and r['implementation']==impl and r['size']==10000]
+    trials = [r['elapsed_s']*1000 for r in raw_rows
+              if r['workload']=='arithmetic_sum' and r['implementation']==impl and r['size']==10000]
     if trials: ax.hist(trials, bins=10, alpha=0.6, label=impl, color=C[impl], edgecolor='black')
-ax.set_xlabel('Time (ms)'); ax.set_ylabel('Frequency'); ax.set_title('Figure 8: Trial Distribution — Arithmetic Sum (N=10000)', fontsize=11, fontweight='bold')
+ax.set_xlabel('Time (ms)'); ax.set_ylabel('Frequency'); ax.set_title(
+    'Figure 8: Trial Distribution — Arithmetic Sum (N=10000)',
+    fontsize=11, fontweight='bold')
 ax.legend(); ax.grid(True, alpha=0.3)
 save('fig8_distribution.png', fig)
 
@@ -172,7 +183,8 @@ bottom = np.zeros(len(workloads))
 for i, stage in enumerate(stages):
     ax.bar(workloads, data[:, i], bottom=bottom, label=stage, color=colors[i])
     bottom += data[:, i]
-ax.set_ylabel('% of total time'); ax.set_title('Figure 9: Pipeline Stage Breakdown by Workload', fontsize=12, fontweight='bold')
+ax.set_ylabel('% of total time'); ax.set_title(
+    'Figure 9: Pipeline Stage Breakdown by Workload', fontsize=12, fontweight='bold')
 ax.legend(fontsize=7, loc='upper right')
 save('fig9_pipeline.png', fig)
 
@@ -201,8 +213,10 @@ comps = ["InlineCache\n(var lookup)", "FrameCache\n(store)", "HotLoop\n(JIT trig
 mults = [1.01, 1.01, 1.03, 1.005, 2.0, 2.3]
 colors = ['#2563eb','#2563eb','#2563eb','#2563eb','#dc2626','#dc2626']
 bars = ax.bar(comps, mults, color=colors)
-ax.set_ylabel('Speedup multiplier'); ax.set_title('Figure 11: Ablation — Component Impact on Performance', fontsize=12, fontweight='bold')
-for bar, val in zip(bars, mults):
+ax.set_ylabel('Speedup multiplier'); ax.set_title(
+    'Figure 11: Ablation — Component Impact on Performance',
+    fontsize=12, fontweight='bold')
+for bar, val in zip(bars, mults, strict=False):
     ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.02, f'{val}x', ha='center', fontsize=9)
 save('fig11_ablation.png', fig)
 
@@ -226,7 +240,9 @@ ax.set_yticks(range(len(systems))); ax.set_yticklabels(systems)
 for i in range(len(systems)):
     for j in range(len(features)):
         sym = {0: '-', 1: 'o', 2: 'O'}[matrix[i, j]]
-        ax.text(j, i, sym, ha='center', va='center', color='white' if matrix[i,j]==2 else 'black', fontsize=10, fontweight='bold')
+        ax.text(j, i, sym, ha='center', va='center',
+                color='white' if matrix[i,j]==2 else 'black',
+                fontsize=10, fontweight='bold')
 ax.set_title('Figure 12: Feature Coverage Matrix (O=full, o=partial, -=none)', fontsize=12, fontweight='bold')
 save('fig12_feature_matrix.png', fig)
 
@@ -237,18 +253,24 @@ classical_wls = ['arithmetic_sum', 'fibonacci', 'string_concat']
 q_speedups = []; c_speedups = []
 for wl in quantum_wls:
     for sz in sorted(set(r['size'] for r in rows if r['workload']==wl)):
-        em = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='eigen_vm' and r['size']==sz), 0)
-        pm = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='python' and r['size']==sz), 0)
+        em = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='eigen_vm' and r['size']==sz), 0)
+        pm = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='python' and r['size']==sz), 0)
         if em > 0: q_speedups.append(pm/em)
 for wl in classical_wls:
     for sz in sorted(set(r['size'] for r in rows if r['workload']==wl)):
-        em = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='eigen_vm' and r['size']==sz), 0)
-        pm = next((r['mean_s'] for r in rows if r['workload']==wl and r['implementation']=='python' and r['size']==sz), 0)
+        em = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='eigen_vm' and r['size']==sz), 0)
+        pm = next((r['mean_s'] for r in rows if r['workload']==wl
+                   and r['implementation']=='python' and r['size']==sz), 0)
         if em > 0: c_speedups.append(pm/em)
 ax.boxplot([c_speedups, q_speedups], tick_labels=['Classical', 'Quantum'], patch_artist=True,
            boxprops=dict(facecolor='#2563eb', alpha=0.3), medianprops=dict(color='#dc2626', lw=2))
 ax.axhline(1.0, color='gray', ls='--', lw=1)
-ax.set_ylabel('Speedup (Python / Eigen VM)'); ax.set_title('Figure 13: Classical vs Quantum Speedup Distribution', fontsize=12, fontweight='bold')
+ax.set_ylabel('Speedup (Python / Eigen VM)'); ax.set_title(
+    'Figure 13: Classical vs Quantum Speedup Distribution',
+    fontsize=12, fontweight='bold')
 save('fig13_classical_vs_quantum.png', fig)
 
 # Fig 14: Confidence interval plot
@@ -259,9 +281,13 @@ for wl in ['bell_state', 'gate_chain']:
         sizes = [r['size'] for r in wr]
         means = [r['mean_s']*1000 for r in wr]
         cis = [r['ci95_s']*1000 for r in wr]
-        ax.fill_between(sizes, [m-c for m,c in zip(means,cis)], [m+c for m,c in zip(means,cis)], alpha=0.2, color=C[impl])
+        ax.fill_between(sizes, [m-c for m,c in zip(means,cis, strict=False)],
+                        [m+c for m,c in zip(means,cis, strict=False)],
+                        alpha=0.2, color=C[impl])
         ax.plot(sizes, means, marker='o', label=f"{wl} {impl}", color=C[impl], lw=2)
-ax.set_xlabel('Size'); ax.set_ylabel('Time (ms)'); ax.set_title('Figure 14: 95% Confidence Intervals — Quantum Workloads', fontsize=12, fontweight='bold')
+ax.set_xlabel('Size'); ax.set_ylabel('Time (ms)'); ax.set_title(
+    'Figure 14: 95% Confidence Intervals — Quantum Workloads',
+    fontsize=12, fontweight='bold')
 ax.set_xscale('log'); ax.set_yscale('log'); ax.legend(fontsize=7); ax.grid(True, alpha=0.3)
 save('fig14_confidence.png', fig)
 
@@ -275,7 +301,8 @@ ax.plot(N, speedup, color='#2563eb', lw=2)
 ax.axhline(1.0, color='gray', ls='--', label='Break-even (1x)')
 ax.axvline(15, color='#dc2626', ls='--', alpha=0.5, label='Break-even N~15')
 ax.set_xscale('log'); ax.set_xlabel('Loop iteration count N (log)')
-ax.set_ylabel('Speedup (VM / JIT)'); ax.set_title('Appendix Figure 15: JIT Break-even Analysis', fontsize=12, fontweight='bold')
+ax.set_ylabel('Speedup (VM / JIT)'); ax.set_title(
+    'Appendix Figure 15: JIT Break-even Analysis', fontsize=12, fontweight='bold')
 ax.legend(); ax.set_ylim(0, 130)
 save('fig15_jit_breakeven.png', fig)
 

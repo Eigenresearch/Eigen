@@ -104,7 +104,7 @@ class MacroTable:
         try:
             return self._macros[name]
         except KeyError:
-            raise MacroExpansionError(f"No macro named {name!r}")
+            raise MacroExpansionError(f"No macro named {name!r}") from None
 
     def expand(self, name: str, args: list, ctx: MacroContext):
         """Invoke the macro named `name` with `args` and `ctx`.

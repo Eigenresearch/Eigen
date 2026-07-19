@@ -4,8 +4,8 @@ import platform
 import subprocess
 import shutil
 
-EIGEN_VERSION = "2.7.0"
-EIGEN_CODENAME = "Meridian"
+EIGEN_VERSION = "2.8.0"
+EIGEN_CODENAME = "Mars"
 
 
 def run_cmd(cmd, shell=False):
@@ -96,7 +96,12 @@ def build_linux_appimage(dist_dir):
 
     apprun_path = os.path.join(app_dir, "AppRun")
     with open(apprun_path, "w") as f:
-        f.write("#!/bin/sh\nSELF=$(readlink -f \"$0\")\nHERE=$(dirname \"$SELF\")\nexec \"$HERE/usr/bin/eigen\" \"$@\"\n")
+        f.write(
+            "#!/bin/sh\n"
+            "SELF=$(readlink -f \"$0\")\n"
+            "HERE=$(dirname \"$SELF\")\n"
+            "exec \"$HERE/usr/bin/eigen\" \"$@\"\n"
+        )
     os.chmod(apprun_path, 0o755)
 
     desktop_path = os.path.join(app_dir, "eigen.desktop")
@@ -190,7 +195,10 @@ def build_macos_pkg(dist_dir):
         run_cmd(pkgbuild_args)
         print(f"macOS package successfully created at: {target_pkg}")
     else:
-        print("pkgbuild command not found. macOS installer package building skipped. Standalone binary is at dist/eigen.")
+        print(
+            "pkgbuild command not found. macOS installer package building skipped. "
+            "Standalone binary is at dist/eigen."
+        )
 
 
 def main():
@@ -198,7 +206,7 @@ def main():
     print(f"Starting Eigen {EIGEN_VERSION} \"{EIGEN_CODENAME}\" build process on platform: {system}")
 
     try:
-        import PyInstaller
+        import PyInstaller  # noqa: F401  (availability check)
         print("PyInstaller is already installed.")
     except ImportError:
         print("Installing PyInstaller...")

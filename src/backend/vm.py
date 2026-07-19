@@ -1,16 +1,43 @@
-from src.backend.bytecode import Opcode, Instruction, UnsupportedBytecodeVersionError
+from src.backend.bytecode import Opcode, Instruction, UnsupportedBytecodeVersionError  # noqa: F401  (re-exported)
 from src.simulator import QuantumSimulator
 from src.backend.vm_optimizations import (
     InlineCache, HotLoopDetector, ObjectPool, FrameCache, CacheEntry,
 )
 from src.debugger.dap_server import DebugSession
+import os as _os
+import math as _math
 import random
 import re
-import weakref
 import threading
 import concurrent.futures
 import time as _time
 import hashlib as _hashlib
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.runtime_audit import AuditTrail
+
+# §6 (security) — Native stdlib module whitelist. ``execute_native_stdlib``
+# receives ``func_name`` straight from (potentially hostile) ``.ebc``
+# bytecode. Before the fix the module segment was interpolated into a
+# filesystem path without validation, so a crafted name such as
+# ``std./tmp/evil.x`` (POSIX) or ``std.C:/Temp/evil.x.y`` (Windows) made
+# ``os.path.join`` collapse to an absolute attacker-controlled path and
+# ``importlib`` executed it — a critical RCE. Module names are now matched
+# against this allow-list *before* any path is built, and the resolved
+# path is additionally verified to stay inside the native stdlib root.
+_NATIVE_STDLIB_WHITELIST = frozenset({
+    "math", "io", "random", "time", "stats", "string", "collections",
+})
+_NATIVE_STDLIB_ROOT = _os.path.abspath(
+    _os.path.join(_os.path.dirname(__file__), "..", "..", "stdlib", "native")
+)
+_NATIVE_MODULE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+# §6.1 (Security): Static loading of allowed native stdlib modules.
+# We pre-resolve and cache them to avoid runtime importlib calls for
+# already-whitelisted names.
+_NATIVE_STDLIB_MODULES = {}
 
 
 def _hash_program_fallback(vm, instructions) -> str:
@@ -93,8 +120,18 @@ class EigenVM:
         "concat": "std.string.concat", "format_int": "std.string.format_int"
     }
 
-    def __init__(self, trace_mode: bool = False, noise_model=None, sim_type: str = 'dense', gpu_platform: str = 'none', seed: int | None = None, verbose: bool = False, opt_level: int = 3, deterministic: bool = False, max_instruction_count: int | None = None, max_operand_stack_depth: int = 1 << 20, instruction_timeout_s: float | None = None, dispatch_mode: str = 'fast'):
+    def __init__(self, trace_mode: bool = False, noise_model=None,
+                 sim_type: str = 'dense', gpu_platform: str = 'none',
+                 seed: int | None = None, verbose: bool = False,
+                 opt_level: int = 3, deterministic: bool = False,
+                 max_instruction_count: int | None = None,
+                 max_operand_stack_depth: int = 1 << 20,
+                 instruction_timeout_s: float | None = None,
+                 dispatch_mode: str = 'fast', sandbox: bool = False):
         self.rng = random.Random(seed)
+        # §6.2 (Security): Check for sandbox mode via env var if not passed.
+        self.sandbox = sandbox or (_os.environ.get("EIGEN_SANDBOX") == "1")
+        
         from src.noise.noise_model import NoiseModel
         self.simulator = QuantumSimulator(sim_type=sim_type, gpu_platform=gpu_platform, seed=seed)
         self.trace_mode = trace_mode
@@ -161,9 +198,21 @@ class EigenVM:
         # Trace-Based Adaptive Execution Engine
         from src.jit.jit_compiler import JITCompiler
         self.jit = JITCompiler(self)
+        # §2.1 — JIT sourcegen removal. The fragile Python-sourcegen JIT
+        # is disabled by default and scheduled for deletion in Eigen 2.8.
+        # Trace-based JIT (jit_compiler/native_codegen) is enabled at -O3.
+        # The fragile hand-rolled Python-sourcegen fast-loop JIT that used to
+        # live here was removed (audit §2) — it duplicated every opcode in 3
+        # places and silently mis-executed continue/break.
         self.jit_enabled = (opt_level >= 3)
         self.jit_hits = 0
         self.jit_deopts = 0
+        
+        if opt_level >= 3:
+            import sys as _sys
+            print("Warning: JIT (opt_level >= 3) requested, but the Python-sourcegen "
+                  "JIT is disabled for audit compliance. Using native executor "
+                  "where possible.", file=_sys.stderr)
         
         # VM registers and stacks
         self.instructions = []
@@ -184,7 +233,12 @@ class EigenVM:
         self._debug_mode = False
         
         # Heap
-        self.heap = weakref.WeakValueDictionary()
+        # VM heap stores strong references: heap objects must live until the
+        # VM explicitly frees them (or the VM itself is collected), not until
+        # the last Python VMRef goes out of scope. The old WeakValueDictionary
+        # dropped entries as soon as the caller's VMRef was collected, which
+        # corrupted heap state under normal ref churn.
+        self.heap = {}
         self.heap_lock = threading.Lock()
         self.next_ref_id = 1
 
@@ -320,7 +374,12 @@ class EigenVM:
     def run_compiled_block(self, compiled_func) -> bool:
         locals_map = self.call_stack[-1].locals if self.call_stack else self.globals
         try:
-            res = compiled_func(self.operand_stack, locals_map, self.globals, self.lookup_var, self)
+            # §3.1 (Security): use a restricted proxy for the JIT sandbox.
+            # This prevents the JIT'd block from reaching dangerous VM internals
+            # and hardens the sandbox (audit §3).
+            from src.jit.jit_compiler import JITVMProxy
+            proxy = JITVMProxy(self)
+            res = compiled_func(self.operand_stack, locals_map, self.globals, self.lookup_var, proxy)
             if res:
                 self.jit_deopts += 1
             return True
@@ -412,7 +471,13 @@ class EigenVM:
         return ActivationFrame(return_address, func_name)
 
     def recycle_frame(self, frame):
+        # §5 (audit): clear the frame before pooling so stale locals /
+        # try-stack / line info from the previous tenant don't leak into
+        # the next call that reuses this frame. ``get_frame`` also calls
+        # ``reset`` on the way out, so this is defense in depth — but it
+        # keeps the pooled object small and safe for inspection.
         if len(self.frame_pool) < 64:
+            frame.reset(None, "main")
             self.frame_pool.append(frame)
 
     # === §10.1 — Debug Adapter Protocol Integration ====================
@@ -480,7 +545,24 @@ class EigenVM:
     def op_pow(self, arg):
         b = self.operand_stack.pop()
         a = self.operand_stack.pop()
-        self.operand_stack.append(a ** b)
+        # §6 (DoS hardening): ``a ** b`` with a huge integer exponent tries
+        # to allocate gigabytes (``2 ** 999999999``) — an OOM/DoS vector via
+        # crafted bytecode. Cap integer exponents; float exponents stay
+        # unbounded (IEEE overflow yields inf, no allocation blow-up).
+        if isinstance(b, int) and not isinstance(b, bool):
+            if abs(b) > 1_000_000:
+                self.throw_exception("OverflowError: integer exponent too large (max 10^6).")
+                return
+            if isinstance(a, int) and not isinstance(a, bool):
+                # Estimate result size: b * log2(a)
+                # 10,000,000 bits limit (~1.25MB)
+                if abs(b) * a.bit_length() > 10_000_000:
+                    self.throw_exception("OverflowError: power result too large (max 10^7 bits).")
+                    return
+        try:
+            self.operand_stack.append(a ** b)
+        except OverflowError:
+            self.throw_exception("OverflowError: result of ** is too large.")
 
     def op_bit_and(self, arg):
         b = self.operand_stack.pop()
@@ -504,11 +586,25 @@ class EigenVM:
     def op_shl(self, arg):
         b = self.operand_stack.pop()
         a = self.operand_stack.pop()
+        # §6 (DoS hardening): limit shift amount to prevent huge allocations.
+        if isinstance(b, int) and not isinstance(b, bool):
+            if b > 1_000_000:
+                self.throw_exception("OverflowError: shift amount too large (max 10^6).")
+                return
+            if isinstance(a, int) and not isinstance(a, bool):
+                if a.bit_length() + b > 10_000_000:
+                    self.throw_exception("OverflowError: shift result too large (max 10^7 bits).")
+                    return
         self.operand_stack.append(a << b)
 
     def op_shr(self, arg):
         b = self.operand_stack.pop()
         a = self.operand_stack.pop()
+        # Right shift reduces size, no guard needed for allocation.
+        if isinstance(b, int) and not isinstance(b, bool) and b > 1_000_000:
+             # But still cap it to avoid weirdness
+             self.operand_stack.append(0 if a >= 0 else -1)
+             return
         self.operand_stack.append(a >> b)
 
     def op_eq(self, arg):
@@ -755,7 +851,7 @@ class EigenVM:
             field_vals.append(pop())
         field_vals.reverse()
 
-        data = {name: val for name, val in zip(field_names, field_vals)}
+        data = {name: val for name, val in zip(field_names, field_vals, strict=False)}
         ref = self.allocate_heap("struct", data)
         self.operand_stack.append(ref)
 
@@ -876,53 +972,47 @@ class EigenVM:
         self.simulator.allocate_qubit(qname)
         self.log_trace(f"Allocated qubit: '{qname}'")
 
+    # §2 (audit): table-driven quantum gate dispatch replaces the 18-branch
+    # if/elif chain. Single source of truth; adding a gate = one entry.
+    _Q_GATE_DISPATCH = {
+        'H':     lambda sim, t, a: sim.H(t[0]),
+        'X':     lambda sim, t, a: sim.X(t[0]),
+        'Y':     lambda sim, t, a: sim.Y(t[0]),
+        'Z':     lambda sim, t, a: sim.Z(t[0]),
+        'S':     lambda sim, t, a: sim.S(t[0]),
+        'T':     lambda sim, t, a: sim.T(t[0]),
+        'RX':    lambda sim, t, a: sim.RX(t[0], a[0]),
+        'RY':    lambda sim, t, a: sim.RY(t[0], a[0]),
+        'RZ':    lambda sim, t, a: sim.RZ(t[0], a[0]),
+        'CNOT':  lambda sim, t, a: sim.CNOT(t[0], t[1]),
+        'CZ':    lambda sim, t, a: sim.CZ(t[0], t[1]),
+        'SWAP':  lambda sim, t, a: sim.SWAP(t[0], t[1]),
+        'CCX':   lambda sim, t, a: sim.CCX(t[0], t[1], t[2]),
+        'CSWAP': lambda sim, t, a: sim.CSWAP(t[0], t[1], t[2]),
+        'CP':    lambda sim, t, a: sim.CP(t[0], t[1], a[0]),
+        'CRX':   lambda sim, t, a: sim.CRX(t[0], t[1], a[0]),
+        'CRY':   lambda sim, t, a: sim.CRY(t[0], t[1], a[0]),
+        'CRZ':   lambda sim, t, a: sim.CRZ(t[0], t[1], a[0]),
+    }
+
     def op_q_gate(self, arg):
         gate_name, targets = arg
         angles = []
         if gate_name in ("RX", "RY", "RZ", "CP", "CRX", "CRY", "CRZ"):
-            angles.append(self.operand_stack.pop())
-        
-        resolved_targets = [self.lookup_var(t) for t in targets]
+            angle = self.operand_stack.pop()
+            # §6 (Security): rotation angles must be finite (no NaN / Inf)
+            # to prevent simulator instability or crashes (audit BUG-C01/C02).
+            if not _math.isfinite(angle):
+                self.throw_exception(f"ValueError: {gate_name} angle must be finite, got {angle!r}")
+                return
+            angles.append(angle)
 
-        if gate_name == 'H':
-            self.simulator.H(resolved_targets[0])
-        elif gate_name == 'X':
-            self.simulator.X(resolved_targets[0])
-        elif gate_name == 'Y':
-            self.simulator.Y(resolved_targets[0])
-        elif gate_name == 'Z':
-            self.simulator.Z(resolved_targets[0])
-        elif gate_name == 'S':
-            self.simulator.S(resolved_targets[0])
-        elif gate_name == 'T':
-            self.simulator.T(resolved_targets[0])
-        elif gate_name == 'RX':
-            self.simulator.RX(resolved_targets[0], angles[0])
-        elif gate_name == 'RY':
-            self.simulator.RY(resolved_targets[0], angles[0])
-        elif gate_name == 'RZ':
-            self.simulator.RZ(resolved_targets[0], angles[0])
-        elif gate_name == 'CNOT':
-            self.simulator.CNOT(resolved_targets[0], resolved_targets[1])
-        elif gate_name == 'CZ':
-            self.simulator.CZ(resolved_targets[0], resolved_targets[1])
-        elif gate_name == 'SWAP':
-            self.simulator.SWAP(resolved_targets[0], resolved_targets[1])
-        elif gate_name == 'CCX':
-            self.simulator.CCX(resolved_targets[0], resolved_targets[1], resolved_targets[2])
-        elif gate_name == 'CSWAP':
-            self.simulator.CSWAP(resolved_targets[0], resolved_targets[1], resolved_targets[2])
-        elif gate_name == 'CP':
-            self.simulator.CP(resolved_targets[0], resolved_targets[1], angles[0])
-        elif gate_name == 'CRX':
-            self.simulator.CRX(resolved_targets[0], resolved_targets[1], angles[0])
-        elif gate_name == 'CRY':
-            self.simulator.CRY(resolved_targets[0], resolved_targets[1], angles[0])
-        elif gate_name == 'CRZ':
-            self.simulator.CRZ(resolved_targets[0], resolved_targets[1], angles[0])
-        else:
+        resolved_targets = [self.lookup_var(t) for t in targets]
+        handler = self._Q_GATE_DISPATCH.get(gate_name)
+        if handler is None:
             self.throw_exception(f"UnknownGateException: {gate_name}")
             return
+        handler(self.simulator, resolved_targets, angles)
 
         # Apply global gate noise if active
         for target in resolved_targets:
@@ -1041,665 +1131,6 @@ class EigenVM:
                 except Exception as e:
                     self.throw_exception(f"ParallelTaskError: {e}")
 
-    def _try_fast_array_loop(self, instructions) -> bool:
-        """
-        Audit §1.1 BUG #1: the simple counter Fast-Loop JIT at ``_try_fast_loop``
-        rejects ``for x in arr { body }`` patterns because (a) the loop condition
-        uses ``LEN`` (4 ops, not the required 3) and (b) the body uses
-        ``GET_INDEX`` which is not in the ``supported_body`` set. For the
-        ``arrays.eig`` benchmark (sum of 10 numbers) this caused the loop to fall
-        back to a fully interpret-and-deopt path: ~17 ms vs the quantum sim's
-        ~0.8 ms for the same data size.
-
-        This handler recognises the EBC-compiler lowering of ``for x in arr``
-        specifically and rewrites it to a native Python
-        ``for x_val in <underlying_python_list>`` loop — iteration over a list
-        is one order of magnitude faster than the interpreter dispatch path.
-
-        Matching pattern (after the function-skip JMP at IP 0):
-
-            LOAD_VAR arr_ref_temp
-            STORE_VAR _compiler_temp_1
-            LOAD_CONST_STORE (0, _compiler_temp_2)
-          <loop_start>:
-            LOAD_VAR   _compiler_temp_2   # idx (counter)
-            LOAD_VAR   _compiler_temp_1   # arr_ref
-            LEN
-            <CMP>
-            JMP_IF_FALSE <exit_target>
-            LOAD_VAR   _compiler_temp_1   # reloaded for GET_INDEX
-            LOAD_VAR   _compiler_temp_2
-            GET_INDEX
-            STORE_VAR  x                  # iter var assignment
-            <body using LOAD_VAR/STORE_VAR/ADD/SUB/.../MUL/... only>
-            LOAD_VAR_LOAD_CONST_ADD (_compiler_temp_2, 1)   # idx + 1
-            STORE_VAR  _compiler_temp_2
-            JMP        <loop_start>       # backward jump
-          <exit_target>:
-            <post-loop opcodes — typically LOAD_VAR/PRINT/assert/HALT>
-
-        Returns True if it ran the loop to completion and ran the epilogue.
-        Returns False otherwise — caller falls back to the counter-based
-        ``_try_fast_loop`` or the slow interpreter.
-        """
-        n = len(instructions)
-        if n < 14:
-            return False
-
-        # 1. Find the *first* backward JMP (the loop back-jump).
-        back_jump_idx = None
-        back_jump_target = None
-        for i, inst in enumerate(instructions):
-            if inst.opcode == "JMP" and isinstance(inst.arg, int) and inst.arg < i:
-                back_jump_idx = i
-                back_jump_target = inst.arg
-                break
-        if back_jump_idx is None:
-            return False
-
-        # 2. Within the loop body, find the JMP_IF_FALSE that exits the loop.
-        cond_check_idx = None
-        exit_target = None
-        for i in range(back_jump_target, back_jump_idx):
-            inst = instructions[i]
-            if inst.opcode == "JMP_IF_FALSE" and isinstance(inst.arg, int):
-                cond_check_idx = i
-                exit_target = inst.arg
-                break
-        if cond_check_idx is None:
-            return False
-        # exit_target must land *after* the back-jump (forward jump out of loop).
-        if exit_target <= back_jump_idx:
-            return False
-
-        # 3. The condition expression: LOAD_VAR idx, LOAD_VAR arr_ref, LEN, CMP.
-        cond_insts = instructions[back_jump_target:cond_check_idx]
-        if len(cond_insts) != 4:
-            return False
-        if cond_insts[0].opcode != "LOAD_VAR" or not isinstance(cond_insts[0].arg, str):
-            return False
-        if cond_insts[1].opcode != "LOAD_VAR" or not isinstance(cond_insts[1].arg, str):
-            return False
-        if cond_insts[2].opcode != "LEN":
-            return False
-        if cond_insts[3].opcode not in ("LT", "LTE", "GT", "GTE", "EQ", "NEQ"):
-            return False
-
-        idx_var = cond_insts[0].arg
-        arr_ref_var = cond_insts[1].arg
-        cmp_op = cond_insts[3].opcode
-
-        # `for x in arr` semantics require iterating over every element of the
-        # array; loops with LTE/GT/GTE/EQ/NEQ against len(arr) *might* still
-        # iterate (e.g. LTE with == len) but the pattern is rare and ambiguous;
-        # accept only LT/LTE with the standard `idx < len(arr)` form.
-        if cmp_op not in ("LT", "LTE"):
-            return False
-
-        body_start = cond_check_idx + 1
-        body_end = back_jump_idx  # back-JMP itself is excluded from the body
-
-        # Need at least: GET_INDEX(4) + increment + STORE_VAR idx (2 minimum).
-        if body_end - body_start < 7:
-            return False
-
-        # 4. First 4 body ops must be: LOAD_VAR arr_ref, LOAD_VAR idx, GET_INDEX, STORE_VAR x.
-        b0 = instructions[body_start]
-        b1 = instructions[body_start + 1]
-        b2 = instructions[body_start + 2]
-        b3 = instructions[body_start + 3]
-        if b0.opcode != "LOAD_VAR" or b0.arg != arr_ref_var:
-            return False
-        if b1.opcode != "LOAD_VAR" or b1.arg != idx_var:
-            return False
-        if b2.opcode != "GET_INDEX":
-            return False
-        if b3.opcode != "STORE_VAR" or not isinstance(b3.arg, str):
-            return False
-        iter_var = b3.arg
-
-        # 5. Last body op = STORE_VAR idx_var (the increment's store-back).
-        #    Second-to-last = the increment itself. We accept the
-        #    LOAD_VAR_LOAD_CONST_ADD superinstr (the common emitter case) and
-        #    fall back to the three-op LOAD_VAR/LOAD_CONST/ADD form.
-        increment_const = None
-        if (instructions[body_end - 2].opcode == "LOAD_VAR_LOAD_CONST_ADD"
-                and isinstance(instructions[body_end - 2].arg, tuple)
-                and instructions[body_end - 2].arg[0] == idx_var):
-            store_inst = instructions[body_end - 1]
-            if store_inst.opcode != "STORE_VAR" or store_inst.arg != idx_var:
-                return False
-            increment_const = instructions[body_end - 2].arg[1]
-            body_insts_start = body_start + 4
-            body_insts_end = body_end - 2
-        elif body_end - body_start >= 9:
-            l1 = instructions[body_end - 4]
-            l2 = instructions[body_end - 3]
-            addn = instructions[body_end - 2]
-            store_2 = instructions[body_end - 1]
-            if (l1.opcode != "LOAD_VAR" or l1.arg != idx_var
-                    or l2.opcode != "LOAD_CONST"
-                    or addn.opcode != "ADD"
-                    or store_2.opcode != "STORE_VAR" or store_2.arg != idx_var):
-                return False
-            increment_const = l2.arg
-            body_insts_start = body_start + 4
-            body_insts_end = body_end - 4
-        else:
-            return False
-        if increment_const != 1:
-            return False
-
-        body_insts = instructions[body_insts_start:body_insts_end]
-
-        # 6. Validate that the body uses only ops we can lower to Python
-        #    register-form. NOTABLY excluded: GET_INDEX (other than the head
-        #    read we handle), SET_INDEX (body would mutate arr — Python's
-        #    iteration would skip the new entry), LEN, CALL (recursion), RET,
-        #    THROW, GET_FIELD, SET_FIELD, ALLOC_*, etc.
-        supported_body = {
-            "LOAD_VAR", "LOAD_CONST", "ADD", "SUB", "MUL", "DIV", "STORE_VAR",
-            "LOAD_VAR_LOAD_CONST_ADD", "LOAD_VAR_LOAD_CONST_SUB", "LOAD_CONST_STORE",
-            "JMP", "MOD", "POW", "BIT_AND", "BIT_OR", "BIT_XOR", "SHL", "SHR",
-            "EQ", "NEQ", "LT", "GT", "LTE", "GTE",
-        }
-        for inst in body_insts:
-            if inst.opcode not in supported_body:
-                return False
-
-        # 7. Collect all variables touched by the loop (so we can load them
-        #    once into Python local ``r_*`` registers and write them back to
-        #    globals/locals once at the end — avoiding dict lookups per iter).
-        all_vars = {iter_var, idx_var, arr_ref_var}
-        for inst in body_insts:
-            if inst.opcode in ("LOAD_VAR", "STORE_VAR"):
-                all_vars.add(inst.arg)
-            elif inst.opcode == "LOAD_CONST_STORE":
-                all_vars.add(inst.arg[1])
-            elif inst.opcode in ("LOAD_VAR_LOAD_CONST_ADD", "LOAD_VAR_LOAD_CONST_SUB"):
-                all_vars.add(inst.arg[0])
-
-        clean = lambda v: "".join(c if c.isalnum() else "_" for c in v)
-
-        # 8. Build the Python source.
-        lines = []
-        lines.append("def _fast_array_loop(_globals, _locals, _heap_resolve):")
-        lines.append(f"    _arr_ref = _locals.get({arr_ref_var!r}, _globals.get({arr_ref_var!r}, None))")
-        lines.append("    _arr_data = _heap_resolve(_arr_ref)")
-        lines.append("    if _arr_data is None:")
-        lines.append("        return False")
-        for v in sorted(all_vars):
-            cn = clean(v)
-            lines.append(f"    r_{cn} = _locals.get({v!r}, _globals.get({v!r}, 0))")
-        iter_cn = clean(iter_var)
-        lines.append(f"    for _iter_val in _arr_data:")
-        lines.append(f"        r_{iter_cn} = _iter_val")
-
-        stack = []
-        _binop = {
-            "ADD": "+", "SUB": "-", "MUL": "*", "DIV": "/", "MOD": "%", "POW": "**",
-            "EQ": "==", "NEQ": "!=", "LT": "<", "GT": ">", "LTE": "<=", "GTE": ">=",
-            "BIT_AND": "&", "BIT_OR": "|", "BIT_XOR": "^", "SHL": "<<", "SHR": ">>",
-        }
-        for inst in body_insts:
-            if inst.opcode == "LOAD_CONST":
-                stack.append(repr(inst.arg))
-            elif inst.opcode == "LOAD_VAR":
-                stack.append(f"r_{clean(inst.arg)}")
-            elif inst.opcode == "STORE_VAR":
-                if not stack:
-                    return False
-                val = stack.pop()
-                lines.append(f"        r_{clean(inst.arg)} = {val}")
-            elif inst.opcode in _binop:
-                if len(stack) < 2:
-                    return False
-                b = stack.pop(); a = stack.pop()
-                stack.append(f"({a} {_binop[inst.opcode]} {b})")
-            elif inst.opcode == "LOAD_VAR_LOAD_CONST_ADD":
-                vn, k = inst.arg
-                stack.append(f"(r_{clean(vn)} + {k!r})")
-            elif inst.opcode == "LOAD_VAR_LOAD_CONST_SUB":
-                vn, k = inst.arg
-                stack.append(f"(r_{clean(vn)} - {k!r})")
-            elif inst.opcode == "LOAD_CONST_STORE":
-                cv, vn = inst.arg
-                lines.append(f"        r_{clean(vn)} = {cv!r}")
-            elif inst.opcode == "JMP":
-                # The compiler emits a JMP only for `continue`'s forward jump
-                # inside the loop. We treat it as a no-op inside the Python
-                # for-loop body; this is correct *iff* the only body-JMPs are
-                # forward jumps within the loop. We do not currently detect
-                # break/continue semantics — they're outside `supported_body`
-                # (BREAK/CONTINUE are separate opcodes).
-                pass
-            else:
-                return False
-
-        if stack:
-            # Body leaves intermediate values on the stack — bail to the
-            # interpreter for safety.
-            return False
-
-        # Write back *all* locals at the end. The idx_var is set to the final
-        # length so subsequent code that reads it sees the same value the
-        # original interpreter would have left.
-        for v in sorted(all_vars):
-            if v == idx_var:
-                continue
-            cn = clean(v)
-            lines.append(f"    _locals[{v!r}] = r_{cn}")
-            lines.append(f"    _globals[{v!r}] = r_{cn}")
-        idx_cn = clean(idx_var)
-        lines.append(f"    _locals[{idx_var!r}] = len(_arr_data)")
-        lines.append(f"    _globals[{idx_var!r}] = len(_arr_data)")
-        lines.append("    return True")
-
-        source = "\n".join(lines)
-
-        try:
-            code_obj = compile(source, "<fast_array_loop>", "exec")
-            # Audit §3: hardened sandbox — no type/getattr/hasattr/isinstance.
-            safe_globals = {
-                "__builtins__": {
-                    "bool": bool, "int": int, "float": float, "str": str,
-                    "len": len, "abs": abs, "range": range, "repr": repr,
-                },
-            }
-            local_vars = {}
-            exec(code_obj, safe_globals, local_vars)
-            fast_func = local_vars["_fast_array_loop"]
-        except Exception:
-            return False
-
-        # 9. Execute the prologue (instructions before the loop start). Any
-        #    opcode outside the supported set bails — keep us robust against
-        #    future compiler changes.
-        prologue_ok = self._exec_prologue_for_fast_array_loop(back_jump_target, instructions)
-        if not prologue_ok:
-            return False
-
-        # 10. Heap-resolver: walks a VMRef to its underlying Python list.
-        def resolve_arr_data(ref):
-            if not isinstance(ref, VMRef):
-                return None
-            if ref.ref_id not in self.heap:
-                return None
-            obj = self.heap[ref.ref_id]
-            if obj.obj_type != "array":
-                return None
-            return obj.data
-
-        locals_map = self.call_stack[-1].locals if self.call_stack else self.globals
-        success = fast_func(self.globals, locals_map, resolve_arr_data)
-        if not success:
-            return False
-
-        # Audit BUG #6: increment the unused-but-tracked jit_hits counter so
-        # the resource profile / monitoring reports a non-zero JIT count.
-        self.jit_hits += 1
-
-        # 11. Run the epilogue (instructions from exit_target to end). Bail
-        #     to the interpreter if any opcode falls outside our supported
-        #     set; this ensures we never silently drop a side-effect.
-        return self._exec_epilogue_for_fast_array_loop(exit_target, instructions)
-
-    def _exec_prologue_for_fast_array_loop(self, up_to_idx: int, instructions) -> bool:
-        """Run the prologue instructions for the array-loop JIT. Returns True
-        when all prologue ops were handled; False if the prologue contains
-        something we don't yet handle (caller bails to the slow interpreter)."""
-        for i in range(0, up_to_idx):
-            inst = instructions[i]
-            try:
-                if inst.opcode == "LOAD_CONST":
-                    self.operand_stack.append(inst.arg)
-                elif inst.opcode == "STORE_VAR":
-                    val = self.operand_stack.pop()
-                    if self.call_stack:
-                        self.call_stack[-1].locals[inst.arg] = val
-                    else:
-                        self.globals[inst.arg] = val
-                elif inst.opcode == "ALLOC_ARRAY":
-                    num_elems = inst.arg
-                    elems = []
-                    for _ in range(num_elems):
-                        elems.append(self.operand_stack.pop())
-                    elems.reverse()
-                    ref = self.allocate_heap("array", elems)
-                    self.operand_stack.append(ref)
-                elif inst.opcode == "LOAD_CONST_STORE":
-                    cv, vn = inst.arg
-                    if self.call_stack:
-                        self.call_stack[-1].locals[vn] = cv
-                    else:
-                        self.globals[vn] = cv
-                elif inst.opcode == "LOAD_VAR":
-                    self.operand_stack.append(self.lookup_var(inst.arg))
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_ADD":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) + k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_SUB":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) - k)
-                elif inst.opcode == "ADD":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a + b)
-                elif inst.opcode == "SUB":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a - b)
-                elif inst.opcode == "MUL":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a * b)
-                elif inst.opcode == "DIV":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    if b == 0:
-                        self.throw_exception("DivisionByZeroError: Division by zero.")
-                        return False
-                    self.operand_stack.append(a / b)
-                elif inst.opcode == "JMP":
-                    pass  # the function-skip jump at IP 0
-                else:
-                    return False
-            except IndexError:
-                return False
-        return True
-
-    def _exec_epilogue_for_fast_array_loop(self, exit_target: int, instructions) -> bool:
-        """Run the instructions after the loop body. Return True iff we
-        reached HALT (or natural end) with only supported epilogue ops."""
-        n = len(instructions)
-        self.instructions = instructions
-        ip = exit_target
-        while ip < n:
-            inst = instructions[ip]
-            ip += 1
-            self.ip = ip
-            try:
-                if inst.opcode == "LOAD_VAR":
-                    self.operand_stack.append(self.lookup_var(inst.arg))
-                elif inst.opcode == "LOAD_CONST":
-                    self.operand_stack.append(inst.arg)
-                elif inst.opcode == "PRINT":
-                    self.op_print(inst.arg)
-                elif inst.opcode == "STORE_VAR":
-                    val = self.operand_stack.pop()
-                    if self.call_stack:
-                        self.call_stack[-1].locals[inst.arg] = val
-                    else:
-                        self.globals[inst.arg] = val
-                elif inst.opcode == "LOAD_CONST_STORE":
-                    cv, vn = inst.arg
-                    if self.call_stack:
-                        self.call_stack[-1].locals[vn] = cv
-                    else:
-                        self.globals[vn] = cv
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_ADD":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) + k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_SUB":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) - k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_LT":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) < k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_LTE":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) <= k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_GT":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) > k)
-                elif inst.opcode == "LOAD_VAR_LOAD_CONST_GTE":
-                    vn, k = inst.arg
-                    self.operand_stack.append(self.lookup_var(vn) >= k)
-                elif inst.opcode == "ADD":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a + b)
-                elif inst.opcode == "SUB":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a - b)
-                elif inst.opcode == "MUL":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a * b)
-                elif inst.opcode == "EQ":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a == b)
-                elif inst.opcode == "NEQ":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a != b)
-                elif inst.opcode == "LT":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a < b)
-                elif inst.opcode == "GT":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a > b)
-                elif inst.opcode == "LTE":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a <= b)
-                elif inst.opcode == "GTE":
-                    b = self.operand_stack.pop(); a = self.operand_stack.pop()
-                    self.operand_stack.append(a >= b)
-                elif inst.opcode == "JMP_IF_FALSE":
-                    cond = self.operand_stack.pop()
-                    if not cond:
-                        ip = inst.arg
-                    self.ip = ip
-                elif inst.opcode == "JMP_IF_TRUE":
-                    cond = self.operand_stack.pop()
-                    if cond:
-                        ip = inst.arg
-                    self.ip = ip
-                elif inst.opcode == "JMP":
-                    ip = inst.arg
-                    self.ip = ip
-                elif inst.opcode == "HALT":
-                    return True
-                else:
-                    self.ip = ip - 1
-                    return False
-            except IndexError:
-                self.ip = ip - 1
-                return False
-        return True
-
-    def _try_fast_loop(self, instructions) -> bool:
-        """Detect simple tight loops and compile them to register-based Python for near-native speed."""
-        n = len(instructions)
-        if n < 6:
-            return False
-
-        jmp_ops = {"JMP", "JMP_IF_FALSE", "JMP_IF_TRUE"}
-        back_jump_idx = None
-        back_jump_target = None
-        for i, inst in enumerate(instructions):
-            if inst.opcode in jmp_ops and isinstance(inst.arg, int) and inst.arg < i:
-                back_jump_idx = i
-                back_jump_target = inst.arg
-                break
-
-        if back_jump_idx is None:
-            return False
-
-        cond_check_idx = None
-        for i in range(back_jump_target, back_jump_idx):
-            inst = instructions[i]
-            if inst.opcode == "JMP_IF_FALSE" and isinstance(inst.arg, int):
-                cond_check_idx = i
-                loop_body_start = i + 1
-                exit_target = inst.arg
-                break
-
-        if cond_check_idx is None:
-            return False
-
-        # Only support pure register operations (no stack needed for simple loops)
-        # Condition must be: LOAD_VAR var, LOAD_CONST N, CMP_OP, JMP_IF_FALSE
-        cond_expr_insts = instructions[back_jump_target:cond_check_idx]
-        if len(cond_expr_insts) != 3:
-            return False
-        if cond_expr_insts[0].opcode != "LOAD_VAR":
-            return False
-        if cond_expr_insts[1].opcode != "LOAD_CONST":
-            return False
-        if cond_expr_insts[2].opcode not in ("LT", "GT", "LTE", "GTE", "EQ", "NEQ"):
-            return False
-
-        loop_var = cond_expr_insts[0].arg
-        limit_val = cond_expr_insts[1].arg
-        cmp_op = cond_expr_insts[2].opcode
-
-        # Parse loop body into simple register operations
-        # Each instruction must be: LOAD_VAR, LOAD_CONST, ADD/SUB, STORE_VAR
-        body_insts = instructions[loop_body_start:back_jump_idx]
-        if not body_insts:
-            return False
-
-        # Check all body instructions are supported
-        supported_body = {"LOAD_VAR", "LOAD_CONST", "ADD", "SUB", "MUL", "DIV",
-                          "STORE_VAR", "LOAD_VAR_LOAD_CONST_ADD", "LOAD_VAR_LOAD_CONST_SUB",
-                          "LOAD_CONST_STORE", "JMP"}
-        for inst in body_insts:
-            if inst.opcode not in supported_body:
-                return False
-
-        # Collect all variables
-        all_vars = set()
-        all_vars.add(loop_var)
-        for inst in body_insts:
-            if inst.opcode in ("LOAD_VAR", "STORE_VAR"):
-                all_vars.add(inst.arg)
-            elif inst.opcode == "LOAD_CONST_STORE":
-                all_vars.add(inst.arg[1])
-            elif inst.opcode in ("LOAD_VAR_LOAD_CONST_ADD", "LOAD_VAR_LOAD_CONST_SUB"):
-                all_vars.add(inst.arg[0])
-
-        clean = lambda v: "".join(c if c.isalnum() else "_" for c in v)
-
-        # Build register-based Python code (no stack!)
-        lines = []
-        lines.append("def _fast_loop(_globals, _locals):")
-        for v in sorted(all_vars):
-            cn = clean(v)
-            lines.append(f"    r_{cn} = _locals.get({repr(v)}, _globals.get({repr(v)}, 0))")
-
-        cmp_map = {"LT": "<", "GT": ">", "LTE": "<=", "GTE": ">=", "EQ": "==", "NEQ": "!="}
-
-        # Generate while loop
-        lines.append(f"    while r_{clean(loop_var)} {cmp_map[cmp_op]} {repr(limit_val)}:")
-
-        # Translate body instructions to register operations
-        # We use a simple expression stack for intermediate values
-        stack = []
-        for inst in body_insts:
-            if inst.opcode == "LOAD_CONST":
-                stack.append(repr(inst.arg))
-            elif inst.opcode == "LOAD_VAR":
-                stack.append(f"r_{clean(inst.arg)}")
-            elif inst.opcode == "STORE_VAR":
-                val = stack.pop()
-                lines.append(f"        r_{clean(inst.arg)} = {val}")
-            elif inst.opcode == "ADD":
-                b = stack.pop(); a = stack.pop()
-                stack.append(f"({a} + {b})")
-            elif inst.opcode == "SUB":
-                b = stack.pop(); a = stack.pop()
-                stack.append(f"({a} - {b})")
-            elif inst.opcode == "MUL":
-                b = stack.pop(); a = stack.pop()
-                stack.append(f"({a} * {b})")
-            elif inst.opcode == "DIV":
-                b = stack.pop(); a = stack.pop()
-                stack.append(f"({a} / {b})")
-            elif inst.opcode == "LOAD_VAR_LOAD_CONST_ADD":
-                stack.append(f"(r_{clean(inst.arg[0])} + {repr(inst.arg[1])})")
-            elif inst.opcode == "LOAD_VAR_LOAD_CONST_SUB":
-                stack.append(f"(r_{clean(inst.arg[0])} - {repr(inst.arg[1])})")
-            elif inst.opcode == "LOAD_CONST_STORE":
-                lines.append(f"        r_{clean(inst.arg[1])} = {repr(inst.arg[0])}")
-            elif inst.opcode == "JMP":
-                pass
-
-        # Write back variables after loop
-        for v in sorted(all_vars):
-            cn = clean(v)
-            lines.append(f"    _locals[{repr(v)}] = r_{cn}")
-            lines.append(f"    _globals[{repr(v)}] = r_{cn}")
-
-        source = "\n".join(lines)
-
-        try:
-            code_obj = compile(source, '<fast_loop>', 'exec')
-            # Audit §3: hardened sandbox. The fast-loop generated source uses
-            # only dict.get + arithmetic + comparisons, so we drop the
-            # introspection primitives (type/getattr/hasattr/isinstance) that
-            # previously enabled escapes like type(x).__subclasses__().
-            safe_globals = {
-                "__builtins__": {
-                    "bool": bool,
-                    "int": int,
-                    "float": float,
-                    "str": str,
-                    "len": len,
-                    "abs": abs,
-                    "range": range,
-                    "repr": repr,
-                },
-            }
-            local_vars = {}
-            exec(code_obj, safe_globals, local_vars)
-            fast_func = local_vars['_fast_loop']
-
-            # Execute pre-loop instructions (initialize variables)
-            for i in range(0, back_jump_target):
-                inst = instructions[i]
-                if inst.opcode == "LOAD_CONST":
-                    self.operand_stack.append(inst.arg)
-                elif inst.opcode == "STORE_VAR":
-                    val = self.operand_stack.pop()
-                    if self.call_stack:
-                        self.call_stack[-1].locals[inst.arg] = val
-                    else:
-                        self.globals[inst.arg] = val
-                elif inst.opcode == "LOAD_CONST_STORE":
-                    cv, vn = inst.arg
-                    if self.call_stack:
-                        self.call_stack[-1].locals[vn] = cv
-                    else:
-                        self.globals[vn] = cv
-                else:
-                    return False
-
-            # Run the fast loop!
-            locals_map = self.call_stack[-1].locals if self.call_stack else self.globals
-            fast_func(self.globals, locals_map)
-
-            # Execute epilogue
-            self.instructions = instructions
-            ip = exit_target
-            while ip < n:
-                inst = instructions[ip]
-                ip += 1
-                self.ip = ip
-                if inst.opcode == "LOAD_VAR":
-                    self.operand_stack.append(self.lookup_var(inst.arg))
-                elif inst.opcode == "LOAD_CONST":
-                    self.operand_stack.append(inst.arg)
-                elif inst.opcode == "PRINT":
-                    self.op_print(inst.arg)
-                elif inst.opcode == "HALT":
-                    return True
-                elif inst.opcode == "STORE_VAR":
-                    val = self.operand_stack.pop()
-                    if self.call_stack:
-                        self.call_stack[-1].locals[inst.arg] = val
-                    else:
-                        self.globals[inst.arg] = val
-                else:
-                    self.ip = ip - 1
-                    return False
-            return True
-        except Exception:
-            return False
-
     def execute(self, instructions: list[Instruction],
                 audit: 'AuditTrail | None' = None,
                 program_hash: str | None = None):
@@ -1718,7 +1149,10 @@ class EigenVM:
             with self._state_lock:
                 return self._execute_locked(instructions)
         # Audited path: build the entry around _execute_locked.
-        started = _time.monotonic_ns()
+        # §3 (audit): perf_counter_ns has nanosecond resolution on all
+        # platforms; monotonic_ns on Windows is ~15 ms and yields 0 for
+        # sub-millisecond programs, which broke the audit-trail test.
+        started = _time.perf_counter_ns()
         outcome_str = "success"
         err: BaseException | None = None
         try:
@@ -1729,7 +1163,7 @@ class EigenVM:
             outcome_str = "failure"
             raise
         finally:
-            wall = _time.monotonic_ns() - started
+            wall = _time.perf_counter_ns() - started
             # Don't fail the audited op because of an audit-write
             # failure; record() swallows OSError by design.
             audit.record(
@@ -1863,10 +1297,10 @@ class EigenVM:
                 print(f"[Auto Backend] Selected '{chosen}': {report.reason}")
             self.simulator.configure_backend(chosen)
 
-        # Native Rust executor bypassed — Python VM with fast-loop JIT is faster for loops
-        # and provides better print precision. Native executor kept as fallback for
-        # straight-line programs without PRINT/loops if ever needed.
-        _skip_native = True
+        # §2.2 — Native Rust executor. Enabled only for straight-line programs
+        # with semantically compatible opcodes. PRINT is excluded because
+        # the Rust `println!` bypasses the VM `output_stream`.
+        _skip_native = False
         if not _skip_native and native is not None and hasattr(native, 'execute_bytecode_native'):
             supported = {
                 "LOAD_CONST", "STORE_VAR", "LOAD_VAR",
@@ -1874,7 +1308,7 @@ class EigenVM:
                 "EQ", "NEQ", "LT", "GT", "LTE", "GTE",
                 "AND", "OR", "NOT",
                 "JMP", "JMP_IF_FALSE", "JMP_IF_TRUE",
-                "PRINT", "HALT",
+                "HALT",
                 "MOD", "BIT_AND", "BIT_OR", "BIT_XOR", "BIT_NOT", "SHL", "SHR",
                 "LOAD_CONST_STORE",
                 "LOAD_VAR_LOAD_CONST_ADD", "LOAD_VAR_LOAD_CONST_SUB",
@@ -1899,7 +1333,7 @@ class EigenVM:
                     raise e
                 except ZeroDivisionError:
                     self.throw_exception("DivisionByZeroError: Division by zero.")
-                except Exception as e:
+                except Exception:
                     pass
 
         self.instructions = instructions
@@ -1912,17 +1346,12 @@ class EigenVM:
 
         self.log_trace("Starting execution of Eigen VM bytecode")
 
-        # Try fast-loop compilation: detect backward jumps and compile entire loop bodies
-        if self.jit_enabled:
-            # Audit §1.1 BUG #1: try the array-iteration variant first (it is
-            # a specific pattern the counter JIT below cannot handle because of
-            # LEN/GET_INDEX). If it recognizes the pattern and runs, we're done.
-            if self._try_fast_array_loop(instructions):
-                self.log_trace("Finished execution of Eigen VM bytecode (fast array loop)")
-                return
-            if self._try_fast_loop(instructions):
-                self.log_trace("Finished execution of Eigen VM bytecode (fast loop)")
-                return
+        # The fragile hand-rolled Python-sourcegen fast-loop JIT that used to
+        # live here was removed (audit §2): it re-implemented every opcode in
+        # 3 places, silently mis-executed ``continue``/``break`` (JMP as
+        # no-op), and broke on any compiler pattern change. Per-loop
+        # acceleration now comes only from the trace JIT in jit_compiler/
+        # native_codegen; a proper loop JIT in Rust is future work.
 
         # Pre-extract instruction data into parallel arrays for maximum speed
         n_instrs = len(instructions)
@@ -1946,7 +1375,6 @@ class EigenVM:
         self.instruction_count = 0
         max_inst = self.max_instruction_count
         max_stack = self.max_operand_stack_depth
-        deterministic = self.deterministic
         if self.instruction_timeout_s is not None:
             import time as _time_mod
             _deadline = _time_mod.monotonic() + self.instruction_timeout_s
@@ -2265,28 +1693,48 @@ class EigenVM:
     def execute_native_stdlib(self, func_name: str, args: list) -> any:
         import importlib.util
         import sys
-        import os
-        
+
         parts = func_name.split('.')
-        if len(parts) < 3:
+        if len(parts) != 3:
             raise ValueError(f"Invalid stdlib function call: {func_name}")
-            
+
         module_subname = parts[1]
         func_subname = parts[2]
-        
-        module_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "stdlib", "native", f"{module_subname}.py"))
-        if not os.path.isfile(module_path):
-            raise FileNotFoundError(f"Native stdlib module {module_subname} not found at {module_path}")
-            
+
+        # §6 (security): allow-list validation happens *before* any path is
+        # constructed. This rejects path traversal (``..``), absolute-path
+        # injection (``/tmp/evil``, ``C:/evil``) and unknown modules alike,
+        # closing the bytecode-driven RCE vector.
+        if module_subname not in _NATIVE_STDLIB_WHITELIST:
+            raise ValueError(
+                f"Unknown native stdlib module: {module_subname!r}. "
+                f"Allowed: {sorted(_NATIVE_STDLIB_WHITELIST)}")
+        if not _NATIVE_MODULE_NAME_RE.match(module_subname):
+            raise ValueError(f"Invalid native stdlib module name: {module_subname!r}")
+
+        # §6.1 (Security): Static loading from cache.
         module_qualname = f"stdlib.native.{module_subname}"
-        if module_qualname in sys.modules:
+        if module_qualname in _NATIVE_STDLIB_MODULES:
+            mod = _NATIVE_STDLIB_MODULES[module_qualname]
+        elif module_qualname in sys.modules:
             mod = sys.modules[module_qualname]
+            _NATIVE_STDLIB_MODULES[module_qualname] = mod
         else:
+            module_path = _os.path.abspath(
+                _os.path.join(_NATIVE_STDLIB_ROOT, f"{module_subname}.py"))
+            # Defense in depth: the allow-list above already guarantees
+            # containment; this check guards against future edits that widen it.
+            if _os.path.commonpath([module_path, _NATIVE_STDLIB_ROOT]) != _NATIVE_STDLIB_ROOT:
+                raise ValueError(f"Native stdlib path escapes root: {module_subname!r}")
+            if not _os.path.isfile(module_path):
+                raise FileNotFoundError(f"Native stdlib module {module_subname} not found at {module_path}")
+
             spec = importlib.util.spec_from_file_location(module_qualname, module_path)
             mod = importlib.util.module_from_spec(spec)
             sys.modules[module_qualname] = mod
             spec.loader.exec_module(mod)
-            
+            _NATIVE_STDLIB_MODULES[module_qualname] = mod
+
         if not hasattr(mod, func_subname):
             if func_subname == 'abs' and hasattr(mod, 'abs_val'):
                 func_subname = 'abs_val'

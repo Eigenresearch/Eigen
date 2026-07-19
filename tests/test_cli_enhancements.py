@@ -11,9 +11,7 @@ from src.cli_enhancements import (
     default_eigen_completion_spec,
     generate_completion_script,
     REPLState,
-    REPLResult,
     REPL,
-    WatchEvent,
     FileWatcher,
     PlaygroundBackend,
     Playground,
@@ -168,7 +166,7 @@ class TestFileWatcher(unittest.TestCase):
                                     callback=recorded.append,
                                     poll_interval_s=0.01,
                                     max_iterations=1)
-            events = watcher.run()
+            watcher.run()
             self.assertEqual(recorded, [])
         finally:
             os.unlink(path)

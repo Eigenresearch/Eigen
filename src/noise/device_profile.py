@@ -4,16 +4,11 @@ Supports importing noise parameters from IBM Quantum and IonQ backends.
 When real calibration data is not available, uses typical published values.
 """
 import json
-import math
 import random
 from src.noise.noise_channel import (
     NoiseChannel,
     NoisePipeline,
-    BitFlipChannel,
-    PhaseFlipChannel,
     DepolarizingChannel,
-    AmplitudeDampingChannel,
-    PhaseDampingChannel,
     ReadoutErrorChannel,
 )
 from src.noise.t1t2_model import T1T2NoiseModel
@@ -110,6 +105,18 @@ class DeviceNoiseProfile:
                  coupling_map=None, rng=None, seed=None):
         self.backend_name = backend_name
         self.num_qubits = num_qubits
+        if t1_avg <= 0:
+            raise ValueError(f"t1_avg must be positive, got {t1_avg}")
+        if t2_avg <= 0:
+            raise ValueError(f"t2_avg must be positive, got {t2_avg}")
+        if t2_avg > 2.0 * t1_avg:
+            import warnings
+            warnings.warn(
+                f"t2_avg ({t2_avg}) exceeds 2*t1_avg ({2.0 * t1_avg}); "
+                f"clamping t2_avg to 2*t1_avg. T2 cannot exceed 2*T1.",
+                stacklevel=2,
+            )
+            t2_avg = 2.0 * t1_avg
         self.t1_avg = t1_avg
         self.t2_avg = t2_avg
         self.single_qubit_error = single_qubit_error

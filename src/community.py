@@ -109,7 +109,6 @@ def render_issue_template(template: IssueTemplate) -> str:
     """Render an issue template as YAML front-matter + body —
     the format that GitHub's `.github/ISSUE_TEMPLATE/*.yml`
     expects."""
-    name_part = template.title.lower().replace(" ", "_")
     labels = {
         IssueKind.BUG: "bug",
         IssueKind.FEATURE: "enhancement",

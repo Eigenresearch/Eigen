@@ -27,8 +27,6 @@ from src.backend.bytecode import (
     format_version_error,
     load_bytecode,
     UnsupportedBytecodeVersionError,
-    Instruction,
-    Opcode,
 )
 
 
@@ -168,7 +166,7 @@ class TestModuleConstants(unittest.TestCase):
         self.assertEqual(BYTECODE_VERSION, 1)
 
     def test_supported_bytecode_version_str(self):
-        self.assertEqual(str(SUPPORTED_BYTECODE_VERSION), "1.0")
+        self.assertEqual(str(SUPPORTED_BYTECODE_VERSION), "1.1")
 
 
 # ---------------------------------------------------------------------------
@@ -178,19 +176,19 @@ class TestModuleConstants(unittest.TestCase):
 class TestCompatibilityStatus(unittest.TestCase):
     def test_exact_match(self):
         self.assertEqual(
-            check_bytecode_compatibility(BytecodeVersion(1, 0)),
+            check_bytecode_compatibility(BytecodeVersion(1, 1)),
             CompatibilityStatus.EXACT
         )
 
     def test_exact_match_with_int(self):
         self.assertEqual(
             check_bytecode_compatibility(1),
-            CompatibilityStatus.EXACT
+            CompatibilityStatus.BACKWARD
         )
 
     def test_exact_match_with_str(self):
         self.assertEqual(
-            check_bytecode_compatibility("1.0"),
+            check_bytecode_compatibility("1.1"),
             CompatibilityStatus.EXACT
         )
 
@@ -312,7 +310,7 @@ class TestFormatVersionError(unittest.TestCase):
 
     def test_message_includes_supported_version(self):
         msg = format_version_error("2.5")
-        self.assertIn("1.0", msg)
+        self.assertIn("1.1", msg)
 
     def test_message_actionable_advice(self):
         msg = format_version_error("2.0")
@@ -353,7 +351,7 @@ class TestLegacyAPIBackwardsCompat(unittest.TestCase):
 class TestLoadBytecode(unittest.TestCase):
     def test_load_exact_version_returns_instructions(self):
         data = {
-            "bytecode_version": 1,
+            "bytecode_version": "1.1",
             "instructions": [
                 {"opcode": "LOAD_CONST", "arg": 42, "line": 1},
                 {"opcode": "HALT", "arg": None, "line": 2},
@@ -398,19 +396,19 @@ class TestLoadBytecode(unittest.TestCase):
         self.assertEqual(status, "exact")
 
     def test_load_empty_instructions(self):
-        data = {"bytecode_version": 1, "instructions": []}
+        data = {"bytecode_version": "1.1", "instructions": []}
         instrs, status = load_bytecode(data)
         self.assertEqual(instrs, [])
         self.assertEqual(status, CompatibilityStatus.EXACT)
 
     def test_load_missing_instructions_key(self):
-        data = {"bytecode_version": 1}
+        data = {"bytecode_version": "1.1"}
         instrs, status = load_bytecode(data)
         self.assertEqual(instrs, [])
 
     def test_load_preserves_line_info(self):
         data = {
-            "bytecode_version": 1,
+            "bytecode_version": "1.1",
             "instructions": [
                 {"opcode": "LOAD_CONST", "arg": 1, "line": 10},
             ],

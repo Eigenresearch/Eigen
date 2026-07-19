@@ -7,7 +7,6 @@ from src.frontend.lexer import Lexer
 from src.frontend.parser import Parser
 from src.semantic.import_resolver import ImportResolver
 from src.semantic.type_checker import TypeChecker, TypeErrorException
-from src.ir.ir_converter import EQIRConverter
 from src.ir.optimizer import EQIROptimizer
 from src.backend.ebc_compiler import EBCCompiler
 from src.backend.vm import EigenVM

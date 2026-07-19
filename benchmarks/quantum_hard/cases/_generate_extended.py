@@ -60,7 +60,7 @@ def ising_trotter(n_qubits: int, n_steps: int, dt: float) -> str:
     body = [f"qubit q{i}" for i in range(n_qubits)]
     for i in range(n_qubits):
         body.append(f"H q{i}")
-    for s in range(n_steps):
+    for _s in range(n_steps):
         for i in range(n_qubits - 1):
             body.append(f"CNOT q{i}, q{i+1}")
             body.append(f"RZ q{i+1}, {dt}")
@@ -287,7 +287,7 @@ def vqe_layered(n_qubits: int, n_layers: int, seed: int = 7) -> str:
     """
     rng = random.Random(seed)
     body = [f"qubit q{i}" for i in range(n_qubits)]
-    for layer in range(n_layers):
+    for _layer in range(n_layers):
         for i in range(n_qubits):
             theta = rng.uniform(-math.pi, math.pi)
             phi = rng.uniform(-math.pi, math.pi)

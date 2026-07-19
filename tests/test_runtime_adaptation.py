@@ -5,7 +5,6 @@ import unittest
 from src.runtime_adaptation import (
     PrecisionLevel,
     MemoryBudget,
-    AdaptationDecision,
     RuntimeAdapter,
     AutoScalerConfig,
     AutoScaler,

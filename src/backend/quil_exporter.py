@@ -72,7 +72,7 @@ class QuilExporter:
         # Translate measurements
         if measures:
             lines.append("")
-            for idx, (q, c) in enumerate(measures):
+            for idx, (q, _c) in enumerate(measures):
                 lines.append(f"MEASURE {q_map[q]} ro[{idx}]")
                 
         return "\n".join(lines)

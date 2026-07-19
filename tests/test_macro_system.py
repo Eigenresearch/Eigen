@@ -208,7 +208,7 @@ class TestMacroContextHygiene(unittest.TestCase):
         same shared counter — useful for hygiene across a single
         expansion."""
         ctx = MacroContext(scope={}, line=0, column=0)
-        table = MacroTable()
+        MacroTable()
         n1 = ctx.next_temp_name("a")
         n2 = ctx.next_temp_name("a")
         self.assertNotEqual(n1, n2)

@@ -6,10 +6,6 @@ Covers `src.distributed.circuit_slicer.CircuitSlicer` and
 """
 from __future__ import annotations
 
-import math
-import os
-import shutil
-import tempfile
 import unittest
 
 from src.distributed.circuit_slicer import CircuitSlicer, _qubit_targets

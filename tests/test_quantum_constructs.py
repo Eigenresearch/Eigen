@@ -11,8 +11,6 @@ from src.language_extensions.quantum_constructs import (
     MidCircuitFeedback,
     feed_forward,
     RepeatUntilSuccess,
-    RusFailure,
-    QecCode,
     repetition_code_x,
     repetition_code_z,
     shor_code,
@@ -20,7 +18,6 @@ from src.language_extensions.quantum_constructs import (
     PulseEntry,
     PulseSchedule,
     DynamicCircuit,
-    DynamicStep,
     conditional_gate,
 )
 

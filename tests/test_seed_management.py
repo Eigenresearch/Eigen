@@ -216,7 +216,7 @@ class TestGlobalSeedManagerInstance(unittest.TestCase):
 
     def test_set_component_seed_overrides_global_derivation(self):
         self.gs.set_global_seed(99)
-        derived = self.gs.get_seed_for("sim")
+        self.gs.get_seed_for("sim")
         self.gs.set_component_seed("sim", 12345)
         self.assertEqual(self.gs.get_seed_for("sim"), 12345)
         # Different components still derived from master

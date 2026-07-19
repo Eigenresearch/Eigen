@@ -5,8 +5,7 @@ induce errors on neighbouring qubits. This is critical for modelling
 real superconducting quantum processors where microwave pulses for
 one gate can affect nearby qubits.
 """
-import random
-from src.noise.noise_channel import NoiseChannel, NoisePipeline
+from src.noise.noise_channel import NoisePipeline
 
 
 class CrosstalkModel(NoisePipeline):

@@ -41,9 +41,8 @@ from __future__ import annotations
 
 import hashlib
 import os
-import tempfile
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from src.compiler import to_ebc, get_db

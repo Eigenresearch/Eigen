@@ -1,9 +1,9 @@
-; Eigen Programming Language - Inno Setup Script v2.7.0
+; Eigen Programming Language - Inno Setup Script v2.8.0
 ; Build with: iscc installer\eigen_setup.iss
 ; Requires: Inno Setup 6.x (https://jrsoftware.org/isinfo.php)
 
-#define EigenVersion "2.7.0"
-#define EigenCodename "Meridian"
+#define EigenVersion "2.8.0"
+#define EigenCodename "Mars"
 
 [Setup]
 AppName=Eigen Programming Language

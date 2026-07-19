@@ -33,7 +33,7 @@ class AzureBackend:
         q_map = {q: idx for idx, q in enumerate(sorted_qubits)}
 
         # 1. Declare qubits in QIR format
-        for q, idx in q_map.items():
+        for _q, idx in q_map.items():
             lines.append(f"  %q{idx} = call %Qubit* @__quantum__rt__qubit_allocate()")
 
         # 2. Gate operations - dispatch via the shared gate registry so that
@@ -69,7 +69,7 @@ class AzureBackend:
                 used_qir_funcs.append(spec.qir_func)
 
         # 3. Free qubits
-        for q, idx in q_map.items():
+        for _q, idx in q_map.items():
             lines.append(f"  call void @__quantum__rt__qubit_release(%Qubit* %q{idx})")
 
         lines.append("  ret void")

@@ -1,7 +1,7 @@
 import sys
-import os
 import argparse
 from src.compiler import get_workspace_root
+from src.release import RELEASE_LABEL, VERSION
 
 COMMAND_REGISTRY = {}
 
@@ -12,10 +12,11 @@ def register_command(name):
     return decorator
 
 # Load all command handlers to trigger their @register_command decorations
-import src.commands
+import src.commands  # noqa: F401  (imported for registration side effects)
 
 def main():
-    parser = argparse.ArgumentParser(description="Eigen Language Command Line Interface (v2.7 — Meridian)")
+    parser = argparse.ArgumentParser(description=f"Eigen Language Command Line Interface (v{RELEASE_LABEL})")
+    parser.add_argument('--version', action='version', version=f'Eigen {VERSION}')
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Run command
@@ -26,30 +27,53 @@ def main():
     run_parser.add_argument("--trace", action="store_true", help="Enable execution step tracing")
     run_parser.add_argument("--vm", action="store_true", help="Execute using the Eigen VM (EBC)")
     run_parser.add_argument("--aot", action="store_true", help="Execute compiled AOT code via JIT (MCJIT)")
-    run_parser.add_argument("--backend", choices=["sim", "qiskit", "ibmq", "sparse", "mps", "density_matrix", "stabilizer", "auto"], default="auto", help="Execution backend target")
+    run_parser.add_argument(
+        "--backend",
+        choices=["sim", "qiskit", "ibmq", "sparse", "mps", "density_matrix", "stabilizer", "auto"],
+        default="auto", help="Execution backend target")
     run_parser.add_argument("--strict", action="store_true", help="Enforce strict backend capability validation")
-    run_parser.add_argument("--noise", choices=["depolarizing", "bit_flip", "phase_flip", "amplitude_damping", "readout_error"], help="Stochastic noise model target")
+    run_parser.add_argument(
+        "--noise",
+        choices=["depolarizing", "bit_flip", "phase_flip", "amplitude_damping", "readout_error"],
+        help="Stochastic noise model target")
     run_parser.add_argument("--noise-prob", type=float, default=0.0, help="Noise probability/rate")
-    run_parser.add_argument("--gpu", choices=["auto", "cuda", "rocm", "metal", "none"], default="none", help="GPU acceleration engine target")
-    run_parser.add_argument("--seed", type=int, default=None, help="Random number generator seed for deterministic simulation")
-    run_parser.add_argument("--deterministic", action="store_true", help="Force fully reproducible execution (sol.md §2.1): implies a fixed RNG seed and rejects non-deterministic operations")
-    run_parser.add_argument("--max-instructions", type=int, default=None, help="VM instruction-count limit (sol.md §7.1 hardening). Aborts with TimeoutError once exceeded")
-    run_parser.add_argument("--instruction-timeout", type=float, default=None, help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
+    run_parser.add_argument(
+        "--gpu", choices=["auto", "cuda", "rocm", "metal", "none"],
+        default="none", help="GPU acceleration engine target")
+    run_parser.add_argument(
+        "--seed", type=int, default=None,
+        help="Random number generator seed for deterministic simulation")
+    run_parser.add_argument(
+        "--deterministic", action="store_true",
+        help="Force fully reproducible execution (sol.md §2.1): implies a fixed RNG seed "
+             "and rejects non-deterministic operations")
+    run_parser.add_argument(
+        "--max-instructions", type=int, default=None,
+        help="VM instruction-count limit (sol.md §7.1 hardening). "
+             "Aborts with TimeoutError once exceeded")
+    run_parser.add_argument(
+        "--instruction-timeout", type=float, default=None,
+        help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
     run_parser.add_argument("--verbose", action="store_true", help="Print debug prefixes in output")
+    run_parser.add_argument(
+        "--sandbox", action="store_true",
+        help="Execute in an isolated subprocess (audit hardening)")
 
     # Debug command
     debug_parser = subparsers.add_parser("debug", help="Debug Eigen source file interactively")
     debug_parser.add_argument("file", help="Path to the source file")
 
     # Verify-equiv command
-    equiv_parser = subparsers.add_parser("verify-equiv", help="Verify if two Eigen programs are mathematically equivalent")
+    equiv_parser = subparsers.add_parser(
+        "verify-equiv", help="Verify if two Eigen programs are mathematically equivalent")
     equiv_parser.add_argument("file1", help="Path to first .eig file")
     equiv_parser.add_argument("file2", help="Path to second .eig file")
     equiv_parser.add_argument("--optimize", action="store_true", help="Enable optimization before verification")
     equiv_parser.add_argument("-O", type=int, choices=[0, 1, 2, 3], help="Set compiler optimization level (0-3)")
 
     # Estimate command
-    estimate_parser = subparsers.add_parser("estimate", help="Statically estimate quantum resources of an Eigen program")
+    estimate_parser = subparsers.add_parser(
+        "estimate", help="Statically estimate quantum resources of an Eigen program")
     estimate_parser.add_argument("file", help="Path to .eig file")
 
     # Packaging commands
@@ -70,7 +94,9 @@ def main():
     build_parser.add_argument("--optimize", action="store_true", help="Enable SSA IR optimizations on bytecode")
     build_parser.add_argument("-O", type=int, choices=[0, 1, 2, 3], help="Set compiler optimization level (0-3)")
     build_parser.add_argument("--llvm", action="store_true", help="Compile to LLVM IR (.ll) instead of EBC bytecode")
-    build_parser.add_argument("--aot", action="store_true", help="Compile to native standalone executable using AOT compiler")
+    build_parser.add_argument(
+        "--aot", action="store_true",
+        help="Compile to native standalone executable using AOT compiler")
     build_parser.add_argument("--emit-llvm", action="store_true", help="Dumps LLVM IR generated by llvmlite")
     build_parser.add_argument("--explain-cache", action="store_true", help="Explain cache hit/miss reasons")
     build_parser.add_argument("--qir", action="store_true", help="Emit QIR-compliant LLVM IR (.ll) file")
@@ -97,20 +123,33 @@ def main():
     exec_parser.add_argument("file", help="Path to compiled EBC file")
     exec_parser.add_argument("--trace", action="store_true", help="Enable VM trace mode")
     exec_parser.add_argument("--seed", type=int, default=None, help="Random number generator seed")
-    exec_parser.add_argument("--deterministic", action="store_true", help="Force fully reproducible execution (sol.md §2.1)")
-    exec_parser.add_argument("--max-instructions", type=int, default=None, help="VM instruction-count limit (sol.md §7.1 hardening)")
-    exec_parser.add_argument("--instruction-timeout", type=float, default=None, help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
+    exec_parser.add_argument(
+        "--deterministic", action="store_true",
+        help="Force fully reproducible execution (sol.md §2.1)")
+    exec_parser.add_argument(
+        "--max-instructions", type=int, default=None,
+        help="VM instruction-count limit (sol.md §7.1 hardening)")
+    exec_parser.add_argument(
+        "--instruction-timeout", type=float, default=None,
+        help="VM wall-clock timeout in seconds (sol.md §7.1 hardening)")
     exec_parser.add_argument("--verbose", action="store_true", help="Print debug prefixes in output")
+    exec_parser.add_argument(
+        "--sandbox", action="store_true",
+        help="Execute in an isolated subprocess (audit hardening)")
 
     # Bench command
     bench_parser = subparsers.add_parser("bench", help="Run the benchmark suite and report performance results")
-    bench_parser.add_argument("--frontend", action="store_true", help="Compare Python vs native Rust frontend parser speeds")
+    bench_parser.add_argument(
+        "--frontend", action="store_true",
+        help="Compare Python vs native Rust frontend parser speeds")
     bench_parser.add_argument("--html", action="store_true", help="Generate HTML dashboard report")
 
     # Profile command
     profile_parser = subparsers.add_parser("profile", help="Run the memory and time execution profiler")
     profile_parser.add_argument("file", help="Path to the source file")
-    profile_parser.add_argument("--flamegraph", action="store_true", help="Output ASCII flamegraph of compiler/runtime phases")
+    profile_parser.add_argument(
+        "--flamegraph", action="store_true",
+        help="Output ASCII flamegraph of compiler/runtime phases")
 
     # Doctor command
     subparsers.add_parser("doctor", help="Diagnose local compiler setup and environment")
@@ -126,10 +165,35 @@ def main():
     audit_parser = subparsers.add_parser("audit", help="Audit project manifest and capability usage")
     audit_parser.add_argument("--strict", action="store_true", help="Fail compilation on any capability warnings")
     audit_parser.add_argument("--research", action="store_true", help="Output research reproducibility report")
-    audit_parser.add_argument("--backend", default="qiskit", choices=["qiskit", "ibmq"], help="Target backend to audit compatibility against")
+    audit_parser.add_argument(
+        "--backend", default="qiskit",
+        choices=["qiskit", "ibmq", "sparse", "mps", "density_matrix", "stabilizer"],
+        help="Target backend to audit compatibility against")
 
     # LSP command
     subparsers.add_parser("lsp", help="Run basic Language Server Protocol host")
+
+    # Publish command
+    subparsers.add_parser("publish", help="Publish current package to the registry")
+
+    # Playground command (stub)
+    subparsers.add_parser("playground", help="Launch an interactive Eigen sandbox")
+
+    # Watch command (stub)
+    subparsers.add_parser("watch", help="Watch source files and re-run on change")
+
+    # Migrate command (stub)
+    migrate_parser = subparsers.add_parser("migrate", help="Migrate Eigen source between language versions")
+    migrate_parser.add_argument("file", nargs="?", help="Path to the source file to migrate")
+
+    # Completions command (stub)
+    completions_parser = subparsers.add_parser("completions", help="Print shell completion script")
+    completions_parser.add_argument(
+        "--shell", choices=["bash", "zsh", "fish", "powershell"],
+        default="bash", help="Target shell")
+
+    # REPL command
+    subparsers.add_parser("repl", help="Launch the interactive Eigen REPL")
 
     args = parser.parse_args()
     workspace_root = get_workspace_root()

@@ -1,11 +1,29 @@
 import random
 import math
+import warnings
+from typing import Optional
+from src.noise.noise_channel import ReadoutError
 
 class NoiseModel:
-    def __init__(self, noise_type: str = None, noise_prob: float = 0.0, rng=None):
+    def __init__(self, noise_type: str = None, noise_prob: float = 0.0, rng=None,
+                 readout_error: Optional[ReadoutError] = None,
+                 t1: Optional[float] = None, t2: Optional[float] = None):
         self.noise_type = noise_type
         self.noise_prob = noise_prob
         self.rng = rng if rng is not None else random.Random()
+        self.readout_error = readout_error
+        if t1 is not None and t2 is not None:
+            if t1 <= 0 or t2 <= 0:
+                raise ValueError(f"T1 and T2 must be positive, got T1={t1}, T2={t2}")
+            if t2 > 2.0 * t1:
+                warnings.warn(
+                    f"T2 ({t2}) exceeds 2*T1 ({2.0 * t1}); clamping T2 to 2*T1. "
+                    f"This is a physical constraint — T2 cannot exceed 2*T1.",
+                    stacklevel=2,
+                )
+                t2 = 2.0 * t1
+        self.t1 = t1
+        self.t2 = t2
 
     def apply_gate_noise(self, simulator, qubit_name: str):
         if not self.noise_type or self.noise_prob <= 0.0:
@@ -14,7 +32,10 @@ class NoiseModel:
         if self.noise_type == 'readout_error':
             return
 
-        if getattr(simulator, 'sim_type', None) == 'density_matrix' or (hasattr(simulator, 'density_sim') and simulator.density_sim):
+        if (
+            getattr(simulator, 'sim_type', None) == 'density_matrix'
+            or (hasattr(simulator, 'density_sim') and simulator.density_sim)
+        ):
             density_sim = getattr(simulator, 'density_sim', simulator)
             if self.noise_type == 'bit_flip':
                 density_sim.apply_bit_flip_noise(qubit_name, self.noise_prob)
@@ -48,6 +69,8 @@ class NoiseModel:
                 self._apply_phase_damping(simulator, qubit_name, self.noise_prob)
 
     def apply_readout_noise(self, outcome: int) -> int:
+        if self.readout_error is not None:
+            return self.readout_error.apply(outcome, rng=self.rng)
         if self.noise_type == 'readout_error' and self.noise_prob > 0.0:
             r = self.rng.random()
             if r < self.noise_prob:

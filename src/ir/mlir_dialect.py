@@ -6,11 +6,11 @@ translation passes: AST -> MLIR Dialect -> EQIR.
 
 from src.frontend.ast import (
     ASTNode, ProgramNode, QFuncDeclNode, LetNode, VarDeclNode,
-    BinaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
+    BinaryOpNode, UnaryOpNode, LiteralNode, VarRefNode, QFuncCallNode, GateNode,
     MeasureNode, IfNode, ReturnNode, TraceNode, PrintNode, AssertNode,
     FuncDeclNode, CallNode, ParallelBlockNode, TaskStatementNode
 )
-from src.ir.ir_graph import EQIRGraph, EQIRNode
+from src.ir.ir_graph import EQIRGraph
 
 
 class MLIRValue:
@@ -23,7 +23,8 @@ class MLIRValue:
 
 
 class MLIROp:
-    def __init__(self, op_name: str, operands: list[MLIRValue] = None, results: list[MLIRValue] = None, attributes: dict = None, condition=None):
+    def __init__(self, op_name: str, operands: list[MLIRValue] = None,
+                 results: list[MLIRValue] = None, attributes: dict = None, condition=None):
         self.op_name = op_name
         self.operands = operands or []
         self.results = results or []
@@ -160,7 +161,8 @@ class ASTToMLIRConverter:
 
         elif isinstance(node, LiteralNode):
             res = MLIRValue(self.get_temp("c"), node.type_name)
-            op = MLIROp("arith.constant", attributes={"value": node.value}, results=[res], condition=self.current_condition)
+            op = MLIROp("arith.constant", attributes={"value": node.value},
+                        results=[res], condition=self.current_condition)
             self.current_function.add_op(op, self.current_block_idx)
             return res
 
@@ -183,6 +185,21 @@ class ASTToMLIRConverter:
             self.current_function.add_op(op, self.current_block_idx)
             return res
 
+        elif isinstance(node, UnaryOpNode):
+            operand_val = self.convert_node(node.operand)
+            res = MLIRValue(self.get_temp("t"), "unknown")
+            if node.op == '-':
+                op = MLIROp("arith.neg", operands=[operand_val], results=[res], condition=self.current_condition)
+            elif node.op == '~':
+                op = MLIROp("arith.not", operands=[operand_val], results=[res], condition=self.current_condition)
+            elif node.op == 'not':
+                op = MLIROp("arith.logical_not", operands=[operand_val],
+                            results=[res], condition=self.current_condition)
+            else:
+                op = MLIROp(f"unary.{node.op}", operands=[operand_val], results=[res], condition=self.current_condition)
+            self.current_function.add_op(op, self.current_block_idx)
+            return res
+
         elif isinstance(node, GateNode):
             operands = [self.convert_node(VarRefNode(t)) for t in node.targets]
             # Convert rotation angle arguments
@@ -192,7 +209,8 @@ class ASTToMLIRConverter:
                 if arg_val:
                     arg_vals.append(arg_val)
             
-            op = MLIROp("quantum.gate", operands=operands + arg_vals, attributes={"gate": node.gate_name}, condition=self.current_condition)
+            op = MLIROp("quantum.gate", operands=operands + arg_vals,
+                        attributes={"gate": node.gate_name}, condition=self.current_condition)
             self.current_function.add_op(op, self.current_block_idx)
             return None
 
@@ -216,7 +234,8 @@ class ASTToMLIRConverter:
                 arg_val = self.convert_node(arg)
                 if arg_val:
                     args.append(arg_val)
-            op = MLIROp("func.call", operands=args, attributes={"callee": callee_name}, condition=self.current_condition)
+            op = MLIROp("func.call", operands=args,
+                        attributes={"callee": callee_name}, condition=self.current_condition)
             self.current_function.add_op(op, self.current_block_idx)
             return None
 
@@ -285,7 +304,9 @@ class ASTToMLIRConverter:
         elif isinstance(node, AssertNode):
             l_val = self.convert_node(node.condition_left)
             r_val = self.convert_node(node.condition_right)
-            op = MLIROp("cf.assert", operands=[l_val, r_val] if l_val and r_val else [], attributes={"op": node.op}, condition=self.current_condition)
+            op = MLIROp("cf.assert",
+                        operands=[l_val, r_val] if l_val and r_val else [],
+                        attributes={"op": node.op}, condition=self.current_condition)
             self.current_function.add_op(op, self.current_block_idx)
             return None
 
@@ -416,7 +437,7 @@ class MLIRToEQIRConverter:
                         target_func = self.qfuncs[callee]
                         # Map params to operands
                         local_map = {}
-                        for param, operand in zip(target_func.params, op.operands):
+                        for param, operand in zip(target_func.params, op.operands, strict=False):
                             local_map[param[0]] = resolve_name(operand.name)
                         # Inline target function operations
                         self.convert_function(target_func, local_map)

@@ -38,15 +38,15 @@ def states_equivalent(sv1, sv2, tol=1e-6) -> bool:
         return False
     # Find first non-zero element to determine global phase
     phase = None
-    for a, b in zip(sv1, sv2):
+    for a, b in zip(sv1, sv2, strict=False):
         if abs(a) > tol and abs(b) > tol:
             phase = b / a
             break
     if phase is None:
         # Both are zero vectors (shouldn't happen for valid states)
-        return all(abs(a) < tol and abs(b) < tol for a, b in zip(sv1, sv2))
+        return all(abs(a) < tol and abs(b) < tol for a, b in zip(sv1, sv2, strict=False))
     # Check all elements match up to the global phase
-    for a, b in zip(sv1, sv2):
+    for a, b in zip(sv1, sv2, strict=False):
         if abs(a * phase - b) > tol:
             return False
     return True
@@ -177,7 +177,7 @@ class TestPropertyEquivalence(unittest.TestCase):
             seq = [rng.choice(gates_pool) for _ in range(rng.randint(1, 10))]
             sv1 = self._run_circuit(seq)
             sv2 = self._run_circuit(seq)
-            for a, b in zip(sv1, sv2):
+            for a, b in zip(sv1, sv2, strict=False):
                 self.assertAlmostEqual(abs(a - b), 0.0)
 
 

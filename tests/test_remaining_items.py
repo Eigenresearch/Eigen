@@ -22,7 +22,7 @@ from src.simulator_optimizations import (
 
 # §3.2 Pulse control
 from src.pulse_control import (
-    PulseShape, GaussianPulse, DRAGPulse, SquarePulse,
+    GaussianPulse, DRAGPulse, SquarePulse,
     PulseSchedule, gate_to_pulse,
 )
 
@@ -30,7 +30,6 @@ from src.pulse_control import (
 from src.distributed.mpi_simulator import (
     is_mpi_available, get_rank, get_world_size,
     distribute_state_vector, plan_distributed_contraction,
-    TensorNetworkContraction,
 )
 
 # §8.2 Parallel compiler
@@ -41,12 +40,11 @@ from src.parallel_compiler import (
 # §9.1 Mutation testing
 from src.mutation_testing import (
     MUTMUT_CONFIG, write_mutmut_config, parse_mutmut_results,
-    MutationTestResult,
 )
 
 # §10.1 DAP server
 from src.debugger.dap_server import (
-    Breakpoint, DebugSession, StackFrame,
+    DebugSession,
 )
 
 # §10.2 CLI extras
@@ -79,7 +77,7 @@ class TestInlineCache(unittest.TestCase):
         cache = InlineCache()
         frame = {"x": 1}
         cache.lookup("x", frame, {})
-        stats_before = cache.stats()
+        cache.stats()
         cache.lookup("x", frame, {})
         stats_after = cache.stats()
         # Second lookup should be a hit
@@ -224,6 +222,17 @@ class TestLazyModuleLoader(unittest.TestCase):
         loader.load("m")
         loader.load("m")
         self.assertEqual(count["n"], 1)
+
+    def test_clear_drops_all_loader_state(self):
+        loader = LazyModuleLoader()
+        loader.register("m", lambda: {"name": "m"})
+        loader.load("m")
+
+        loader.clear()
+
+        self.assertEqual(loader.stats(), {"registered": 0, "loaded": 0})
+        with self.assertRaises(KeyError):
+            loader.load("m")
 
     def test_circular_detection(self):
         loader = LazyModuleLoader()

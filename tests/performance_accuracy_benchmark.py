@@ -1,6 +1,5 @@
 import time
 import math
-import cmath
 from src.simulator import PythonDenseStatevector
 
 def run_qubit_test():
@@ -37,7 +36,7 @@ def run_accuracy_test():
     res_state = dense_rot.get_state_vector()
     target = [0.0j, -1j]
     
-    fidelity = abs(sum(c1.conjugate() * c2 for c1, c2 in zip(res_state, target)))
+    fidelity = abs(sum(c1.conjugate() * c2 for c1, c2 in zip(res_state, target, strict=False)))
     dur = time.perf_counter() - start
     print(f"Accuracy check completed in {dur*1000:.3f} ms. Fidelity = {fidelity:.10f}")
     return fidelity, dur

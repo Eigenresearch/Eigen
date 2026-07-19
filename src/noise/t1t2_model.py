@@ -5,8 +5,8 @@ gate execution times. This is a physically motivated noise model
 that accounts for the duration of each gate operation.
 """
 import math
+import warnings
 from src.noise.noise_channel import (
-    NoiseChannel,
     AmplitudeDampingChannel,
     PhaseDampingChannel,
     NoisePipeline,
@@ -56,6 +56,17 @@ class T1T2NoiseModel(NoisePipeline):
     def __init__(self, t1: float = DEFAULT_T1, t2: float = DEFAULT_T2,
                  gate_times: dict = None, rng=None, seed=None):
         super().__init__(rng=rng, seed=seed)
+        if t1 <= 0:
+            raise ValueError(f"T1 must be positive, got {t1}")
+        if t2 <= 0:
+            raise ValueError(f"T2 must be positive, got {t2}")
+        if t2 > 2.0 * t1:
+            warnings.warn(
+                f"T2 ({t2}) exceeds 2*T1 ({2.0 * t1}); clamping T2 to 2*T1. "
+                f"This is a physical constraint — T2 cannot exceed 2*T1.",
+                stacklevel=2,
+            )
+            t2 = 2.0 * t1
         self.t1 = t1
         self.t2 = t2
         self.gate_times = dict(GATE_TIMES)

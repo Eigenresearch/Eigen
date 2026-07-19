@@ -1,6 +1,4 @@
 # Distributed execution support using Ray/Dask stubs
-import os
-import sys
 
 class DistributedExecutor:
     def __init__(self, backend='ray'):

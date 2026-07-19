@@ -1,6 +1,5 @@
 """§4.2 — Extended OpenQASM 3.0 tests, organised by the four
 roadmap checkboxes."""
-import math
 import unittest
 
 from src.qasm3_advanced import (
@@ -8,7 +7,6 @@ from src.qasm3_advanced import (
     ConditionalBlock,
     Qasm3ExportOptions,
     Qasm3Importer,
-    Qasm3Program,
     Subroutine,
     eqir_to_extended_qasm3,
     qasm3_to_eqir,

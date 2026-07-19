@@ -1,6 +1,10 @@
-import abc
+class ASTNode:
+    """Base class for all AST nodes.
 
-class ASTNode(metaclass=abc.ABCMeta):
+    Not an abc.ABC: subclasses vary widely and most don't need to override
+    any single method, so declaring one @abstractmethod would force a
+    large mechanical change across the AST hierarchy for no real benefit.
+    """
     def to_source(self) -> str:
         return repr(self)
 
@@ -12,7 +16,8 @@ class ProgramNode(ASTNode):
         self.body = body
 
     def __repr__(self):
-        return f"ProgramNode(version={self.version}, module={self.module_name}, imports={self.imports}, body={self.body})"
+        return (f"ProgramNode(version={self.version}, module={self.module_name}, "
+                f"imports={self.imports}, body={self.body})")
 
 class ImportNode(ASTNode):
     def __init__(self, module_path: str):
@@ -58,6 +63,19 @@ class BinaryOpNode(ASTNode):
 
     def to_source(self) -> str:
         return f"{self.left.to_source()} {self.op} {self.right.to_source()}"
+
+class UnaryOpNode(ASTNode):
+    def __init__(self, op: str, operand: ASTNode):
+        self.op = op
+        self.operand = operand
+
+    def __repr__(self):
+        return f"UnaryOpNode({self.op} {self.operand})"
+
+    def to_source(self) -> str:
+        if self.op == "not":
+            return f"not {self.operand.to_source()}"
+        return f"{self.op}{self.operand.to_source()}"
 
 class LiteralNode(ASTNode):
     def __init__(self, value: float | int | str, type_name: str):
@@ -108,7 +126,8 @@ class MeasureNode(ASTNode):
         return f"MeasureNode({self.qubit_name} -> {self.cbit_name})"
 
 class IfNode(ASTNode):
-    def __init__(self, condition_left: ASTNode, op: str, condition_right: ASTNode, body: list[ASTNode], else_body: list[ASTNode] | None = None):
+    def __init__(self, condition_left: ASTNode, op: str, condition_right: ASTNode,
+                 body: list[ASTNode], else_body: list[ASTNode] | None = None):
         self.condition_left = condition_left
         self.op = op  # "=="
         self.condition_right = condition_right
@@ -116,7 +135,8 @@ class IfNode(ASTNode):
         self.else_body = else_body if else_body is not None else []
 
     def __repr__(self):
-        return f"IfNode({self.condition_left} {self.op} {self.condition_right}, body={self.body}, else_body={self.else_body})"
+        return (f"IfNode({self.condition_left} {self.op} {self.condition_right}, "
+                f"body={self.body}, else_body={self.else_body})")
 
 class ReturnNode(ASTNode):
     def __init__(self, expr: ASTNode | None = None):
@@ -146,7 +166,8 @@ class AssertNode(ASTNode):
         return f"AssertNode({self.condition_left} {self.op} {self.condition_right})"
 
 class FuncDeclNode(ASTNode):
-    def __init__(self, name: str, generic_params: list[str], params: list[tuple[str, str]], return_type: str, body: list[ASTNode]):
+    def __init__(self, name: str, generic_params: list[str],
+                 params: list[tuple[str, str]], return_type: str, body: list[ASTNode]):
         self.name = name
         self.generic_params = generic_params  # e.g. ["T"]
         self.params = params  # list of (param_name, type_name)
@@ -154,7 +175,58 @@ class FuncDeclNode(ASTNode):
         self.body = body
 
     def __repr__(self):
-        return f"FuncDeclNode({self.name}, generics={self.generic_params}, params={self.params}, return={self.return_type}, body={self.body})"
+        return (f"FuncDeclNode({self.name}, generics={self.generic_params}, "
+                f"params={self.params}, return={self.return_type}, body={self.body})")
+
+
+class AsyncFuncDeclNode(FuncDeclNode):
+    """An ``async func`` declaration compiled to a VM task handle."""
+
+    def __repr__(self):
+        return (f"AsyncFuncDeclNode({self.name}, generics={self.generic_params}, "
+                f"params={self.params}, return={self.return_type}, body={self.body})")
+
+
+class AwaitExprNode(ASTNode):
+    """Unary ``await`` expression retaining its awaited operand."""
+
+    def __init__(self, expr: ASTNode):
+        self.expr = expr
+
+    def __repr__(self):
+        return f"AwaitExprNode({self.expr})"
+
+    def to_source(self) -> str:
+        return f"await {self.expr.to_source()}"
+
+
+_OPERATOR_METHOD_NAMES = {
+    "+": "__add__", "-": "__sub__", "*": "__mul__", "/": "__truediv__",
+    "%": "__mod__", "**": "__pow__", "==": "__eq__", "!=": "__ne__",
+    "<": "__lt__", "<=": "__le__", ">": "__gt__", ">=": "__ge__",
+    "&": "__and__", "|": "__or__", "^": "__xor__", "<<": "__lshift__",
+    ">>": "__rshift__", "~": "__invert__",
+}
+
+
+class OperatorDeclNode(FuncDeclNode):
+    """Operator implementation declared inside an ``impl`` block."""
+
+    def __init__(self, operator: str, generic_params: list[str],
+                 params: list[tuple[str, str]], return_type: str,
+                 body: list[ASTNode]):
+        try:
+            method_name = _OPERATOR_METHOD_NAMES[operator]
+        except KeyError as exc:
+            raise ValueError(f"Operator {operator!r} cannot be overloaded") from exc
+        super().__init__(method_name, generic_params, params, return_type, body)
+        self.operator = operator
+        self.method_name = method_name
+
+    def __repr__(self):
+        return (f"OperatorDeclNode({self.operator} -> {self.method_name}, "
+                f"params={self.params}, return={self.return_type}, body={self.body})")
+
 
 class ForNode(ASTNode):
     def __init__(self, variable: str, iterable: ASTNode, body: list[ASTNode]):
@@ -224,13 +296,18 @@ class TupleLiteralNode(ASTNode):
         return f"TupleLiteralNode({self.elements})"
 
 class TryCatchNode(ASTNode):
-    def __init__(self, try_body: list[ASTNode], catch_var: str | None, catch_body: list[ASTNode]):
+    def __init__(self, try_body: list[ASTNode], catch_var: str | None, catch_body: list[ASTNode],
+                 finally_body: list[ASTNode] | None = None, catch_type: str | None = None):
         self.try_body = try_body
         self.catch_var = catch_var
+        self.catch_type = catch_type
         self.catch_body = catch_body
+        self.finally_body = finally_body if finally_body is not None else []
 
     def __repr__(self):
-        return f"TryCatchNode(try={self.try_body}, catch_var={self.catch_var}, catch={self.catch_body})"
+        return (f"TryCatchNode(try={self.try_body}, catch_var={self.catch_var}"
+                f"{f': {self.catch_type}' if self.catch_type else ''}, "
+                f"catch={self.catch_body}, finally={self.finally_body})")
 
 class ThrowNode(ASTNode):
     def __init__(self, expr: ASTNode):
@@ -354,7 +431,8 @@ class TaskStatementNode(ASTNode):
         return f"TaskStatementNode(call={self.call})"
 
 class MatchNode(ASTNode):
-    def __init__(self, expr: ASTNode, cases: list[tuple[ASTNode, list[ASTNode]]], default_body: list[ASTNode] | None = None):
+    def __init__(self, expr: ASTNode, cases: list[tuple[ASTNode, list[ASTNode]]],
+                 default_body: list[ASTNode] | None = None):
         self.expr = expr
         self.cases = cases  # list of (pattern_expr, body)
         self.default_body = default_body or []
@@ -465,7 +543,7 @@ class TypeAliasDeclNode(ASTNode):
 
 
 try:
-    import eigen_native
+    import eigen_native  # noqa: F401  (availability check)
     NATIVE_AVAILABLE = True
 except ImportError:
     NATIVE_AVAILABLE = False

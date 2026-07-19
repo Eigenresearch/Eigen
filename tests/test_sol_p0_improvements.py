@@ -4,11 +4,8 @@ gate caching, VM hardening, determinism).
 Each test maps cleanly to a checkbox item in D:\\Nuras-7\\sol.md so future
 contributors can correlate the test with the roadmap entry it pins down.
 """
-import os
-import sys
 import unittest
 
-import src.frontend.lexer as lexer_mod
 from src.frontend.lexer import Lexer, TokenType
 from src.backend.vm import EigenVM
 from src.backend.bytecode import Opcode, Instruction

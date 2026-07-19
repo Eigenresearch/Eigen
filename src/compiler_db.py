@@ -131,7 +131,10 @@ class QueryDb:
             full_path = filepath if os.path.isabs(filepath) else os.path.join(self.workspace_root, filepath)
             actual_hash = self.get_file_hash(full_path)
             if actual_hash != expected_hash:
-                return False, f"Input file '{filepath}' has changed (expected {expected_hash[:8] if expected_hash else None}, got {actual_hash[:8] if actual_hash else None})"
+                return False, (
+                    f"Input file '{filepath}' has changed "
+                    f"(expected {expected_hash[:8] if expected_hash else None}, "
+                    f"got {actual_hash[:8] if actual_hash else None})")
                 
         # Verify dependencies
         for dep in record["dependencies"]:
@@ -190,7 +193,8 @@ class QueryDb:
                     "instructions": [inst.to_dict() for inst in result]
                 }
             elif query_name == "to_ssa":
-                data = {block_id: [inst.to_dict() for inst in block.instructions] for block_id, block in result[0].items()}
+                data = {block_id: [inst.to_dict() for inst in block.instructions]
+                        for block_id, block in result[0].items()}
             elif query_name == "optimize":
                 data = {
                     "major": 3,

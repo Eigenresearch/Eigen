@@ -40,17 +40,23 @@ class EQIROptimizer:
         # iteration of `children`/`parents`, this makes the optimizer output
         # byte-identical for identical input regardless of interpreter hash
         # seed or process-local memory layout.
-        worklist = set(graph.nodes.keys())
+        import heapq as _heapq
+        worklist_set = set(graph.nodes.keys())
+        worklist_heap = list(worklist_set)
+        _heapq.heapify(worklist_heap)
         max_iterations = len(graph.nodes) * 5 + 1000
         iterations = 0
         
         self_inverse_gates = {"H", "X", "Y", "Z"}
         rotation_gates = {"RX", "RY", "RZ"}
         
-        while worklist and iterations < max_iterations:
+        while worklist_heap and iterations < max_iterations:
             # Deterministic pop: smallest id first.
-            node_id = min(worklist)
-            worklist.discard(node_id)
+            node_id = _heapq.heappop(worklist_heap)
+            if node_id not in worklist_set:
+                continue
+            worklist_set.discard(node_id)
+
             if node_id not in graph.nodes:
                 continue
                 
@@ -76,7 +82,9 @@ class EQIROptimizer:
                     
                     affected = {p.id for p in node.parents} | {c.id for c in next_node.children}
                     self._cancel_nodes(graph, node, next_node)
-                    worklist.update(affected)
+                    worklist_set.update(affected)
+                    for _x in affected:
+                        _heapq.heappush(worklist_heap, _x)
                     self.optimizations_count += 1
                     continue
                     
@@ -103,7 +111,9 @@ class EQIROptimizer:
                     
                     affected = {p.id for p in next_node.parents} | {c.id for c in next_node.children} | {node.id}
                     self._bypass_node(graph, next_node)
-                    worklist.update(affected)
+                    worklist_set.update(affected)
+                    for _x in affected:
+                        _heapq.heappush(worklist_heap, _x)
                     self.optimizations_count += 1
                     continue
             
@@ -111,7 +121,9 @@ class EQIROptimizer:
             if node.gate_name in rotation_gates and len(node.args) > 0 and abs(node.args[0]) < 1e-9:
                 affected = {p.id for p in node.parents} | {c.id for c in node.children}
                 self._bypass_node(graph, node)
-                worklist.update(affected)
+                worklist_set.update(affected)
+                for _x in affected:
+                    _heapq.heappush(worklist_heap, _x)
                 self.optimizations_count += 1
                 continue
                 
@@ -136,7 +148,9 @@ class EQIROptimizer:
                         affected = {p.id for p in node.parents} | {c.id for c in n3.children} | {n2.id}
                         self._bypass_node(graph, node)
                         self._bypass_node(graph, n3)
-                        worklist.update(affected)
+                        worklist_set.update(affected)
+                        for _x in affected:
+                            _heapq.heappush(worklist_heap, _x)
                         self.optimizations_count += 1
                         continue
                         
@@ -154,7 +168,9 @@ class EQIROptimizer:
                     
                     affected = {p.id for p in node.parents} | {c.id for c in n2.children} | {n2.id}
                     self._bypass_node(graph, node)
-                    worklist.update(affected)
+                    worklist_set.update(affected)
+                    for _x in affected:
+                        _heapq.heappush(worklist_heap, _x)
                     self.optimizations_count += 1
                     continue
                     
@@ -172,11 +188,14 @@ class EQIROptimizer:
                         if child.targets and child.targets[0] == q0:
                             n3 = child
                             break
-                    if n3 and n3.id in graph.nodes and n3.type == 'GATE' and n3.gate_name == 'Z' and n3.targets[0] == q0:
+                    if (n3 and n3.id in graph.nodes and n3.type == 'GATE'
+                            and n3.gate_name == 'Z' and n3.targets[0] == q0):
                         affected = {p.id for p in node.parents} | {c.id for c in n3.children} | {n2.id}
                         self._bypass_node(graph, node)
                         self._bypass_node(graph, n3)
-                        worklist.update(affected)
+                        worklist_set.update(affected)
+                        for _x in affected:
+                            _heapq.heappush(worklist_heap, _x)
                         self.optimizations_count += 1
                         continue
                         
@@ -194,11 +213,14 @@ class EQIROptimizer:
                         if child.targets and child.targets[0] == q1:
                             n3 = child
                             break
-                    if n3 and n3.id in graph.nodes and n3.type == 'GATE' and n3.gate_name == 'X' and n3.targets[0] == q1:
+                    if (n3 and n3.id in graph.nodes and n3.type == 'GATE'
+                            and n3.gate_name == 'X' and n3.targets[0] == q1):
                         affected = {p.id for p in node.parents} | {c.id for c in n3.children} | {n2.id}
                         self._bypass_node(graph, node)
                         self._bypass_node(graph, n3)
-                        worklist.update(affected)
+                        worklist_set.update(affected)
+                        for _x in affected:
+                            _heapq.heappush(worklist_heap, _x)
                         self.optimizations_count += 1
                         continue
                         

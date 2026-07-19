@@ -2,6 +2,10 @@
 use pyo3::prelude::*;
 #[cfg(feature = "pyo3")]
 use pyo3::exceptions::PyValueError;
+#[cfg(feature = "numpy")]
+use numpy::{PyArray1, ToPyArray, PyArrayMethods};
+#[cfg(feature = "numpy")]
+use num_complex::Complex64;
 use std::f64::consts::FRAC_1_SQRT_2;
 use std::collections::HashMap;
 
@@ -121,21 +125,12 @@ impl RustStatevector {
         let n = self.state.len();
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            let chunks = n / (step * 2);
-            (0..chunks).into_par_iter().for_each(|c| {
-                let i = c * step * 2;
-                unsafe {
-                    let ptr = state_ptr as *mut (f64, f64);
-                    for j in i..(i + step) {
-                        let i0 = j;
-                        let i1 = j + step;
-                        let a0 = *ptr.add(i0);
-                        let a1 = *ptr.add(i1);
-                        let (r0, r1) = f(a0, a1);
-                        *ptr.add(i0) = r0;
-                        *ptr.add(i1) = r1;
-                    }
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low, high) = chunk.split_at_mut(step);
+                for (a0, a1) in low.iter_mut().zip(high.iter_mut()) {
+                    let (r0, r1) = f(*a0, *a1);
+                    *a0 = r0;
+                    *a1 = r1;
                 }
             });
         } else {
@@ -315,13 +310,14 @@ impl RustStatevector {
         }
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & c_mask) != 0 && (i & t_mask) == 0 {
-                    let i_target_1 = i | t_mask;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        std::ptr::swap(ptr.add(i), ptr.add(i_target_1));
+            let step = 1 << target;
+            let state_ptr = self.state.as_ptr() as usize;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low, high) = chunk.split_at_mut(step);
+                let offset = (low.as_ptr() as usize - state_ptr) / std::mem::size_of::<(f64, f64)>();
+                for (i, (val_low, val_high)) in low.iter_mut().zip(high.iter_mut()).enumerate() {
+                    if ((offset + i) & c_mask) != 0 {
+                        std::mem::swap(val_low, val_high);
                     }
                 }
             });
@@ -348,14 +344,10 @@ impl RustStatevector {
         }
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
+            self.state.par_iter_mut().enumerate().for_each(|(i, val)| {
                 if (i & c_mask) != 0 && (i & t_mask) != 0 {
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        let (re, im) = *ptr.add(i);
-                        *ptr.add(i) = (-re, -im);
-                    }
+                    val.0 = -val.0;
+                    val.1 = -val.1;
                 }
             });
         } else {
@@ -381,13 +373,17 @@ impl RustStatevector {
         }
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & mask1) != 0 && (i & mask2) == 0 {
-                    let j = (i & !mask1) | mask2;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        std::ptr::swap(ptr.add(i), ptr.add(j));
+            let high_mask = mask1.max(mask2);
+            let low_mask = mask1.min(mask2);
+            let step = high_mask;
+            let low_step = low_mask;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low_part, high_part) = chunk.split_at_mut(step);
+                for i in (0..step).step_by(low_step * 2) {
+                    let (_, low_high) = low_part[i..i + low_step * 2].split_at_mut(low_step);
+                    let (high_low, _) = high_part[i..i + low_step * 2].split_at_mut(low_step);
+                    for (v_h_l, v_l_h) in high_low.iter_mut().zip(low_high.iter_mut()) {
+                        std::mem::swap(v_h_l, v_l_h);
                     }
                 }
             });
@@ -415,13 +411,15 @@ impl RustStatevector {
         }
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & c1_mask) != 0 && (i & c2_mask) != 0 && (i & t_mask) == 0 {
-                    let i_target_1 = i | t_mask;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        std::ptr::swap(ptr.add(i), ptr.add(i_target_1));
+            let step = 1 << target;
+            let state_ptr = self.state.as_ptr() as usize;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low, high) = chunk.split_at_mut(step);
+                let offset = (low.as_ptr() as usize - state_ptr) / std::mem::size_of::<(f64, f64)>();
+                for (i, (val_low, val_high)) in low.iter_mut().zip(high.iter_mut()).enumerate() {
+                    let abs_i = offset + i;
+                    if (abs_i & c1_mask) != 0 && (abs_i & c2_mask) != 0 {
+                        std::mem::swap(val_low, val_high);
                     }
                 }
             });
@@ -449,13 +447,21 @@ impl RustStatevector {
         }
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & c_mask) != 0 && (i & mask1) != 0 && (i & mask2) == 0 {
-                    let j = (i & !mask1) | mask2;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        std::ptr::swap(ptr.add(i), ptr.add(j));
+            let high_mask = mask1.max(mask2);
+            let low_mask = mask1.min(mask2);
+            let step = high_mask;
+            let low_step = low_mask;
+            let state_ptr = self.state.as_ptr() as usize;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low_part, high_part) = chunk.split_at_mut(step);
+                let offset_high = (high_part.as_ptr() as usize - state_ptr) / std::mem::size_of::<(f64, f64)>();
+                for i in (0..step).step_by(low_step * 2) {
+                    let (_, low_high) = low_part[i..i + low_step * 2].split_at_mut(low_step);
+                    let (high_low, _) = high_part[i..i + low_step * 2].split_at_mut(low_step);
+                    for (j, (v_h_l, v_l_h)) in high_low.iter_mut().zip(low_high.iter_mut()).enumerate() {
+                        if ((offset_high + i + j) & c_mask) != 0 {
+                            std::mem::swap(v_h_l, v_l_h);
+                        }
                     }
                 }
             });
@@ -484,14 +490,10 @@ impl RustStatevector {
         let sin_val = theta.sin();
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
+            self.state.par_iter_mut().enumerate().for_each(|(i, val)| {
                 if (i & c_mask) != 0 && (i & t_mask) != 0 {
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        let (re, im) = *ptr.add(i);
-                        *ptr.add(i) = (re * cos_val - im * sin_val, re * sin_val + im * cos_val);
-                    }
+                    let (re, im) = *val;
+                    *val = (re * cos_val - im * sin_val, re * sin_val + im * cos_val);
                 }
             });
         } else {
@@ -519,16 +521,17 @@ impl RustStatevector {
         let sin_val = (theta / 2.0).sin();
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & c_mask) != 0 && (i & t_mask) == 0 {
-                    let i_target_1 = i | t_mask;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        let (a0_re, a0_im) = *ptr.add(i);
-                        let (a1_re, a1_im) = *ptr.add(i_target_1);
-                        *ptr.add(i) = (cos_val * a0_re + sin_val * a1_im, cos_val * a0_im - sin_val * a1_re);
-                        *ptr.add(i_target_1) = (sin_val * a0_im + cos_val * a1_re, -sin_val * a0_re + cos_val * a1_im);
+            let step = 1 << target;
+            let state_ptr = self.state.as_ptr() as usize;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low, high) = chunk.split_at_mut(step);
+                let offset = (low.as_ptr() as usize - state_ptr) / std::mem::size_of::<(f64, f64)>();
+                for (i, (val_low, val_high)) in low.iter_mut().zip(high.iter_mut()).enumerate() {
+                    if ((offset + i) & c_mask) != 0 {
+                        let (a0_re, a0_im) = *val_low;
+                        let (a1_re, a1_im) = *val_high;
+                        *val_low = (cos_val * a0_re + sin_val * a1_im, cos_val * a0_im - sin_val * a1_re);
+                        *val_high = (sin_val * a0_im + cos_val * a1_re, -sin_val * a0_re + cos_val * a1_im);
                     }
                 }
             });
@@ -560,16 +563,17 @@ impl RustStatevector {
         let sin_val = (theta / 2.0).sin();
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
-                if (i & c_mask) != 0 && (i & t_mask) == 0 {
-                    let i_target_1 = i | t_mask;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        let (a0_re, a0_im) = *ptr.add(i);
-                        let (a1_re, a1_im) = *ptr.add(i_target_1);
-                        *ptr.add(i) = (cos_val * a0_re - sin_val * a1_re, cos_val * a0_im - sin_val * a1_im);
-                        *ptr.add(i_target_1) = (sin_val * a0_re + cos_val * a1_re, sin_val * a0_im + cos_val * a1_im);
+            let step = 1 << target;
+            let state_ptr = self.state.as_ptr() as usize;
+            self.state.par_chunks_mut(step * 2).for_each(|chunk| {
+                let (low, high) = chunk.split_at_mut(step);
+                let offset = (low.as_ptr() as usize - state_ptr) / std::mem::size_of::<(f64, f64)>();
+                for (i, (val_low, val_high)) in low.iter_mut().zip(high.iter_mut()).enumerate() {
+                    if ((offset + i) & c_mask) != 0 {
+                        let (a0_re, a0_im) = *val_low;
+                        let (a1_re, a1_im) = *val_high;
+                        *val_low = (cos_val * a0_re - sin_val * a1_re, cos_val * a0_im - sin_val * a1_im);
+                        *val_high = (sin_val * a0_re + cos_val * a1_re, sin_val * a0_im + cos_val * a1_im);
                     }
                 }
             });
@@ -601,18 +605,14 @@ impl RustStatevector {
         let sin_val = (theta / 2.0).sin();
         use rayon::prelude::*;
         if n >= 16384 {
-            let state_ptr = self.state.as_mut_ptr() as usize;
-            (0..n).into_par_iter().for_each(|i| {
+            self.state.par_iter_mut().enumerate().for_each(|(i, val)| {
                 if (i & c_mask) != 0 {
                     let has_target = (i & t_mask) != 0;
-                    unsafe {
-                        let ptr = state_ptr as *mut (f64, f64);
-                        let (re, im) = *ptr.add(i);
-                        if !has_target {
-                            *ptr.add(i) = (re * cos_val + im * sin_val, im * cos_val - re * sin_val);
-                        } else {
-                            *ptr.add(i) = (re * cos_val - im * sin_val, im * cos_val + re * sin_val);
-                        }
+                    let (re, im) = *val;
+                    if !has_target {
+                        *val = (re * cos_val + im * sin_val, im * cos_val - re * sin_val);
+                    } else {
+                        *val = (re * cos_val - im * sin_val, im * cos_val + re * sin_val);
                     }
                 }
             });
@@ -700,6 +700,34 @@ impl RustStatevector {
     #[pyo3(name = "set_state")]
     pub fn set_state_py(&mut self, new_state: Vec<(f64, f64)>) -> PyResult<()> {
         self.set_state(new_state).map_err(|e| PyValueError::new_err(e))
+    }
+
+    #[cfg(feature = "numpy")]
+    #[pyo3(name = "get_state_numpy")]
+    pub fn get_state_numpy<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray1<Complex64>>> {
+        let complex_state: &[Complex64] = unsafe {
+            std::slice::from_raw_parts(self.state.as_ptr() as *const Complex64, self.state.len())
+        };
+        Ok(complex_state.to_pyarray_bound(py))
+    }
+
+    #[cfg(feature = "numpy")]
+    #[pyo3(name = "set_state_numpy")]
+    pub fn set_state_numpy<'py>(&mut self, new_state: Bound<'py, PyArray1<Complex64>>) -> PyResult<()> {
+        let readonly = new_state.readonly();
+        let slice = readonly.as_slice()?;
+        let n = slice.len();
+        if n != (1 << self.num_qubits) {
+            return Err(PyValueError::new_err(format!(
+                "Invalid state length: expected {}, got {}",
+                1 << self.num_qubits,
+                n
+            )));
+        }
+        self.state = unsafe {
+            std::slice::from_raw_parts(slice.as_ptr() as *const (f64, f64), n).to_vec()
+        };
+        Ok(())
     }
 
     #[pyo3(name = "apply_h")]
@@ -1450,5 +1478,21 @@ mod tests {
         sv.apply_x(1).unwrap();
         let ptr_after = sv.state.as_ptr();
         assert_eq!(ptr_before, ptr_after, "Statevector buffer was copied or reallocated during gate application!");
+    }
+
+    #[test]
+    fn test_complex_svd() {
+        let matrix = vec![
+            vec![(1.0, 0.0), (0.0, 0.0)],
+            vec![(0.0, 0.0), (1.0, 0.0)],
+        ];
+        let (u, s, vh) = complex_svd(&matrix);
+        assert_eq!(s.len(), 2);
+        assert!((s[0] - 1.0).abs() < 1e-9);
+        assert!((s[1] - 1.0).abs() < 1e-9);
+        
+        // Identity check: U * S * Vh should be close to matrix
+        // (1 0) * (1 0; 0 1) * (1 0; 0 1) = (1 0; 0 1)
+        // ...
     }
 }

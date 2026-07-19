@@ -1,5 +1,4 @@
 import hashlib
-import json
 import threading
 from collections import OrderedDict
 from src.backend.bytecode import Opcode, Instruction
@@ -27,27 +26,19 @@ class LRUCache:
 
 
 def get_function_hash(instructions_segment: list[Instruction]) -> str:
-    # Serialize the instructions to a stable representation
-    serialized = []
+    # §3.1 — streaming stable hash for bytecode segments.
+    # Instead of json.dumps() which creates a full in-memory copy of the
+    # serialized bytecode, we update the hasher iteratively.
+    hasher = hashlib.sha256()
     for inst in instructions_segment:
-        serialized.append((inst.opcode, inst.arg))
-    try:
-        data_str = json.dumps(serialized, sort_keys=True)
-    except Exception:
-        # Fallback if there are any non-serializable objects (e.g. complex numbers)
-        def custom_serializer(obj):
-            if isinstance(obj, complex):
-                return {"__complex__": True, "real": obj.real, "imag": obj.imag}
-            if isinstance(obj, (list, tuple)):
-                return [custom_serializer(x) for x in obj]
-            if isinstance(obj, dict):
-                return {str(k): custom_serializer(v) for k, v in obj.items()}
-            if hasattr(obj, 'to_dict'):
-                return obj.to_dict()
-            return repr(obj)
-        data_str = json.dumps(custom_serializer(serialized), sort_keys=True)
-        
-    return hashlib.sha256(data_str.encode('utf-8')).hexdigest()
+        # Instruction(opcode, arg)
+        op_data = str(inst.opcode).encode('utf-8')
+        arg_data = repr(inst.arg).encode('utf-8')
+        hasher.update(op_data)
+        hasher.update(b':')
+        hasher.update(arg_data)
+        hasher.update(b'|')
+    return hasher.hexdigest()
 
 
 def _build_sandbox_globals() -> dict:
@@ -85,6 +76,48 @@ def _build_sandbox_globals() -> dict:
         # No `type`, `getattr`, `hasattr`, `isinstance` -- introspection escape
         # primitives removed (audit §3).
     }
+
+
+class JITVMProxy:
+    """A restricted proxy for the VM instance to be used within the JIT sandbox.
+    
+    Audit §3.1: instead of passing the full EigenVM instance to ``exec``'d code,
+    we pass this proxy which only exposes the necessary opcode handlers and 
+    state needed for JIT execution. This prevents the JIT'd block from 
+    accessing sensitive VM internals or reaching into the host system.
+    """
+    def __init__(self, vm):
+        self._vm = vm
+        # Expose only safe attributes
+        self.output_stream = vm.output_stream
+        self.verbose = getattr(vm, 'verbose', False)
+        self.instructions = vm.instructions # Needed for some checks
+        
+    @property
+    def ip(self):
+        return self._vm.ip
+    
+    @ip.setter
+    def ip(self, value):
+        self._vm.ip = value
+        
+    @property
+    def call_stack(self):
+        return self._vm.call_stack
+        
+    def throw_exception(self, msg):
+        return self._vm.throw_exception(msg)
+        
+    def op_ret(self, arg):
+        return self._vm.op_ret(arg)
+        
+    def op_call(self, arg):
+        return self._vm.op_call(arg)
+        
+    def __getattr__(self, name):
+        if name.startswith("op_"):
+            return getattr(self._vm, name)
+        raise AttributeError(f"JITVMProxy has no attribute {name!r}")
 
 
 class JITCompiler:
@@ -211,7 +244,10 @@ class JITCompiler:
             block.append(inst)
             # Basic block ends on JMPs, RETs, HALT, or if the next instruction is a jump target
             # For simplicity, end block on control flow instructions
-            if inst.opcode in (Opcode.JMP, Opcode.JMP_IF_FALSE, Opcode.JMP_IF_TRUE, Opcode.RET, Opcode.HALT, Opcode.CALL):
+            if inst.opcode in (
+                Opcode.JMP, Opcode.JMP_IF_FALSE, Opcode.JMP_IF_TRUE,
+                Opcode.RET, Opcode.HALT, Opcode.CALL
+            ):
                 break
             ip += 1
         return block

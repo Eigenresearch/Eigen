@@ -35,7 +35,6 @@ import platform
 import stat
 import sys
 import tempfile
-import time
 import unittest
 
 from src.runtime_audit import (
@@ -329,7 +328,7 @@ class TestEigenVMExecuteAudited(unittest.TestCase):
         trail = AuditTrail(path=None, enabled=True)
         vm = EigenVM(sim_type='dense', seed=42, deterministic=True)
         prog = _compile_to_ebc(_OK_SRC)
-        rv = vm.execute(prog, audit=trail, program_hash="h-success")
+        vm.execute(prog, audit=trail, program_hash="h-success")
         # No exception; VM returns whatever _execute_locked returns
         # (a stack of locals). We don't pin the shape — only that
         # audit captured it.

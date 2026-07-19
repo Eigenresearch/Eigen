@@ -3,7 +3,6 @@ import json
 import os
 from src.frontend.lexer import Lexer, TokenType
 from src.frontend.parser import Parser
-from src.frontend import ast as ast_mod
 from src.semantic.import_resolver import ImportResolver
 from src.semantic.type_checker import TypeChecker, TypeErrorException
 
@@ -337,6 +336,146 @@ def build_signature_help(text, position):
     }
 
 
+def _word_at(text, position):
+    """Return the identifier under the cursor at `position`, or None."""
+    line_idx = position.get("line", 0)
+    char_idx = position.get("character", 0)
+    lines = text.split("\n")
+    if line_idx >= len(lines):
+        return None
+    line = lines[line_idx]
+    i = min(char_idx, len(line))
+    start = i
+    while start > 0 and (line[start - 1].isalnum() or line[start - 1] == "_"):
+        start -= 1
+    end = i
+    while end < len(line) and (line[end].isalnum() or line[end] == "_"):
+        end += 1
+    word = line[start:end]
+    return word if word else None
+
+
+_BUILTIN_HOVER_DETAILS = {
+    "PI": "const PI: float = 3.141592653589793",
+    "TAU": "const TAU: float = 6.283185307179586",
+    "E": "const E: float = 2.718281828459045",
+    "print": "func print(value) -> void",
+    "measure": "func measure(qubit: qubit) -> cbit",
+    "trace": "func trace() -> void",
+    "assert": "func assert(condition) -> void",
+}
+
+
+def _lookup_hover_info(text, word):
+    """Look up `word` across builtins, keywords, and the document AST.
+
+    Returns a type-info string suitable for a markdown code block, or
+    None when the symbol is unknown.
+    """
+    if word in _BUILTIN_HOVER_DETAILS:
+        return _BUILTIN_HOVER_DETAILS[word]
+
+    if word in Lexer._KEYWORDS_MAP:
+        tok_type = Lexer._KEYWORDS_MAP[word]
+        if word in ("int", "float", "string", "bool", "array", "map",
+                    "qubit", "cbit"):
+            return f"{word}  // built-in type"
+        if word in ("true", "false", "null"):
+            return f"{word}  // Eigen literal"
+        gate_token_types = {v for v in TokenType.__members__.values()
+                            if v.name.startswith("GATE_")}
+        if tok_type in gate_token_types:
+            return f"gate {word}  // quantum gate"
+        return f"{word}  // Eigen keyword"
+
+    try:
+        lexer = Lexer(text)
+        parser = Parser(lexer.tokenize())
+        program = parser.parse()
+    except Exception:
+        program = None
+
+    if program is not None:
+        found = []
+
+        def _walk(stmts):
+            for stmt in stmts or []:
+                cls = type(stmt).__name__
+                if cls == "FuncDeclNode" and stmt.name == word:
+                    param_str = ", ".join(f"{p}: {t}" for p, t in stmt.params)
+                    found.append(
+                        f"func {word}({param_str}) -> {stmt.return_type}")
+                elif cls == "QFuncDeclNode" and stmt.name == word:
+                    param_str = ", ".join(f"{p}: {t}" for p, t in stmt.params)
+                    found.append(f"qfunc {word}({param_str})")
+                elif cls == "StructDeclNode" and stmt.name == word:
+                    fields_str = ", ".join(f"{f}: {t}" for f, t in stmt.fields)
+                    found.append(f"struct {word} {{ {fields_str} }}")
+                elif cls == "EnumDeclNode" and stmt.name == word:
+                    found.append(
+                        f"enum {word} {{ {', '.join(stmt.variants)} }}")
+                elif cls == "VarDeclNode" and stmt.name == word:
+                    found.append(f"let {word}: {stmt.type_name}")
+                elif cls == "LetNode" and stmt.name == word:
+                    found.append(f"let {word}: {stmt.type_name or 'unknown'}")
+                elif cls == "TypeAliasDeclNode" and stmt.name == word:
+                    found.append(f"type {word} = {stmt.target_type}")
+                for attr in ("body", "else_body"):
+                    inner = getattr(stmt, attr, None)
+                    if isinstance(inner, list):
+                        _walk(inner)
+
+        _walk(getattr(program, "body", None) or [])
+        if found:
+            return found[0]
+
+    import re
+    for kw in ("func", "qfunc", "let", "struct", "enum", "type"):
+        if re.search(rf"\b{kw}\s+{re.escape(word)}\b", text):
+            return f"{kw} {word}"
+    return None
+
+
+def build_hover(text, position):
+    """Return LSP Hover for the symbol at `position` in `text`.
+
+    Returns None when no hover information is available (per LSP spec
+    the hover result is null in that case).
+    """
+    word = _word_at(text, position)
+    if not word:
+        return None
+    type_info = _lookup_hover_info(text, word)
+    if type_info is None:
+        return None
+    return {
+        "contents": {
+            "kind": "markdown",
+            "value": f"```eigen\n{type_info}\n```",
+        }
+    }
+
+
+def build_definition(text, position):
+    """Return the definition position {line, character} for the symbol
+    at `position` in `text`, or None if not found.
+
+    AST nodes don't carry source positions, so this scans the document
+    text for declaration patterns (`func|qfunc|let|struct|enum|type
+    {word}`) and returns the first match's position (0-indexed).
+    """
+    word = _word_at(text, position)
+    if not word:
+        return None
+    import re
+    pattern = rf"\b(?:func|qfunc|let|struct|enum|type)\s+({re.escape(word)})\b"
+    for line_idx, line in enumerate(text.split("\n")):
+        m = re.search(pattern, line)
+        if m:
+            return {"line": line_idx, "character": m.start(1)}
+    return None
+
+
 class LSPServer:
     def __init__(self):
         self.workspace_root = os.getcwd()
@@ -442,29 +581,35 @@ class LSPServer:
                 }
         elif method == "textDocument/hover":
             params = req.get("params", {})
+            uri = params.get("textDocument", {}).get("uri", "")
             position = params.get("position", {})
-            # Sample hover details
+            text = self._snapshot(uri)
+            hover = build_hover(text, position)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "result": {
-                    "contents": {
-                        "kind": "markdown",
-                        "value": "**Eigen Symbol**\nType: Quantum/Classical instruction keyword."
-                    }
-                }
+                "result": hover,
             }
         elif method == "textDocument/definition":
             params = req.get("params", {})
             uri = params.get("textDocument", {}).get("uri", "")
+            position = params.get("position", {})
+            text = self._snapshot(uri)
+            pos = build_definition(text, position)
+            if pos is None:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "result": None,
+                }
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
                     "uri": uri,
                     "range": {
-                        "start": {"line": 0, "character": 0},
-                        "end": {"line": 0, "character": 0}
+                        "start": {"line": pos["line"], "character": pos["character"]},
+                        "end": {"line": pos["line"], "character": pos["character"]},
                     }
                 }
             }

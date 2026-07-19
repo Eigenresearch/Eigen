@@ -1,6 +1,6 @@
 """Full LaTeX PDF build: figures + pandoc + xelatex."""
 from __future__ import annotations
-import shutil, subprocess, sys
+import subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent

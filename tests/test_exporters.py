@@ -1,8 +1,6 @@
 ﻿import sys
 import unittest
 import os
-import shutil
-from src.ir.ir_graph import EQIRGraph
 from src.compiler import to_eqir
 from src.backend.qasm3_exporter import Qasm3Exporter
 from src.backend.quil_exporter import QuilExporter

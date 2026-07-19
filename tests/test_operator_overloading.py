@@ -5,7 +5,6 @@ import unittest
 
 from src.language_extensions.operator_overloading import (
     Operator,
-    OperatorOverload,
     OperatorOverloadTable,
     OperatorOverloadError,
 )

@@ -1,0 +1,61 @@
+eigen 1.0
+
+# Operator overloading via impl blocks.
+#
+# Eigen supports `operator` declarations inside `impl` blocks. The
+# parser (parser.py:parse_operator_decl) recognizes the overloadable
+# operators and maps them to dunder method names via
+# _OPERATOR_METHOD_NAMES in ast.py:
+#
+#   +  -> __add__        == -> __eq__     <  -> __lt__
+#   -  -> __sub__        != -> __ne__     <= -> __le__
+#   *  -> __mul__        &  -> __and__    >  -> __gt__
+#   /  -> __truediv__    |  -> __or__     >= -> __ge__
+#   %  -> __mod__        ^  -> __xor__
+#   ** -> __pow__        << -> __lshift__
+#                          >> -> __rshift__
+#                          ~  -> __invert__
+#
+# This example defines a 2D vector with + and * (scalar multiply).
+
+struct Vec2 {
+    x: float,
+    y: float
+}
+
+impl Vec2 {
+    # Addition: Vec2 + Vec2 -> Vec2
+    operator +(a: Vec2, b: Vec2) -> Vec2 {
+        return Vec2 { x: a.x + b.x, y: a.y + b.y }
+    }
+
+    # Scalar multiplication: Vec2 * float -> Vec2
+    operator *(v: Vec2, s: float) -> Vec2 {
+        return Vec2 { x: v.x * s, y: v.y * s }
+    }
+
+    # Equality: Vec2 == Vec2 -> bool
+    operator ==(a: Vec2, b: Vec2) -> bool {
+        return a.x == b.x and a.y == b.y
+    }
+}
+
+# 1. Construct two vectors.
+let u: Vec2 = Vec2 { x: 1.0, y: 2.0 }
+let v: Vec2 = Vec2 { x: 3.0, y: 4.0 }
+
+# 2. Use the overloaded + operator.
+let sum: Vec2 = u + v
+assert sum.x == 4.0
+assert sum.y == 6.0
+
+# 3. Use the overloaded * operator (scalar multiply).
+let scaled: Vec2 = u * 10.0
+assert scaled.x == 10.0
+assert scaled.y == 20.0
+
+# 4. Use the overloaded == operator.
+let w: Vec2 = Vec2 { x: 1.0, y: 2.0 }
+assert u == w
+
+print "operator overloading works"
